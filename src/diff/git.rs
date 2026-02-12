@@ -1,0 +1,128 @@
+//! Git CLI wrapper for producing diffs.
+//!
+//! Shells out to `git` via `tokio::process::Command`.
+
+use std::path::Path;
+
+use super::DiffError;
+
+/// Run `git diff <base_ref>` and return the unified diff output.
+pub async fn git_diff(repo_root: &Path, base_ref: &str) -> Result<String, DiffError> {
+    let output = tokio::process::Command::new("git")
+        .args(["diff", base_ref])
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| DiffError::GitError(format!("failed to run git: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DiffError::GitError(format!(
+            "git diff failed (exit {}): {stderr}",
+            output.status
+        )));
+    }
+
+    String::from_utf8(output.stdout)
+        .map_err(|e| DiffError::GitError(format!("git output is not valid UTF-8: {e}")))
+}
+
+/// Find the root of the git repository containing `start_dir`.
+pub async fn find_repo_root(start_dir: &Path) -> Result<String, DiffError> {
+    let output = tokio::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(start_dir)
+        .output()
+        .await
+        .map_err(|e| DiffError::GitError(format!("failed to run git: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DiffError::GitError(format!(
+            "not a git repository: {stderr}"
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn git_diff_in_non_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = git_diff(dir.path(), "HEAD").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("git diff failed") || err.contains("git"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_repo_root_non_git() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = find_repo_root(dir.path()).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not a git repository"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn git_diff_in_real_repo() {
+        // Create a temp git repo with a commit so HEAD exists
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+
+        // Initialize repo and make a commit
+        tokio::process::Command::new("git")
+            .args(["init"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::fs::write(p.join("file.txt"), "hello\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        // Now modify a file for a non-empty diff
+        tokio::fs::write(p.join("file.txt"), "hello\nworld\n").await.unwrap();
+
+        let result = git_diff(p, "HEAD").await;
+        assert!(result.is_ok(), "git diff failed: {:?}", result.unwrap_err());
+        let diff = result.unwrap();
+        assert!(diff.contains("world"), "diff should contain the change");
+    }
+
+    #[tokio::test]
+    async fn find_repo_root_real() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = find_repo_root(repo).await.unwrap();
+        assert!(!root.is_empty());
+    }
+}

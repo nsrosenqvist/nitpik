@@ -1,0 +1,39 @@
+[
+  {
+    "check_name": "Unwrap in production code",
+    "description": "Using .unwrap() can cause a panic at runtime. Use proper error handling with ? or .expect().\n\nSuggestion: Replace .unwrap() with .context(\"description\")? using anyhow",
+    "fingerprint": "d1694bbb211dd13084dc751492741aa8",
+    "location": {
+      "lines": {
+        "begin": 42
+      },
+      "path": "src/main.rs"
+    },
+    "severity": "critical"
+  },
+  {
+    "check_name": "Missing error context",
+    "description": "This error propagation loses context about what operation failed.",
+    "fingerprint": "9da8689506e2b6835ba25b06b9c6bf77",
+    "location": {
+      "lines": {
+        "begin": 87
+      },
+      "path": "src/main.rs"
+    },
+    "severity": "major"
+  },
+  {
+    "check_name": "Consider extracting helper",
+    "description": "This block of logic is repeated in multiple places and could be extracted into a shared helper function.\n\nSuggestion: Create a `validate_input()` function in utils.rs",
+    "fingerprint": "2289b9551feb1fb6e53160c1e8b6e7fa",
+    "location": {
+      "lines": {
+        "begin": 15,
+        "end": 20
+      },
+      "path": "src/utils.rs"
+    },
+    "severity": "minor"
+  }
+]

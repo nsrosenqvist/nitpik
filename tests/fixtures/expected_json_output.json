@@ -1,0 +1,37 @@
+{
+  "findings": [
+    {
+      "file": "src/main.rs",
+      "line": 42,
+      "severity": "error",
+      "title": "Unwrap in production code",
+      "message": "Using .unwrap() can cause a panic at runtime. Use proper error handling with ? or .expect().",
+      "suggestion": "Replace .unwrap() with .context(\"description\")? using anyhow",
+      "agent": "backend"
+    },
+    {
+      "file": "src/main.rs",
+      "line": 87,
+      "severity": "warning",
+      "title": "Missing error context",
+      "message": "This error propagation loses context about what operation failed.",
+      "agent": "backend"
+    },
+    {
+      "file": "src/utils.rs",
+      "line": 15,
+      "end_line": 20,
+      "severity": "info",
+      "title": "Consider extracting helper",
+      "message": "This block of logic is repeated in multiple places and could be extracted into a shared helper function.",
+      "suggestion": "Create a `validate_input()` function in utils.rs",
+      "agent": "architect"
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "errors": 1,
+    "warnings": 1,
+    "info": 1
+  }
+}

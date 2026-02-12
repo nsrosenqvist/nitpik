@@ -1,0 +1,24 @@
+{
+  "body": "**nitpik** found 3 findings (1 error, 1 warning, 1 info)",
+  "comments": [
+    {
+      "body": "🔴 **Unwrap in production code** (error)\n\nUsing .unwrap() can cause a panic at runtime. Use proper error handling with ? or .expect().\n\n**Suggestion:** Replace .unwrap() with .context(\"description\")? using anyhow\n\n_— agent: backend_",
+      "new_position": 42,
+      "old_position": 0,
+      "path": "src/main.rs"
+    },
+    {
+      "body": "🟡 **Missing error context** (warning)\n\nThis error propagation loses context about what operation failed.\n\n_— agent: backend_",
+      "new_position": 87,
+      "old_position": 0,
+      "path": "src/main.rs"
+    },
+    {
+      "body": "🔵 **Consider extracting helper** (info)\n\nThis block of logic is repeated in multiple places and could be extracted into a shared helper function.\n\n**Suggestion:** Create a `validate_input()` function in utils.rs\n\n_— agent: architect_",
+      "new_position": 15,
+      "old_position": 0,
+      "path": "src/utils.rs"
+    }
+  ],
+  "event": "COMMENT"
+}

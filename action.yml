@@ -1,0 +1,97 @@
+name: nitpik
+description: AI-powered code review — run nitpik in your GitHub Actions workflow
+author: nitpik
+
+branding:
+  icon: search
+  color: purple
+
+inputs:
+  version:
+    description: "nitpik version to use (e.g. 'v0.1.0', 'latest')"
+    required: false
+    default: latest
+  args:
+    description: "Arguments to pass to nitpik (default: review with GitHub format)"
+    required: false
+    default: ""
+  profiles:
+    description: "Comma-separated reviewer profiles"
+    required: false
+    default: backend
+  diff_base:
+    description: "Git ref to diff against (default: PR target branch)"
+    required: false
+    default: ""
+  fail_on:
+    description: "Exit non-zero on severity: info, warning, error"
+    required: false
+    default: ""
+  scan_secrets:
+    description: "Enable secret scanning before sending to LLM"
+    required: false
+    default: "false"
+  agent:
+    description: "Enable agentic mode (LLM explores your codebase)"
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Determine diff base
+      id: base
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.diff_base }}" ]; then
+          echo "ref=${{ inputs.diff_base }}" >> "$GITHUB_OUTPUT"
+        elif [ -n "$GITHUB_BASE_REF" ]; then
+          echo "ref=origin/$GITHUB_BASE_REF" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::No diff base: set 'diff_base' input or run on a pull_request event"
+          exit 1
+        fi
+
+    - name: Install nitpik
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ inputs.version }}"
+        if [ "$VERSION" = "latest" ]; then
+          DOWNLOAD_URL="https://github.com/${{ github.action_repository }}/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz"
+        else
+          DOWNLOAD_URL="https://github.com/${{ github.action_repository }}/releases/download/${VERSION}/nitpik-x86_64-unknown-linux-gnu.tar.gz"
+        fi
+        curl -sSfL "$DOWNLOAD_URL" | tar xz -C /usr/local/bin
+        chmod +x /usr/local/bin/nitpik
+
+    - name: Run nitpik
+      shell: bash
+      run: |
+        set -euo pipefail
+        ARGS="${{ inputs.args }}"
+        if [ -n "$ARGS" ]; then
+          nitpik $ARGS
+          exit $?
+        fi
+
+        CMD="nitpik review"
+        CMD="$CMD --diff-base ${{ steps.base.outputs.ref }}"
+        CMD="$CMD --profile ${{ inputs.profiles }}"
+        CMD="$CMD --format github"
+
+        if [ -n "${{ inputs.fail_on }}" ]; then
+          CMD="$CMD --fail-on ${{ inputs.fail_on }}"
+        fi
+
+        if [ "${{ inputs.scan_secrets }}" = "true" ]; then
+          CMD="$CMD --scan-secrets"
+        fi
+
+        if [ "${{ inputs.agent }}" = "true" ]; then
+          CMD="$CMD --agent"
+        fi
+
+        echo "::group::nitpik review"
+        eval $CMD
+        echo "::endgroup::"

@@ -1,0 +1,78 @@
+[package]
+name = "nitpik"
+version = "0.1.0"
+edition = "2021"
+description = "AI-powered code review CLI"
+license = "BUSL-1.1"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+
+# LLM (multi-provider support)
+rig-core = { git = "https://github.com/0xPlaygrounds/rig.git", features = ["derive"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Async trait
+async-trait = "0.1"
+
+# Regex
+regex = "1"
+
+# File traversal
+ignore = "0.4"
+walkdir = "2"
+
+# Terminal output
+colored = "3"
+atty = "0.2"
+
+# Hashing (cache keys)
+sha2 = "0.10"
+hex = "0.4"
+md5 = "0.7"
+
+# License key verification (Ed25519 offline signing)
+ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
+base64 = "0.22"
+
+# Ordered maps
+indexmap = { version = "2", features = ["serde"] }
+
+# YAML parsing (agent profile frontmatter)
+serde_yml = "0.0.12"
+
+# Misc
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+schemars = "1"
+
+[dev-dependencies]
+tempfile = "3"
+pretty_assertions = "1"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+serial_test = "3"
+
+[[example]]
+name = "keygen"
+path = "tools/keygen.rs"
+
+[[example]]
+name = "issue_license"
+path = "tools/issue_license.rs"

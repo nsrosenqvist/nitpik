@@ -1,0 +1,117 @@
+//! GitHub Actions annotation renderer.
+//!
+//! Outputs `::warning::` and `::error::` workflow commands that
+//! GitHub Actions intercepts to create inline PR annotations.
+
+use crate::models::finding::{Finding, Severity};
+use crate::output::OutputRenderer;
+
+/// GitHub Actions annotation renderer.
+pub struct GithubRenderer;
+
+impl OutputRenderer for GithubRenderer {
+    fn render(&self, findings: &[Finding]) -> String {
+        let mut output = String::new();
+
+        for finding in findings {
+            let level = match finding.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+                Severity::Info => "notice",
+            };
+
+            let mut params = format!("file={},line={}", finding.file, finding.line);
+            if let Some(end) = finding.end_line {
+                params.push_str(&format!(",endLine={end}"));
+            }
+            params.push_str(&format!(",title={}", escape_annotation(&finding.title)));
+
+            let mut message = escape_annotation(&finding.message);
+            if let Some(ref suggestion) = finding.suggestion {
+                message.push_str(&format!(" Suggestion: {}", escape_annotation(suggestion)));
+            }
+
+            output.push_str(&format!("::{level} {params}::{message}\n"));
+        }
+
+        output
+    }
+}
+
+/// Escape special characters for GitHub Actions annotations.
+///
+/// Workflow commands use `%0A` for newlines and `%25` for percent signs.
+fn escape_annotation(s: &str) -> String {
+    s.replace('%', "%25")
+        .replace('\n', "%0A")
+        .replace('\r', "%0D")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_error() {
+        let renderer = GithubRenderer;
+        let findings = vec![Finding {
+            file: "src/auth.rs".into(),
+            line: 42,
+            end_line: Some(45),
+            severity: Severity::Error,
+            title: "SQL injection vulnerability".into(),
+            message: "User input is interpolated directly into query string.".into(),
+            suggestion: Some("Use parameterized queries.".into()),
+            agent: "security".into(),
+        }];
+
+        let output = renderer.render(&findings);
+        assert_eq!(
+            output,
+            "::error file=src/auth.rs,line=42,endLine=45,title=SQL injection vulnerability::User input is interpolated directly into query string. Suggestion: Use parameterized queries.\n"
+        );
+    }
+
+    #[test]
+    fn render_warning() {
+        let renderer = GithubRenderer;
+        let findings = vec![Finding {
+            file: "test.rs".into(),
+            line: 1,
+            end_line: None,
+            severity: Severity::Warning,
+            title: "Issue".into(),
+            message: "Details".into(),
+            suggestion: None,
+            agent: "backend".into(),
+        }];
+
+        let output = renderer.render(&findings);
+        assert!(output.starts_with("::warning "));
+        assert!(output.contains("file=test.rs,line=1,"));
+    }
+
+    #[test]
+    fn render_info_as_notice() {
+        let renderer = GithubRenderer;
+        let findings = vec![Finding {
+            file: "test.rs".into(),
+            line: 1,
+            end_line: None,
+            severity: Severity::Info,
+            title: "Tip".into(),
+            message: "Consider this".into(),
+            suggestion: None,
+            agent: "backend".into(),
+        }];
+
+        let output = renderer.render(&findings);
+        assert!(output.starts_with("::notice "));
+    }
+
+    #[test]
+    fn escape_newlines() {
+        let s = "line1\nline2";
+        assert_eq!(escape_annotation(s), "line1%0Aline2");
+    }
+}
