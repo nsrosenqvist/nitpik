@@ -486,7 +486,7 @@ Disable caching for a single run with `--no-cache`.
 
 ## Telemetry
 
-nitpik sends a single anonymous heartbeat per review run — **no code, file names, findings, or PII**. Just aggregate counts (files, lines, profiles) and whether you're in CI.
+nitpik sends a single anonymous heartbeat per review run — **no code, file names, findings, or PII**. Just aggregate counts (files, lines, profiles) and whether you're in CI. You can verify exactly what is sent by reading [`src/telemetry/mod.rs`](src/telemetry/mod.rs).
 
 Disable it:
 
