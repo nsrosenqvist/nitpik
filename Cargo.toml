@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "AI-powered code review CLI"
 license = "BUSL-1.1"
+repository = "https://github.com/nsrosenqvist/nitpik"
+homepage = "https://nitpik.dev"
+readme = "README.md"
+keywords = ["code-review", "ai", "llm", "cli", "linting"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # CLI
@@ -55,6 +60,10 @@ indexmap = { version = "2", features = ["serde"] }
 
 # YAML parsing (agent profile frontmatter)
 serde_yml = "0.0.12"
+
+# Archive extraction (self-update)
+flate2 = "1"
+tar = "0.4"
 
 # Misc
 dirs = "6"

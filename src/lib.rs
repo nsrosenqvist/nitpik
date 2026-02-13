@@ -17,3 +17,4 @@ pub mod providers;
 pub mod security;
 pub mod telemetry;
 pub mod tools;
+pub mod update;

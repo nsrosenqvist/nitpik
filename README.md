@@ -35,6 +35,12 @@ Or build from source:
 cargo install --path .
 ```
 
+Once installed, update to the latest release at any time:
+
+```bash
+nitpik update
+```
+
 **Docker**
 
 ```bash
@@ -207,7 +213,7 @@ enabled = false
 | `OPENAI_API_KEY` | OpenAI-specific key (also used for openai-compatible) |
 | `GEMINI_API_KEY` | Gemini-specific key |
 
-nitpik tries to use the provider specific environment variable if it exists, and falls back to `NITPIK_API_KEY`.
+Nitpik tries to use the provider specific environment variable if it exists, and falls back to `NITPIK_API_KEY`.
 
 ---
 
@@ -303,10 +309,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/cache@v4
-        with:
-          path: ~/.config/nitpik/cache
-          key: nitpik-${{ github.repository }}
       - uses: nsrosenqvist/nitpik@v1
         with:
           profiles: backend,security
@@ -333,10 +335,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/cache@v4
-        with:
-          path: ~/.config/nitpik/cache
-          key: nitpik-${{ github.repository }}
       - name: Install nitpik
         run: curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
       - name: AI Code Review
@@ -362,7 +360,6 @@ Findings appear as inline annotations on the pull request.
 ```yaml
 code-review:
   stage: test
-  image: ghcr.io/nsrosenqvist/nitpik:latest
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
@@ -374,18 +371,13 @@ code-review:
         --fail-on warning
         --scan-secrets
         > gl-code-quality-report.json
-  cache:
-    key: nitpik
-    paths:
-      - .nitpik-cache/
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json
   variables:
     NITPIK_PROVIDER: anthropic
     ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
     NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
-    XDG_CONFIG_HOME: $CI_PROJECT_DIR/.nitpik-cache
-  artifacts:
-    reports:
-      codequality: gl-code-quality-report.json
 ```
 
 Findings appear in the merge request Code Quality widget.
@@ -393,17 +385,10 @@ Findings appear in the merge request Code Quality widget.
 ### Bitbucket Pipelines
 
 ```yaml
-definitions:
-  caches:
-    nitpik: /root/.config/nitpik/cache
-
 pipelines:
   pull-requests:
     '**':
       - step:
-          image: ghcr.io/nsrosenqvist/nitpik:latest
-          caches:
-            - nitpik
           script:
             - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
             - nitpik review
@@ -422,7 +407,7 @@ when:
 
 steps:
   - name: ai-review
-    image: ghcr.io/nsrosenqvist/nitpik:latest
+    image: nitpik:latest
     commands:
       - git fetch origin "$CI_COMMIT_TARGET_BRANCH"
       - nitpik review
@@ -434,8 +419,6 @@ steps:
     secrets: [forgejo_token, anthropic_api_key, nitpik_license_key]
     environment:
       NITPIK_PROVIDER: anthropic
-    volumes:
-      - nitpik-cache:/root/.config/nitpik/cache
 ```
 
 ---
@@ -497,6 +480,27 @@ enabled = false
 
 ---
 
+## Updating
+
+nitpik can update itself to the latest release from GitHub:
+
+```bash
+nitpik update           # update to latest version (skips if already current)
+nitpik update --force   # re-download even if already on latest
+```
+
+The update process downloads the release archive for your platform, verifies its SHA256 checksum, and atomically replaces the running binary.
+
+If the binary is installed in a system directory (e.g. `/usr/local/bin`), you may need `sudo`:
+
+```bash
+sudo nitpik update
+```
+
+> **Note:** In Docker containers and CI environments, nitpik will print a warning suggesting you rebuild the image or pin a version in your pipeline instead of self-updating.
+
+---
+
 ## Further Help
 
 Every command and flag is documented in the built-in help:
@@ -506,6 +510,7 @@ nitpik help              # overview of all commands
 nitpik help review       # full review flag reference
 nitpik help license      # license management
 nitpik help cache        # cache management
+nitpik help update       # self-update
 ```
 
 ---

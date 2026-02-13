@@ -22,24 +22,29 @@ Extend the system by implementing a trait, not by modifying existing implementat
 
 | Module | Purpose |
 |---|---|
-| `cli/` | clap arg parsing, CLI entry point wiring |
-| `config/` | `.nitpik.toml` loading, env var resolution, config layering |
+| `constants.rs` | Centralised app name, config paths, env var names, and URLs — a rename only requires changing this file |
+| `cli/` | clap arg parsing, subcommands (`review`, `profiles`, `validate`, `cache`, `license`), CLI entry point wiring |
+| `config/` | `.nitpik.toml` loading, env var resolution, config layering (CLI → env → repo config → global config → defaults) |
 | `diff/` | Git CLI wrapper, unified diff parsing, file scanning, chunk splitting |
 | `context/` | Baseline context: full file loading, project doc detection |
-| `agents/` | Built-in profiles, markdown+YAML parser, auto-profile selection |
-| `providers/` | `ReviewProvider` trait, rig-core multi-provider integration |
-| `tools/` | Agentic tools: `ReadFileTool`, `SearchTextTool`, `ListDirectoryTool` |
+| `agents/` | Built-in profiles (`backend`, `frontend`, `architect`, `security`), markdown+YAML parser, auto-profile selection |
+| `providers/` | `ReviewProvider` trait, rig-core multi-provider integration (Anthropic, OpenAI, Gemini, Cohere, DeepSeek, xAI, Groq, Perplexity, OpenAI-compatible) |
+| `tools/` | Agentic tools: `ReadFileTool`, `SearchTextTool`, `ListDirectoryTool`, `CustomCommandTool` (user-defined CLI tools from profile frontmatter) |
 | `orchestrator/` | Parallel review execution, prompt construction, deduplication |
-| `output/` | `OutputRenderer` trait + format implementations |
+| `output/` | `OutputRenderer` trait + format implementations (terminal, JSON, GitHub, GitLab, Bitbucket, Forgejo) |
 | `security/` | Secret scanner, vendored gitleaks rules, entropy checks, redaction |
 | `cache/` | Content-hash cache, filesystem storage |
-| `models/` | Shared types: `Finding`, `Severity`, `FileDiff`, `AgentDefinition`, etc. |
+| `models/` | Shared types: `Finding`, `Severity`, `FileDiff`, `AgentDefinition`, `ReviewConfig`, `ReviewContext`, etc. |
+| `license/` | Offline Ed25519 license key verification, expiry checks |
+| `progress/` | Live terminal progress display — spinners, status tracking per file×agent task, suppressed with `--no-progress` |
+| `telemetry/` | Anonymous fire-and-forget heartbeat POST per review run, disabled with `--no-telemetry` or `NITPIK_TELEMETRY=false` |
 
 ### Key Principles
 
 - **Modules communicate through `models/`** — import shared types from `models/`, not from sibling module internals.
 - **`main.rs` is the composition root** — it wires modules together. The orchestrator coordinates execution; everything else is a leaf.
 - **Async-first** — all I/O uses `tokio`. Parallel work uses `JoinSet` with a semaphore for concurrency control. Git is invoked via `tokio::process::Command`.
+- **Single source of truth for names and paths** — `constants.rs` centralises the app name, config filenames, env var names, and URLs. Use those constants instead of hard-coding strings.
 
 ## Conventions
 
@@ -61,6 +66,27 @@ Extend the system by implementing a trait, not by modifying existing implementat
 ### Dependencies
 
 Keep the dependency tree lean — binary size and compile time matter for a CLI tool. Justify any new crate before adding it. Prefer stdlib when reasonable.
+
+### Configuration & Environment Variables
+
+**Config priority (highest wins):**
+
+1. CLI flags
+2. Environment variables
+3. `.nitpik.toml` in repo root
+4. `~/.config/nitpik/config.toml` (global)
+5. Built-in defaults
+
+**Key env vars** (all prefixed `NITPIK_`):
+
+| Variable | Purpose |
+|---|---|
+| `NITPIK_PROVIDER` | LLM provider name |
+| `NITPIK_MODEL` | Model identifier |
+| `NITPIK_API_KEY` | API key (falls back to provider-specific vars like `ANTHROPIC_API_KEY`) |
+| `NITPIK_BASE_URL` | Custom API base URL (for OpenAI-compatible endpoints) |
+| `NITPIK_LICENSE_KEY` | Commercial license key |
+| `NITPIK_TELEMETRY` | Set `false` to disable telemetry |
 
 ### Testing
 
@@ -101,9 +127,31 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 3. Add to agent construction in `src/providers/rig.rs`
 4. Document the tool in agent system prompts
 
+### Add a Custom Command Tool (in an Agent Profile)
+
+Users can define CLI tools directly in an agent profile's YAML frontmatter — no Rust code needed:
+
+```yaml
+tools:
+  - name: run_tests
+    description: Run the project's test suite
+    command: cargo test
+    parameters:
+      - name: filter
+        type: string
+        description: Optional test name filter
+        required: false
+```
+
+At runtime each entry becomes a `CustomCommandTool` the LLM can invoke. Commands are sandboxed to the repo root with a 120 s timeout and 256 KB output cap.
+
 ### Add LLM Provider Support
 
-If rig-core supports it, add the provider name to config resolution. Otherwise, implement a rig-core provider adapter or extend `ReviewProvider`.
+If rig-core supports it, add the provider name to config resolution in `src/config/loader.rs` and the provider construction in `src/providers/rig.rs`. Otherwise, implement a rig-core provider adapter or extend `ReviewProvider`.
+
+### `tools/` Directory (Project Root)
+
+The top-level `tools/` directory contains standalone Rust utilities for license key management (`keygen.rs`, `issue_license.rs`). These are not part of the main binary.
 
 ## Agent Workflow
 

@@ -44,6 +44,9 @@ pub enum Command {
         #[command(subcommand)]
         action: LicenseAction,
     },
+
+    /// Update nitpik to the latest release.
+    Update(UpdateArgs),
 }
 
 /// Arguments for the `profiles` subcommand.
@@ -84,6 +87,14 @@ pub enum LicenseAction {
     Status,
     /// Remove the license key from the global config.
     Deactivate,
+}
+
+/// Arguments for the `update` subcommand.
+#[derive(Parser, Debug)]
+pub struct UpdateArgs {
+    /// Force update even if already on the latest version.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 /// Arguments for the `review` subcommand.

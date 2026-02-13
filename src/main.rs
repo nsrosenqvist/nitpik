@@ -19,6 +19,7 @@ mod providers;
 mod security;
 mod telemetry;
 mod tools;
+mod update;
 
 use std::path::Path;
 use std::process;
@@ -27,7 +28,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
-use cli::args::{CacheAction, Cli, Command, LicenseAction, OutputFormat};
+use cli::args::{CacheAction, Cli, Command, LicenseAction, OutputFormat, UpdateArgs};
 use config::Config;
 use models::{Severity, DEFAULT_PROFILE};
 use progress::ProgressTracker;
@@ -53,6 +54,7 @@ async fn run() -> Result<()> {
         Command::Validate(args) => run_validate(args).await,
         Command::Cache { action } => run_cache(action).await,
         Command::License { action } => run_license(action).await,
+        Command::Update(args) => run_update(args).await,
     }
 }
 
@@ -158,6 +160,14 @@ async fn run_cache(action: CacheAction) -> Result<()> {
 
     Ok(())
 }
+
+/// Update nitpik to the latest release from GitHub.
+async fn run_update(args: UpdateArgs) -> Result<()> {
+    update::run_update(args.force)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
 /// Manage the commercial license key.
 async fn run_license(action: LicenseAction) -> Result<()> {
     use colored::Colorize;
