@@ -213,7 +213,7 @@ enabled = false
 | `OPENAI_API_KEY` | OpenAI-specific key (also used for openai-compatible) |
 | `GEMINI_API_KEY` | Gemini-specific key |
 
-Nitpik tries to use the provider specific environment variable if it exists, and falls back to `NITPIK_API_KEY`.
+nitpik tries to use the provider specific environment variable if it exists, and falls back to `NITPIK_API_KEY`.
 
 ---
 
@@ -309,6 +309,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.config/nitpik/cache
+          key: nitpik-${{ github.repository }}
       - uses: nsrosenqvist/nitpik@v1
         with:
           profiles: backend,security
@@ -335,6 +339,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.config/nitpik/cache
+          key: nitpik-${{ github.repository }}
       - name: Install nitpik
         run: curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
       - name: AI Code Review
@@ -360,6 +368,7 @@ Findings appear as inline annotations on the pull request.
 ```yaml
 code-review:
   stage: test
+  image: ghcr.io/nsrosenqvist/nitpik:latest
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
@@ -371,6 +380,10 @@ code-review:
         --fail-on warning
         --scan-secrets
         > gl-code-quality-report.json
+  cache:
+    key: nitpik
+    paths:
+      - .nitpik-cache/
   artifacts:
     reports:
       codequality: gl-code-quality-report.json
@@ -378,6 +391,7 @@ code-review:
     NITPIK_PROVIDER: anthropic
     ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
     NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
+    XDG_CONFIG_HOME: $CI_PROJECT_DIR/.nitpik-cache
 ```
 
 Findings appear in the merge request Code Quality widget.
@@ -385,10 +399,17 @@ Findings appear in the merge request Code Quality widget.
 ### Bitbucket Pipelines
 
 ```yaml
+definitions:
+  caches:
+    nitpik: /root/.config/nitpik/cache
+
 pipelines:
   pull-requests:
     '**':
       - step:
+          image: ghcr.io/nsrosenqvist/nitpik:latest
+          caches:
+            - nitpik
           script:
             - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
             - nitpik review
@@ -407,7 +428,7 @@ when:
 
 steps:
   - name: ai-review
-    image: nitpik:latest
+    image: ghcr.io/nsrosenqvist/nitpik:latest
     commands:
       - git fetch origin "$CI_COMMIT_TARGET_BRANCH"
       - nitpik review
@@ -419,6 +440,8 @@ steps:
     secrets: [forgejo_token, anthropic_api_key, nitpik_license_key]
     environment:
       NITPIK_PROVIDER: anthropic
+    volumes:
+      - nitpik-cache:/root/.config/nitpik/cache
 ```
 
 ---
