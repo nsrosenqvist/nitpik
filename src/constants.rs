@@ -68,3 +68,4 @@ pub const ENV_API_KEY: &str = "NITPIK_API_KEY";
 pub const ENV_BASE_URL: &str = "NITPIK_BASE_URL";
 pub const ENV_LICENSE_KEY: &str = "NITPIK_LICENSE_KEY";
 pub const ENV_TELEMETRY: &str = "NITPIK_TELEMETRY";
+pub const ENV_DEBUG: &str = "NITPIK_DEBUG";

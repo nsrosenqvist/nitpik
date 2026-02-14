@@ -391,15 +391,17 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             .flat_map(|h| h.lines.iter())
             .filter(|l| l.line_type == DiffLineType::Added || l.line_type == DiffLineType::Removed)
             .count();
-        // TODO: integrate real license check once the license agent is ready
-        let licensed = false;
+        let licensed = license_claims.is_some();
         let payload = telemetry::HeartbeatPayload::from_review(
             diffs.len(),
             diff_lines,
             agent_defs.len(),
             licensed,
         );
-        telemetry::send_heartbeat(payload);
+        let handle = telemetry::send_heartbeat(payload);
+        if telemetry::is_debug() {
+            let _ = handle.await;
+        }
     }
 
     // Determine whether to show progress

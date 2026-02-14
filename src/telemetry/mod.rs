@@ -17,7 +17,10 @@ use std::time::Duration;
 const HEARTBEAT_URL: &str = crate::constants::TELEMETRY_URL;
 
 /// Maximum time we'll wait for the heartbeat POST before giving up.
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(2);
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Maximum time to wait for a TCP connection (per attempt).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Payload sent with each heartbeat. Contains only anonymous aggregate data.
 #[derive(Debug, Clone, Serialize)]
@@ -81,18 +84,37 @@ pub fn detect_ci() -> bool {
     CI_VARS.iter().any(|var| std::env::var(var).is_ok())
 }
 
-/// Fire-and-forget: send the heartbeat payload. Returns immediately via
-/// `tokio::spawn`. The spawned task will silently discard any errors.
-pub fn send_heartbeat(payload: HeartbeatPayload) {
-    tokio::spawn(async move {
-        let _ = post_heartbeat(&payload).await;
-    });
+/// Returns `true` when `NITPIK_DEBUG` is set to a truthy value.
+pub fn is_debug() -> bool {
+    matches!(
+        std::env::var(crate::constants::ENV_DEBUG).as_deref(),
+        Ok("1" | "true" | "yes")
+    )
+}
+
+/// Send the heartbeat payload.
+///
+/// Returns a [`tokio::task::JoinHandle`] so the caller can optionally
+/// await it.  In normal mode you can just drop the handle (fire-and-forget).
+/// When `NITPIK_DEBUG=true` the caller should `.await` the handle so the
+/// debug output is printed before the process exits.
+pub fn send_heartbeat(payload: HeartbeatPayload) -> tokio::task::JoinHandle<()> {
+    if is_debug() {
+        tokio::spawn(async move {
+            debug_post_heartbeat(&payload).await;
+        })
+    } else {
+        tokio::spawn(async move {
+            let _ = post_heartbeat(&payload).await;
+        })
+    }
 }
 
 /// Actually perform the HTTP POST. Separated for testability.
 async fn post_heartbeat(payload: &HeartbeatPayload) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder()
         .timeout(HEARTBEAT_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
         .build()?;
 
     client
@@ -102,6 +124,51 @@ async fn post_heartbeat(payload: &HeartbeatPayload) -> Result<(), Box<dyn std::e
         .await?;
 
     Ok(())
+}
+
+/// Debug variant: logs URL, payload, and response/error to stderr.
+async fn debug_post_heartbeat(payload: &HeartbeatPayload) {
+    eprintln!("[nitpik:debug] telemetry POST {HEARTBEAT_URL}");
+    match serde_json::to_string_pretty(payload) {
+        Ok(json) => {
+            for line in json.lines() {
+                eprintln!("[nitpik:debug]   {line}");
+            }
+        }
+        Err(e) => eprintln!("[nitpik:debug] failed to serialise payload: {e}"),
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(HEARTBEAT_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[nitpik:debug] failed to build HTTP client: {e}");
+            return;
+        }
+    };
+
+    match client.post(HEARTBEAT_URL).json(payload).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            eprintln!("[nitpik:debug] response: {status}");
+            if !body.is_empty() {
+                eprintln!("[nitpik:debug] body: {body}");
+            }
+        }
+        Err(e) => {
+            eprintln!("[nitpik:debug] request failed: {e}");
+            // Walk the error chain for full diagnostics
+            let mut source = std::error::Error::source(&e);
+            while let Some(cause) = source {
+                eprintln!("[nitpik:debug]   caused by: {cause}");
+                source = std::error::Error::source(cause);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
