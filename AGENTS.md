@@ -63,6 +63,10 @@ Extend the system by implementing a trait, not by modifying existing implementat
 - Constants: `SCREAMING_SNAKE_CASE`
 - Traits: describe a capability (`OutputRenderer`, `ReviewProvider`)
 
+### Enums & Constants Over Magic Strings
+
+Prefer enums and constants over raw string literals. Variant names, format identifiers, provider names, severity levels, and similar fixed sets should be modelled as enums with `Display`/`FromStr` impls (or `strum` derives) rather than compared as ad-hoc strings. For application-wide names, paths, and env vars, use the constants defined in `constants.rs`.
+
 ### Dependencies
 
 Keep the dependency tree lean — binary size and compile time matter for a CLI tool. Justify any new crate before adding it. Prefer stdlib when reasonable.
