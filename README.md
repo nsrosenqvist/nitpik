@@ -524,6 +524,31 @@ sudo nitpik update
 
 ---
 
+## Version Information
+
+Print detailed build metadata:
+
+```bash
+nitpik version
+```
+
+Outputs version, git commit, build date, and target triple:
+
+```
+nitpik 0.2.0
+commit:     a1b2c3d
+built:      2026-02-14
+target:     x86_64-unknown-linux-gnu
+```
+
+For the short one-liner, use the standard `--version` flag:
+
+```bash
+nitpik --version         # nitpik 0.2.0
+```
+
+---
+
 ## Further Help
 
 Every command and flag is documented in the built-in help:
@@ -534,6 +559,7 @@ nitpik help review       # full review flag reference
 nitpik help license      # license management
 nitpik help cache        # cache management
 nitpik help update       # self-update
+nitpik version           # version, commit, build date, target
 ```
 
 ---

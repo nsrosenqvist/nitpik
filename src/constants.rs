@@ -3,6 +3,25 @@
 //! Centralises the tool name, config paths, environment variable names,
 //! and URLs so a rename only requires changing this file.
 
+// ── Version & build metadata ────────────────────────────────────────
+
+/// Semantic version from Cargo.toml (patched from the git tag in CI).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Short git commit hash at build time, or `"unknown"`.
+pub const GIT_SHA: &str = env!("GIT_SHA");
+
+/// Build date (UTC, `YYYY-MM-DD`), or `"unknown"`.
+pub const BUILD_DATE: &str = env!("BUILD_DATE");
+
+/// Compilation target triple (e.g. `x86_64-unknown-linux-gnu`).
+pub const TARGET: &str = env!("TARGET");
+
+/// User-Agent header for HTTP requests.
+pub const USER_AGENT: &str = concat!("nitpik/", env!("CARGO_PKG_VERSION"));
+
+// ── App identity ────────────────────────────────────────────────────
+
 /// Display name of the tool (lowercase).
 pub const APP_NAME: &str = "nitpik";
 

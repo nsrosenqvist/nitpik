@@ -7,7 +7,7 @@ FROM rust:1.89-bookworm AS builder
 WORKDIR /build
 
 # Cache dependencies by building a dummy project first
-COPY Cargo.toml Cargo.lock* ./
+COPY Cargo.toml Cargo.lock* build.rs ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && \
     cargo build --release 2>/dev/null || true && \
     rm -rf src

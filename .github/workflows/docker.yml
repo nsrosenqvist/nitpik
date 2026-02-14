@@ -36,6 +36,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Set version from tag
+        run: sed -i "0,/^version = .*/s//version = \"${GITHUB_REF_NAME#v}\"/" Cargo.toml
+
       - uses: docker/build-push-action@v6
         with:
           context: .

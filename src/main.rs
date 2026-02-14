@@ -55,7 +55,23 @@ async fn run() -> Result<()> {
         Command::Cache { action } => run_cache(action).await,
         Command::License { action } => run_license(action).await,
         Command::Update(args) => run_update(args).await,
+        Command::Version => run_version(),
     }
+}
+
+/// Print detailed version and build information.
+fn run_version() -> Result<()> {
+    use colored::Colorize;
+
+    println!(
+        "{} {}",
+        "nitpik".bold(),
+        constants::VERSION.green().bold()
+    );
+    println!("{}     {}", "commit:".dimmed(), constants::GIT_SHA);
+    println!("{}      {}", "built:".dimmed(), constants::BUILD_DATE);
+    println!("{}     {}", "target:".dimmed(), constants::TARGET);
+    Ok(())
 }
 
 /// List available agent profiles.

@@ -101,6 +101,13 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 - Each `mod.rs` gets a `//!` module-level doc explaining its purpose.
 - Keep this file updated when adding modules or changing architecture.
 
+### Version Management
+
+- **`Cargo.toml` keeps a dev placeholder version** (e.g. `0.1.0`). CI patches it from the git tag before building.
+- **`build.rs`** emits `GIT_SHA`, `BUILD_DATE`, and `TARGET` as compile-time env vars. `CARGO_PKG_VERSION` comes from Cargo (patched in CI).
+- **`constants.rs`** exposes `VERSION`, `GIT_SHA`, `BUILD_DATE`, `TARGET`, and `USER_AGENT` as the single source of truth. Other modules import from there.
+- To **release a new version**: push a `v*` tag (e.g. `v0.2.0`). The release workflow patches `Cargo.toml`, builds cross-platform binaries, publishes to crates.io, and pushes a Docker image.
+
 ### Git
 
 - Imperative mood, <72 char subject line.

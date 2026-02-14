@@ -12,16 +12,7 @@ use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::constants;
-
-/// Compile-time target triple, set by `build.rs`.
-const TARGET: &str = env!("TARGET");
-
-/// Current binary version from Cargo.toml.
-const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// User-Agent header for GitHub API requests.
-const USER_AGENT: &str = concat!("nitpik/", env!("CARGO_PKG_VERSION"));
+use crate::constants::{self, TARGET, VERSION as CURRENT_VERSION, USER_AGENT};
 
 /// Errors that can occur during self-update.
 #[derive(Debug, Error)]

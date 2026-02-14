@@ -9,7 +9,7 @@ use crate::models::{Severity, DEFAULT_PROFILE};
 #[derive(Parser, Debug)]
 #[command(
     name = "nitpik",
-    version,
+    version = crate::constants::VERSION,
     about = super::LICENSE_BANNER_STYLED,
 )]
 pub struct Cli {
@@ -47,6 +47,9 @@ pub enum Command {
 
     /// Update nitpik to the latest release.
     Update(UpdateArgs),
+
+    /// Print version and build information.
+    Version,
 }
 
 /// Arguments for the `profiles` subcommand.
