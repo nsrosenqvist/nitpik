@@ -224,4 +224,78 @@ mod tests {
         assert_eq!(state.files["a.rs"], TaskStatus::Done);
         assert!(matches!(&state.files["b.rs"], TaskStatus::Failed(_)));
     }
+
+    #[test]
+    fn tracker_retrying_status() {
+        let tracker = ProgressTracker::new(
+            &["retry.rs".to_string()],
+            &["backend".to_string()],
+            false,
+        );
+        tracker.update(
+            "retry.rs",
+            TaskStatus::Retrying {
+                attempt: 1,
+                max: 3,
+                reason: "rate limited".to_string(),
+                backoff_secs: 10,
+            },
+        );
+
+        let state = tracker.inner.lock().unwrap();
+        match &state.files["retry.rs"] {
+            TaskStatus::Retrying { attempt, max, reason, backoff_secs } => {
+                assert_eq!(*attempt, 1);
+                assert_eq!(*max, 3);
+                assert_eq!(reason, "rate limited");
+                assert_eq!(*backoff_secs, 10);
+            }
+            other => panic!("expected Retrying, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tracker_empty_files_no_panic() {
+        let tracker = ProgressTracker::new(&[], &[], false);
+        tracker.start();
+        tracker.finish(0);
+    }
+
+    #[test]
+    fn tracker_finish_with_findings_no_panic() {
+        let tracker = ProgressTracker::new(
+            &["a.rs".to_string()],
+            &["backend".to_string()],
+            false,
+        );
+        tracker.update("a.rs", TaskStatus::Done);
+        // Finish with nonzero findings should not print "No issues found."
+        tracker.finish(5);
+    }
+
+    #[test]
+    fn tracker_multiple_agents() {
+        let tracker = ProgressTracker::new(
+            &["a.rs".to_string()],
+            &["backend".to_string(), "security".to_string()],
+            false,
+        );
+        let state = tracker.inner.lock().unwrap();
+        assert_eq!(state.agents.len(), 2);
+        assert_eq!(state.agents[0], "backend");
+        assert_eq!(state.agents[1], "security");
+    }
+
+    #[test]
+    fn tracker_update_unknown_file_adds_it() {
+        let tracker = ProgressTracker::new(
+            &["a.rs".to_string()],
+            &["backend".to_string()],
+            false,
+        );
+        // Updating a file not in the initial list should insert it.
+        tracker.update("unknown.rs", TaskStatus::Done);
+        let state = tracker.inner.lock().unwrap();
+        assert_eq!(state.files["unknown.rs"], TaskStatus::Done);
+    }
 }

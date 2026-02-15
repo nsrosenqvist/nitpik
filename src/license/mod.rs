@@ -261,6 +261,26 @@ mod tests {
     }
 
     #[test]
+    fn expiry_status_expiring_soon() {
+        // Build an expiry date 15 days from now.
+        let today = today_ymd();
+        let future_days = ymd_to_epoch_days(today) + 15;
+        let future = epoch_secs_to_ymd(future_days * 86400);
+        let expires_at = format!("{:04}-{:02}-{:02}", future.0, future.1, future.2);
+
+        let claims = LicenseClaims {
+            customer_name: "Test".into(),
+            customer_id: "test-id".into(),
+            issued_at: "2026-01-01".into(),
+            expires_at,
+        };
+        match check_expiry(&claims).unwrap() {
+            ExpiryStatus::ExpiringSoon { days } => assert!(days <= 30 && days >= 0),
+            other => panic!("expected ExpiringSoon, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn verify_rejects_garbage_input() {
         let result = verify_license_key("not-valid-base64!!!");
         assert!(result.is_err());

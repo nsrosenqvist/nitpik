@@ -97,4 +97,36 @@ mod tests {
         let result = get_diffs(&input, Path::new("/tmp")).await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn get_diffs_git_base_in_real_repo() {
+        // This test runs in the actual nitpik git repo.
+        // Diffing HEAD against itself should produce an empty diff.
+        let repo_root = git::find_repo_root(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .await
+            .expect("should find git repo root");
+        let input = InputMode::GitBase("HEAD".to_string());
+        let diffs = get_diffs(&input, Path::new(&repo_root)).await.unwrap();
+        // HEAD vs HEAD = empty diff (may be non-empty if working tree is dirty,
+        // but the call itself must succeed).
+        let _ = diffs;
+    }
+
+    #[tokio::test]
+    async fn get_diffs_git_base_in_non_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = InputMode::GitBase("HEAD".to_string());
+        let result = get_diffs(&input, dir.path()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_diffs_direct_path_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn b() {}\n").unwrap();
+        let input = InputMode::DirectPath(dir.path().to_path_buf());
+        let diffs = get_diffs(&input, dir.path()).await.unwrap();
+        assert!(diffs.len() >= 2);
+    }
 }

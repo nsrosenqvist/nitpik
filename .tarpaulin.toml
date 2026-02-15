@@ -1,0 +1,17 @@
+# Tarpaulin coverage configuration.
+#
+# The default ptrace engine misses several modules (async-heavy, proc-macro-heavy).
+# LLVM source-based instrumentation covers everything reliably.
+#
+# Run:  cargo tarpaulin
+# Docs: https://github.com/xd009642/tarpaulin
+
+[default]
+engine = "llvm"
+out = ["Json"]
+output-dir = "target/tarpaulin"
+skip-clean = true
+
+[report]
+out = ["Json"]
+output-dir = "target/tarpaulin"

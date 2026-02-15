@@ -649,4 +649,139 @@ mod tests {
         assert!(enhanced.contains("relative to the repository root"));
         assert!(enhanced.contains("proactively"));
     }
+
+    #[test]
+    fn parse_markdown_fenced_json() {
+        let response = r#"Here are the findings:
+```json
+[
+    {
+        "file": "src/lib.rs",
+        "line": 5,
+        "severity": "warning",
+        "title": "Unused import",
+        "message": "This import is unused",
+        "agent": "backend"
+    }
+]
+```
+"#;
+        let findings = parse_findings_response(response).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file, "src/lib.rs");
+    }
+
+    #[test]
+    fn parse_fenced_without_json_label() {
+        let response = "Some preamble text\n```\n[]\n```\n";
+        let findings = parse_findings_response(response).unwrap();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn parse_json_embedded_in_prose() {
+        // LLM returns prose with a JSON array buried in the middle.
+        let response = r#"I found one issue:
+[{"file":"a.rs","line":1,"severity":"info","title":"T","message":"M","agent":"a"}]
+That's all."#;
+        let findings = parse_findings_response(response).unwrap();
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn extract_json_candidates_returns_raw_first() {
+        let text = r#"[{"a":1}]"#;
+        let candidates = extract_json_candidates(text);
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], text);
+    }
+
+    #[test]
+    fn extract_json_candidates_no_brackets() {
+        let text = "no json here";
+        let candidates = extract_json_candidates(text);
+        // Should at least contain the raw text
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], text);
+    }
+
+    #[test]
+    fn classify_error_502_gateway() {
+        let err = ProviderError::ApiError("HTTP 502 Bad Gateway".into());
+        assert_eq!(classify_error(&err), Some("API gateway error"));
+    }
+
+    #[test]
+    fn classify_error_timeout() {
+        let err = ProviderError::ApiError("request timed out after 30s".into());
+        assert_eq!(classify_error(&err), Some("Request timed out"));
+    }
+
+    #[test]
+    fn classify_error_connection() {
+        let err = ProviderError::ApiError("connection refused".into());
+        assert_eq!(classify_error(&err), Some("Connection error"));
+    }
+
+    #[test]
+    fn classify_error_try_again() {
+        let err = ProviderError::ApiError("please try again later".into());
+        assert_eq!(classify_error(&err), Some("Temporary API error"));
+    }
+
+    #[test]
+    fn classify_error_returns_none_for_unknown() {
+        let err = ProviderError::ApiError("some unknown error".into());
+        assert_eq!(classify_error(&err), None);
+    }
+
+    #[test]
+    fn require_base_url_missing() {
+        let config = ProviderConfig {
+            name: ProviderName::OpenAICompatible,
+            model: "custom-model".to_string(),
+            base_url: None,
+            api_key: Some("key".to_string()),
+        };
+        let provider = RigProvider::new(config, PathBuf::from("/tmp")).unwrap();
+        let result = provider.require_base_url();
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("base_url"),
+            "should mention base_url"
+        );
+    }
+
+    #[test]
+    fn require_base_url_present() {
+        let config = ProviderConfig {
+            name: ProviderName::OpenAICompatible,
+            model: "custom-model".to_string(),
+            base_url: Some("https://my-api.example.com".to_string()),
+            api_key: Some("key".to_string()),
+        };
+        let provider = RigProvider::new(config, PathBuf::from("/tmp")).unwrap();
+        assert_eq!(
+            provider.require_base_url().unwrap(),
+            "https://my-api.example.com"
+        );
+    }
+
+    #[test]
+    fn parse_findings_wrapper_with_empty_array() {
+        let response = r#"{"findings": []}"#;
+        let findings = parse_findings_response(response).unwrap();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn backoff_attempt_zero_equals_initial() {
+        assert_eq!(retry_backoff(0), INITIAL_BACKOFF);
+    }
+
+    #[test]
+    fn retryable_rate_limit_message() {
+        let err = ProviderError::ApiError("rate limit exceeded".into());
+        assert!(is_retryable(&err));
+    }
 }

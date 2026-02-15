@@ -45,3 +45,32 @@ pub fn print_banner(claims: Option<&LicenseClaims>) {
     let _ = handle.flush();
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn print_banner_without_license() {
+        // Should not panic when called without claims.
+        print_banner(None);
+    }
+
+    #[test]
+    fn print_banner_with_license() {
+        let claims = LicenseClaims {
+            customer_name: "Test User".to_string(),
+            customer_id: "test-id".to_string(),
+            issued_at: "2026-01-01".to_string(),
+            expires_at: "2099-12-31".to_string(),
+        };
+        // Should not panic when called with claims.
+        print_banner(Some(&claims));
+    }
+
+    #[test]
+    fn license_banner_styled_is_non_empty() {
+        assert!(!LICENSE_BANNER_STYLED.is_empty());
+        assert!(LICENSE_BANNER_STYLED.contains("nitpik"));
+    }
+}
+

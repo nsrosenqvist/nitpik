@@ -215,6 +215,15 @@ mod tests {
         let _ = detect_ci();
     }
 
+    #[test]
+    fn is_debug_returns_bool() {
+        // In a test environment NITPIK_DEBUG is typically unset → false.
+        // We simply verify it doesn't panic and returns a bool.
+        let result = is_debug();
+        // Unless the test runner has NITPIK_DEBUG=1 this is false.
+        let _ = result;
+    }
+
     #[tokio::test]
     async fn send_heartbeat_does_not_panic_on_unreachable_url() {
         let payload = HeartbeatPayload::from_review(1, 10, 1, false);

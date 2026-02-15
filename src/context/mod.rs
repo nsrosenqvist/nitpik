@@ -35,3 +35,77 @@ pub async fn build_baseline_context(
         project_docs,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::diff::{FileDiff, Hunk};
+
+    fn make_diff(path: &str) -> FileDiff {
+        FileDiff {
+            old_path: path.to_string(),
+            new_path: path.to_string(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![],
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn build_context_loads_files_and_docs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
+
+        let diffs = vec![make_diff("main.rs")];
+        let config = Config::default();
+
+        let ctx = build_baseline_context(dir.path(), &diffs, &config).await;
+        assert_eq!(ctx.file_contents.len(), 1);
+        assert!(ctx.file_contents.contains_key("main.rs"));
+        assert_eq!(ctx.project_docs.len(), 1);
+        assert!(ctx.project_docs.contains_key("AGENTS.md"));
+    }
+
+    #[tokio::test]
+    async fn build_context_empty_diffs() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::default();
+
+        let ctx = build_baseline_context(dir.path(), &[], &config).await;
+        assert!(ctx.file_contents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn build_context_skips_deleted_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("deleted.rs"), "old content").unwrap();
+
+        let mut diff = make_diff("deleted.rs");
+        diff.is_deleted = true;
+        let config = Config::default();
+
+        let ctx = build_baseline_context(dir.path(), &[diff], &config).await;
+        assert!(ctx.file_contents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn build_context_skips_missing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Diff references a file that doesn't exist on disk.
+        let diffs = vec![make_diff("nonexistent.rs")];
+        let config = Config::default();
+
+        let ctx = build_baseline_context(dir.path(), &diffs, &config).await;
+        assert!(ctx.file_contents.is_empty());
+    }
+}

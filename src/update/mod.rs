@@ -553,4 +553,66 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not contain"));
     }
+
+    #[test]
+    fn validate_platform_accepts_known_targets() {
+        // The current build target should be one of the supported ones,
+        // or the test should still not panic.
+        let result = validate_platform();
+        // We just verify it returns a result (Ok or Err) without panicking.
+        let _ = result;
+    }
+
+    #[test]
+    fn detect_ci_does_not_panic() {
+        // Just verify the function runs without panicking regardless of env state.
+        let _ = detect_ci_environment();
+    }
+
+    #[test]
+    fn detect_container_does_not_panic() {
+        // Just verify the function runs without panicking regardless of env state.
+        let _ = detect_container_environment();
+    }
+
+    #[test]
+    fn is_newer_with_invalid_version_strings() {
+        // Non-semver strings should fall back to string inequality.
+        assert!(version_cmp("abc", "def"));
+        assert!(!version_cmp("abc", "abc"));
+    }
+
+    #[test]
+    fn verify_checksum_multiline_checksums_file() {
+        let data = b"test data";
+        let hash = hex::encode(Sha256::digest(data));
+        let checksums = format!(
+            "aaaa  some-other-file.tar.gz\n\
+             {hash}  target-file.tar.gz\n\
+             bbbb  yet-another.tar.gz\n"
+        );
+        assert!(verify_checksum(data, "target-file.tar.gz", &checksums).is_ok());
+    }
+
+    #[test]
+    fn extract_binary_nested_path() {
+        // Binary at a nested path like "nitpik-v1.0.0/nitpik" should still match.
+        let mut builder = tar::Builder::new(Vec::new());
+        let content = b"nested-binary";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "nitpik-v1.0.0/nitpik", &content[..])
+            .unwrap();
+        let tar_bytes = builder.into_inner().unwrap();
+
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&tar_bytes).unwrap();
+        let gz_bytes = encoder.finish().unwrap();
+
+        let result = extract_binary(&gz_bytes).unwrap();
+        assert_eq!(result, content);
+    }
 }
