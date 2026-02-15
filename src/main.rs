@@ -446,8 +446,9 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     progress.start();
 
     // Secret scanning and context construction
+    let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
     let (review_context, secret_findings) = build_review_context(
-        &args, &config, &diffs, baseline, &repo_root, scan_secrets,
+        &args, &config, &diffs, baseline, &repo_root, scan_secrets, is_path_scan,
     )?;
 
     // Set up provider
@@ -456,8 +457,16 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             .map_err(|e| anyhow::anyhow!("{e}"))?,
     );
 
+    // Detect branch/PR scope for sidecar isolation
+    let review_scope = diff::git::detect_branch(repo_root_path).await;
+
     // Run orchestrator
     let cache = cache::CacheEngine::new(!no_cache);
+
+    // Clean up stale sidecar files (>30 days) before the review starts
+    let stale_age = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+    let _removed = cache.cleanup_stale(stale_age);
+
     let orchestrator = orchestrator::ReviewOrchestrator::new(
         Arc::clone(&provider),
         &config,
@@ -465,6 +474,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         Arc::clone(&progress),
         args.no_prior_context,
         args.max_prior_findings,
+        review_scope,
     );
 
     let review_result = orchestrator
@@ -564,12 +574,14 @@ fn build_review_context(
     baseline: models::BaselineContext,
     repo_root: &str,
     scan_secrets: bool,
+    is_path_scan: bool,
 ) -> Result<(models::ReviewContext, Vec<models::finding::Finding>)> {
     if !scan_secrets {
         let ctx = models::ReviewContext {
             diffs: diffs.to_vec(),
             baseline,
             repo_root: repo_root.to_string(),
+            is_path_scan,
         };
         return Ok((ctx, Vec::new()));
     }
@@ -608,6 +620,7 @@ fn build_review_context(
             project_docs: baseline.project_docs.clone(),
         },
         repo_root: repo_root.to_string(),
+        is_path_scan,
     };
 
     Ok((ctx, secret_findings))

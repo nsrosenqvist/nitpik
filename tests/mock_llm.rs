@@ -130,12 +130,13 @@ async fn orchestrator_returns_findings_from_mock_provider() {
     let config = Config::default();
     let cache = CacheEngine::new(false);
     let progress = Arc::new(ProgressTracker::new(&["src/main.rs".to_string()], &["test-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/main.rs", "let x = 42;")],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
 
     let agents = vec![test_agent("test-agent")];
@@ -158,12 +159,13 @@ async fn orchestrator_returns_empty_for_no_issues() {
     let config = Config::default();
     let cache = CacheEngine::new(false);
     let progress = Arc::new(ProgressTracker::new(&["src/lib.rs".to_string()], &["clean-reviewer".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/lib.rs", "fn hello() {}")],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
 
     let agents = vec![test_agent("clean-reviewer")];
@@ -182,12 +184,13 @@ async fn orchestrator_errors_on_empty_diffs() {
     let config = Config::default();
     let cache = CacheEngine::new(false);
     let progress = Arc::new(ProgressTracker::new(&[], &["any-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
 
     let context = ReviewContext {
         diffs: vec![],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
 
     let agents = vec![test_agent("any-agent")];
@@ -205,7 +208,7 @@ async fn orchestrator_skips_binary_files() {
     let config = Config::default();
     let cache = CacheEngine::new(false);
     let progress = Arc::new(ProgressTracker::new(&["image.png".to_string()], &["test-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
 
     let mut binary_diff = test_diff("image.png", "");
     binary_diff.is_binary = true;
@@ -214,6 +217,7 @@ async fn orchestrator_skips_binary_files() {
         diffs: vec![binary_diff],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
 
     let agents = vec![test_agent("test-agent")];
@@ -242,7 +246,7 @@ async fn orchestrator_handles_multiple_agents_and_files() {
     let config = Config::default();
     let cache = CacheEngine::new(false);
     let progress = Arc::new(ProgressTracker::new(&["a.rs".to_string(), "b.rs".to_string()], &["agent-a".to_string(), "agent-b".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
 
     let context = ReviewContext {
         diffs: vec![
@@ -251,6 +255,7 @@ async fn orchestrator_handles_multiple_agents_and_files() {
         ],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
 
     // Two agents, two files = 4 combinations
@@ -291,12 +296,13 @@ async fn orchestrator_handles_provider_errors_gracefully() {
     let config = Config::default();
     let cache = CacheEngine::new(false);
     let progress = Arc::new(ProgressTracker::new(&["src/main.rs".to_string()], &["failing-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/main.rs", "let x = 1;")],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
 
     let agents = vec![test_agent("failing-agent")];
@@ -343,7 +349,7 @@ async fn cache_prevents_duplicate_calls() {
     let cache = CacheEngine::new(true);
     let provider_trait: Arc<dyn ReviewProvider> = Arc::clone(&provider) as Arc<dyn ReviewProvider>;
     let progress = Arc::new(ProgressTracker::new(&["src/main.rs".to_string()], &["cache-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider_trait, &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(provider_trait, &config, cache, progress, false, None, String::new());
 
     // Use unique content to avoid collisions with previously cached results
     let unique_content = format!("let unique_{} = true;", std::process::id());
@@ -351,6 +357,7 @@ async fn cache_prevents_duplicate_calls() {
         diffs: vec![test_diff("src/main.rs", &unique_content)],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
     let agents = vec![test_agent("cache-agent")];
 
@@ -431,9 +438,10 @@ async fn prior_findings_injected_on_cache_invalidation() {
     }];
 
     // Follow-up findings (the model's response when it sees prior context)
+    // Line must be within the hunk range (1-2) to survive diff-scope filtering.
     let followup_findings = vec![Finding {
         file: "src/app.rs".to_string(),
-        line: 3,
+        line: 2,
         end_line: None,
         severity: Severity::Info,
         title: "Prior issue resolved, new style nit".to_string(),
@@ -462,6 +470,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         diffs: vec![diff1],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
     let agents = vec![test_agent("prior-agent")];
 
@@ -485,10 +494,10 @@ async fn prior_findings_injected_on_cache_invalidation() {
 
     // Store findings + sidecar for run 1
     store.put(&cache_key1, &initial_findings);
-    store.put_sidecar("src/app.rs", "prior-agent", &config.provider.model, &cache_key1);
+    store.put_sidecar("src/app.rs", "prior-agent", &config.provider.model, &cache_key1, "");
 
     // Verify the sidecar was written
-    let prior = store.get_previous("src/app.rs", "prior-agent", &config.provider.model, "different-key");
+    let prior = store.get_previous("src/app.rs", "prior-agent", &config.provider.model, "different-key", "");
     assert!(prior.is_some(), "sidecar should return prior findings for a different key");
     assert_eq!(prior.unwrap().len(), 1);
 
@@ -500,6 +509,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         diffs: vec![diff2],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
 
     // We need an orchestrator that uses the same cache directory.
@@ -538,6 +548,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         "prior-agent",
         &config.provider.model,
         &cache_key1,
+        "",
     );
 
     // Now create an orchestrator with cache enabled — it will use the same dir
@@ -555,6 +566,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         progress,
         false, // no_prior_context = false → inject prior findings
         None,  // max_prior_findings = unlimited
+        String::new(),
     );
 
     let result2 = orchestrator
@@ -640,7 +652,7 @@ async fn no_prior_context_flag_suppresses_injection() {
     let seed_prompt = format!("seed-prompt-{seed_content}");
     let seed_key = nitpik::cache::cache_key(&seed_prompt, "sec-agent", &config.provider.model);
     seeded_store.put(&seed_key, &initial_findings);
-    seeded_store.put_sidecar("src/lib.rs", "sec-agent", &config.provider.model, &seed_key);
+    seeded_store.put_sidecar("src/lib.rs", "sec-agent", &config.provider.model, &seed_key, "");
 
     // Run orchestrator with no_prior_context = true
     let provider = Arc::new(PromptRecordingProvider {
@@ -661,6 +673,7 @@ async fn no_prior_context_flag_suppresses_injection() {
         progress,
         true, // no_prior_context = true → suppress prior findings
         None,
+        String::new(),
     );
 
     let new_content = format!("let new_npc_{} = 2;", std::process::id());
@@ -668,6 +681,7 @@ async fn no_prior_context_flag_suppresses_injection() {
         diffs: vec![test_diff("src/lib.rs", &new_content)],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
     };
     let agents = vec![test_agent("sec-agent")];
 

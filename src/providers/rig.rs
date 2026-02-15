@@ -295,7 +295,11 @@ impl ReviewProvider for RigProvider {
                 .map(|def| CustomCommandTool::new(def, self.repo_root.clone()))
                 .collect();
 
-            self.call_rig_agentic(model, &agent.system_prompt, prompt, max_turns, custom_tools).await
+            // Enhance the system prompt with tool-usage guidance so the
+            // LLM knows it should actively explore before concluding.
+            let agentic_system_prompt = build_agentic_system_prompt(&agent.system_prompt);
+
+            self.call_rig_agentic(model, &agentic_system_prompt, prompt, max_turns, custom_tools).await
         } else {
             self.call_rig(model, &agent.system_prompt, prompt).await
         };
@@ -305,6 +309,38 @@ impl ReviewProvider for RigProvider {
             Err(e) => Err(e),
         }
     }
+}
+
+/// Enhance the system prompt for agentic mode.
+///
+/// Appends instructions that tell the LLM to proactively use tools
+/// for codebase exploration before finalising its review findings.
+/// The base profile prompt is preserved unchanged; the agentic
+/// supplement is appended so it applies regardless of profile.
+fn build_agentic_system_prompt(base_prompt: &str) -> String {
+    format!(
+        "{base_prompt}\n\n\
+         ## Tool-Assisted Review\n\n\
+         You have access to tools for exploring the repository. \
+         Use them **proactively** to build a thorough understanding of the code \
+         before reporting findings.\n\n\
+         When the diff references imports, function calls, types, or modules you \
+         have not seen, **use your tools to read the relevant source files** instead \
+         of guessing what they contain. Specifically:\n\n\
+         1. **Read referenced files** — if the diff imports from or calls into another \
+         module, use `read_file` to examine it.\n\
+         2. **Search for usages** — use `search_text` to find callers, implementations, \
+         or tests related to the changed code.\n\
+         3. **Understand the project layout** — use `list_directory` if you are unsure \
+         where a file lives or what a module contains.\n\
+         4. **Verify before reporting** — do not flag an issue unless you have confirmed \
+         it by reading the relevant code. False positives from guessing are worse \
+         than a missed finding.\n\n\
+         All tool paths are **relative to the repository root** \
+         (e.g., `src/models/finding.rs`, not an absolute path).\n\n\
+         After exploring, return your findings as a JSON array as described in the \
+         instructions."
+    )
 }
 
 /// Check whether a provider error is transient and worth retrying.
@@ -588,5 +624,22 @@ mod tests {
     fn backoff_capped_at_max() {
         let b10 = retry_backoff(10);
         assert_eq!(b10, MAX_BACKOFF);
+    }
+
+    #[test]
+    fn agentic_system_prompt_includes_tool_instructions() {
+        let base = "You are a backend reviewer.";
+        let enhanced = build_agentic_system_prompt(base);
+
+        // Preserves the original prompt
+        assert!(enhanced.starts_with(base));
+
+        // Adds tool guidance
+        assert!(enhanced.contains("Tool-Assisted Review"));
+        assert!(enhanced.contains("read_file"));
+        assert!(enhanced.contains("search_text"));
+        assert!(enhanced.contains("list_directory"));
+        assert!(enhanced.contains("relative to the repository root"));
+        assert!(enhanced.contains("proactively"));
     }
 }

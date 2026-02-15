@@ -53,7 +53,7 @@ impl CacheEngine {
         self.store.put(key, findings);
     }
 
-    /// Write the sidecar that maps a file×agent×model triple to its
+    /// Write the sidecar that maps a file×agent×model×scope tuple to its
     /// latest content-hash cache key.
     pub fn put_sidecar(
         &self,
@@ -61,15 +61,16 @@ impl CacheEngine {
         agent_name: &str,
         model: &str,
         cache_key: &str,
+        review_scope: &str,
     ) {
         if !self.enabled {
             return;
         }
-        self.store.put_sidecar(file_path, agent_name, model, cache_key);
+        self.store.put_sidecar(file_path, agent_name, model, cache_key, review_scope);
     }
 
-    /// Retrieve findings from the *previous* review of a file×agent×model
-    /// triple, if the cache key has changed (content invalidation).
+    /// Retrieve findings from the *previous* review of a file×agent×model×scope
+    /// tuple, if the cache key has changed (content invalidation).
     ///
     /// Returns `None` when caching is disabled, on first run, or when
     /// the cache key hasn't changed (pure hit).
@@ -79,11 +80,22 @@ impl CacheEngine {
         agent_name: &str,
         model: &str,
         current_cache_key: &str,
+        review_scope: &str,
     ) -> Option<Vec<Finding>> {
         if !self.enabled {
             return None;
         }
-        self.store.get_previous(file_path, agent_name, model, current_cache_key)
+        self.store.get_previous(file_path, agent_name, model, current_cache_key, review_scope)
+    }
+
+    /// Remove stale `.meta` sidecar files older than the given duration.
+    ///
+    /// Returns the number of files removed.
+    pub fn cleanup_stale(&self, max_age: std::time::Duration) -> usize {
+        if !self.enabled {
+            return 0;
+        }
+        self.store.cleanup_stale_sidecars(max_age)
     }
 
     /// Remove all cached entries.
@@ -131,13 +143,19 @@ mod tests {
     fn get_previous_returns_none_when_disabled() {
         // CacheEngine with enabled=false should never return prior findings
         let engine = CacheEngine::new(false);
-        assert!(engine.get_previous("f.rs", "backend", "model", "key").is_none());
+        assert!(engine.get_previous("f.rs", "backend", "model", "key", "main").is_none());
     }
 
     #[test]
     fn put_sidecar_noop_when_disabled() {
         // Should not panic or write anything when disabled
         let engine = CacheEngine::new(false);
-        engine.put_sidecar("f.rs", "backend", "model", "key");
+        engine.put_sidecar("f.rs", "backend", "model", "key", "main");
+    }
+
+    #[test]
+    fn cleanup_stale_noop_when_disabled() {
+        let engine = CacheEngine::new(false);
+        assert_eq!(engine.cleanup_stale(std::time::Duration::from_secs(1)), 0);
     }
 }

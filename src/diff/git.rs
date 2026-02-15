@@ -27,6 +27,52 @@ pub async fn git_diff(repo_root: &Path, base_ref: &str) -> Result<String, DiffEr
         .map_err(|e| DiffError::GitError(format!("git output is not valid UTF-8: {e}")))
 }
 
+/// Detect the current branch or review scope.
+///
+/// Tries, in order:
+/// 1. `git rev-parse --abbrev-ref HEAD` (returns branch name, or `HEAD` when detached)
+/// 2. CI-specific environment variables (`GITHUB_HEAD_REF`, `CI_COMMIT_BRANCH`,
+///    `BITBUCKET_BRANCH`, `CI_BRANCH`)
+/// 3. Returns an empty string when nothing is available.
+///
+/// The result is used to scope sidecar `.meta` files so that parallel
+/// PRs/branches reviewing the same file don't cross-contaminate prior findings.
+pub async fn detect_branch(repo_root: &Path) -> String {
+    // Try git first
+    if let Ok(output) = tokio::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .await
+    {
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // "HEAD" means detached — fall through to CI env vars
+            if !branch.is_empty() && branch != "HEAD" {
+                return branch;
+            }
+        }
+    }
+
+    // CI env var fallback (detached HEAD is common in CI)
+    for var in &[
+        "GITHUB_HEAD_REF",
+        "CI_COMMIT_BRANCH",
+        "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME",
+        "BITBUCKET_BRANCH",
+        "CI_BRANCH",
+    ] {
+        if let Ok(val) = std::env::var(var) {
+            let val = val.trim().to_string();
+            if !val.is_empty() {
+                return val;
+            }
+        }
+    }
+
+    String::new()
+}
+
 /// Find the root of the git repository containing `start_dir`.
 pub async fn find_repo_root(start_dir: &Path) -> Result<String, DiffError> {
     let output = tokio::process::Command::new("git")
@@ -124,5 +170,105 @@ mod tests {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
         let root = find_repo_root(repo).await.unwrap();
         assert!(!root.is_empty());
+    }
+
+    #[tokio::test]
+    async fn detect_branch_returns_branch_name_in_git_repo() {
+        // Create a temp git repo on a named branch
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        tokio::process::Command::new("git")
+            .args(["init", "-b", "test-branch"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::fs::write(p.join("file.txt"), "hello\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        let branch = detect_branch(p).await;
+        assert_eq!(branch, "test-branch");
+    }
+
+    #[tokio::test]
+    async fn detect_branch_returns_empty_for_non_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let branch = detect_branch(dir.path()).await;
+        assert!(branch.is_empty(), "non-git dir should return empty, got: {branch}");
+    }
+
+    #[tokio::test]
+    async fn detect_branch_falls_back_to_ci_env_var() {
+        // Create a git repo with detached HEAD
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        tokio::process::Command::new("git")
+            .args(["init"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::fs::write(p.join("file.txt"), "hello\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        // Detach HEAD
+        tokio::process::Command::new("git")
+            .args(["checkout", "--detach"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        // Set a CI env var
+        std::env::set_var("GITHUB_HEAD_REF", "pr-42-branch");
+        let branch = detect_branch(p).await;
+        std::env::remove_var("GITHUB_HEAD_REF");
+
+        assert_eq!(branch, "pr-42-branch");
     }
 }

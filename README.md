@@ -478,11 +478,19 @@ nitpik caches review results by content hash. Unchanged files are not re-reviewe
 
 When a file changes and the cache is invalidated, nitpik automatically includes the **previous findings** in the LLM prompt. This lets the model distinguish resolved issues from persistent or new ones, improving consistency across successive reviews of the same file.
 
+### Branch-scoped prior findings
+
+Prior findings are tracked per **branch** so that parallel PRs reviewing the same file don't cross-contaminate each other. nitpik detects the branch from `git rev-parse --abbrev-ref HEAD`, falling back to CI environment variables (`GITHUB_HEAD_REF`, `CI_COMMIT_BRANCH`, `CI_MERGE_REQUEST_SOURCE_BRANCH_NAME`, `BITBUCKET_BRANCH`, `CI_BRANCH`) when running in detached-HEAD mode.
+
 Previous findings are sorted by severity (errors first) before being injected, so the most important context is always preserved.
+
+### Stale sidecar cleanup
+
+Sidecar metadata files older than **30 days** are automatically removed at the start of each review run, keeping the cache directory from growing unbounded after branches are merged or deleted.
 
 ```bash
 nitpik cache stats   # show entry count and size
-nitpik cache clear   # wipe the cache
+nitpik cache clear   # wipe the cache (including all sidecar metadata)
 nitpik cache path    # print the cache directory
 ```
 

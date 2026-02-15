@@ -33,7 +33,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 | `orchestrator/` | Parallel review execution, prompt construction, deduplication |
 | `output/` | `OutputRenderer` trait + format implementations (terminal, JSON, GitHub, GitLab, Bitbucket, Forgejo) |
 | `security/` | Secret scanner, vendored gitleaks rules, entropy checks, redaction |
-| `cache/` | Content-hash cache, filesystem storage |
+| `cache/` | Content-hash cache, filesystem storage, branch-scoped sidecar metadata for prior findings |
 | `models/` | Shared types: `Finding`, `Severity`, `FileDiff`, `AgentDefinition`, `ReviewConfig`, `ReviewContext`, etc. |
 | `license/` | Offline Ed25519 license key verification, expiry checks |
 | `progress/` | Live terminal progress display — spinners, status tracking per file×agent task, suppressed with `--no-progress` |

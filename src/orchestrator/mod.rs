@@ -48,6 +48,8 @@ pub struct ReviewOrchestrator {
     no_prior_context: bool,
     /// Optional cap on how many prior findings are included.
     max_prior_findings: Option<usize>,
+    /// Branch / PR scope for sidecar isolation.
+    review_scope: String,
 }
 
 impl ReviewOrchestrator {
@@ -59,6 +61,7 @@ impl ReviewOrchestrator {
         progress: Arc<ProgressTracker>,
         no_prior_context: bool,
         max_prior_findings: Option<usize>,
+        review_scope: String,
     ) -> Self {
         Self {
             provider,
@@ -67,6 +70,7 @@ impl ReviewOrchestrator {
             progress,
             no_prior_context,
             max_prior_findings,
+            review_scope,
         }
     }
 
@@ -109,6 +113,7 @@ impl ReviewOrchestrator {
                     let agent = agent.clone();
                     let no_prior_context = self.no_prior_context;
                     let max_prior_findings = self.max_prior_findings;
+                    let review_scope = self.review_scope.clone();
                     let model = agent
                         .profile
                         .model
@@ -119,7 +124,10 @@ impl ReviewOrchestrator {
 
                     // Build the base prompt (without prior findings —
                     // they are injected below only on cache miss).
-                    let base_prompt = build_prompt(&chunk, context, &agent, None);
+                    // Agentic context is included in the base prompt so
+                    // the LLM always sees tool guidance and changed-file
+                    // paths regardless of cache state.
+                    let base_prompt = build_prompt(&chunk, context, &agent, None, agentic);
 
                     // Compute content for cache key from the base prompt (deterministic)
                     let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
@@ -129,7 +137,7 @@ impl ReviewOrchestrator {
                         if let Some(cached) = cache.get(&cache_key) {
                             // Sidecar stays current — write it in case
                             // this is the first run with sidecar support.
-                            cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key);
+                            cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key, &review_scope);
                             progress.update(&file_path, TaskStatus::Done);
                             return (cached, false);
                         }
@@ -144,6 +152,7 @@ impl ReviewOrchestrator {
                                 &agent.profile.name,
                                 &model,
                                 &cache_key,
+                                &review_scope,
                             );
                             match prior {
                                 Some(mut findings) if !findings.is_empty() => {
@@ -167,7 +176,7 @@ impl ReviewOrchestrator {
                             match provider.review(&agent, &prompt, agentic, max_turns, max_tool_calls).await {
                                 Ok(findings) => {
                                     cache.put(&cache_key, &findings);
-                                    cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key);
+                                    cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key, &review_scope);
                                     progress.update(&file_path, TaskStatus::Done);
                                     return (findings, false);
                                 }
@@ -237,8 +246,16 @@ impl ReviewOrchestrator {
         // Deduplicate findings
         let deduped = dedup::deduplicate(all_findings);
 
+        // Filter out findings outside diff boundaries (skip for path-based scans
+        // where all file content is in scope)
+        let scoped = if context.is_path_scan {
+            deduped
+        } else {
+            filter_to_diff_scope(deduped, &context.diffs)
+        };
+
         Ok(ReviewResult {
-            findings: deduped,
+            findings: scoped,
             failed_tasks: failed_count,
         })
     }
@@ -250,6 +267,7 @@ fn build_prompt(
     context: &ReviewContext,
     agent: &AgentDefinition,
     previous_findings: Option<&[Finding]>,
+    agentic: bool,
 ) -> String {
     let mut prompt = String::new();
 
@@ -294,6 +312,11 @@ fn build_prompt(
     }
     prompt.push_str("```\n\n");
 
+    // Agentic context: help the LLM use tools effectively
+    if agentic {
+        prompt.push_str(&build_agentic_context(diff, context, agent));
+    }
+
     // Previous findings (if any)
     if let Some(findings) = previous_findings {
         if !findings.is_empty() {
@@ -306,9 +329,12 @@ fn build_prompt(
         "## Instructions\n\n\
         Review the diff above for file `{file_path}`. \
         You are the **{}** reviewer: {}\n\n\
+        IMPORTANT SCOPE RULE: Only report findings on lines that appear in the diff hunks above. \
+        The full file content is provided for context only — do NOT flag pre-existing issues in \
+        unchanged code outside the diff. Every finding's line number must fall within a diff hunk range.\n\n\
         Return your findings as a JSON array. For each finding include:\n\
         - \"file\": the file path (\"{}\")\n\
-        - \"line\": the line number in the new file\n\
+        - \"line\": the line number in the new file (must be within a diff hunk)\n\
         - \"severity\": MUST be exactly one of: \"error\", \"warning\", \"info\"\n\
         - \"title\": short summary of the issue\n\
         - \"message\": detailed explanation\n\
@@ -324,6 +350,71 @@ fn build_prompt(
     ));
 
     prompt
+}
+
+/// Build the agentic context section for the user prompt.
+///
+/// Provides the LLM with:
+/// - A list of all files changed in this review (for cross-referencing)
+/// - Guidance on using tools with relative paths
+/// - Encouragement to explore before concluding
+fn build_agentic_context(
+    current_diff: &FileDiff,
+    context: &ReviewContext,
+    agent: &AgentDefinition,
+) -> String {
+    let mut section = String::new();
+
+    // List all changed files so the LLM knows what else to explore
+    let other_files: Vec<&str> = context
+        .diffs
+        .iter()
+        .filter(|d| !d.is_binary && d.path() != current_diff.path())
+        .map(|d| d.path())
+        .collect();
+
+    if !other_files.is_empty() {
+        section.push_str("## Other Changed Files in This Review\n\n");
+        section.push_str(
+            "These files are also part of this review. \
+             Use `read_file` to examine them if the current diff references or affects them:\n\n",
+        );
+        for path in &other_files {
+            section.push_str(&format!("- `{path}`\n"));
+        }
+        section.push('\n');
+    }
+
+    // Tool usage guidance with path context
+    section.push_str("## Agentic Exploration\n\n");
+    section.push_str(
+        "You have tools to explore the repository. \
+         All file paths must be **relative to the repository root** \
+         (e.g., `src/main.rs`, not an absolute path).\n\n",
+    );
+
+    section.push_str(
+        "**Available tools:**\n\
+         - `read_file` — read any file in the repository by relative path\n\
+         - `search_text` — search for text patterns (literal or regex) across the codebase\n\
+         - `list_directory` — list directory contents (use `.` for the repo root)\n",
+    );
+
+    // Mention custom tools if the agent defines any
+    for tool in &agent.profile.tools {
+        section.push_str(&format!("- `{}` — {}\n", tool.name, tool.description));
+    }
+
+    section.push_str(
+        "\n**Before reporting findings, use the tools to:**\n\
+         - Read imported modules, types, or functions referenced in the diff\n\
+         - Search for callers or usages of modified functions/types\n\
+         - Check whether tests exist for the changed code\n\
+         - Explore the directory structure around the changed file\n\
+         - Verify assumptions instead of guessing\n\n",
+    );
+
+    section
 }
 
 /// Append the prior-findings section to an already-built base prompt.
@@ -355,6 +446,41 @@ fn format_prior_findings_section(findings: &[Finding]) -> String {
         - Do **not** duplicate previous findings that are unchanged.\n\n\
         ```json\n{json}\n```\n\n"
     )
+}
+
+/// Filter findings to only include those within diff hunk boundaries.
+///
+/// A finding is in scope if:
+/// - Its file matches a file in the diffs, AND
+/// - Its line number (or range) overlaps with at least one hunk's new-file range.
+///
+/// This prevents the LLM from reporting pre-existing issues in unchanged code
+/// that was provided only as surrounding context.
+fn filter_to_diff_scope(findings: Vec<Finding>, diffs: &[FileDiff]) -> Vec<Finding> {
+    findings
+        .into_iter()
+        .filter(|f| finding_in_diff_scope(f, diffs))
+        .collect()
+}
+
+/// Check whether a single finding falls within any diff hunk for its file.
+fn finding_in_diff_scope(finding: &Finding, diffs: &[FileDiff]) -> bool {
+    // Find the matching diff for this finding's file
+    let Some(diff) = diffs.iter().find(|d| d.path() == finding.file) else {
+        // Finding references a file not in the diffs — out of scope
+        return false;
+    };
+
+    let finding_start = finding.line;
+    let finding_end = finding.end_line.unwrap_or(finding.line);
+
+    // Check if the finding overlaps with any hunk's new-file range
+    diff.hunks.iter().any(|hunk| {
+        let hunk_start = hunk.new_start;
+        let hunk_end = hunk.new_start.saturating_add(hunk.new_count).saturating_sub(1);
+        // Overlap check: finding_start <= hunk_end && hunk_start <= finding_end
+        finding_start <= hunk_end && hunk_start <= finding_end
+    })
 }
 
 #[cfg(test)]
@@ -390,10 +516,11 @@ mod tests {
             diffs: vec![diff.clone()],
             baseline: BaselineContext::default(),
             repo_root: "/tmp".into(),
+            is_path_scan: false,
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, None);
+        let prompt = build_prompt(&diff, &context, &agent, None, false);
         assert!(prompt.contains("+let x = 1;"));
         assert!(prompt.contains("test.rs"));
         assert!(prompt.contains("backend"));
@@ -426,6 +553,7 @@ mod tests {
             diffs: vec![diff.clone()],
             baseline: BaselineContext::default(),
             repo_root: "/tmp".into(),
+            is_path_scan: false,
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
         let prior = vec![Finding {
@@ -439,7 +567,7 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let prompt = build_prompt(&diff, &context, &agent, Some(&prior));
+        let prompt = build_prompt(&diff, &context, &agent, Some(&prior), false);
         assert!(prompt.contains("Previous Review Findings"));
         assert!(prompt.contains("Old issue"));
         assert!(prompt.contains("Re-raise"));
@@ -472,10 +600,11 @@ mod tests {
             diffs: vec![diff.clone()],
             baseline: BaselineContext::default(),
             repo_root: "/tmp".into(),
+            is_path_scan: false,
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, None);
+        let prompt = build_prompt(&diff, &context, &agent, None, false);
         assert!(!prompt.contains("Previous Review Findings"));
     }
 
@@ -506,6 +635,7 @@ mod tests {
             diffs: vec![diff.clone()],
             baseline: BaselineContext::default(),
             repo_root: "/tmp".into(),
+            is_path_scan: false,
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
         let prior = vec![Finding {
@@ -519,7 +649,7 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let base = build_prompt(&diff, &context, &agent, None);
+        let base = build_prompt(&diff, &context, &agent, None, false);
         let with_prior = build_prompt_with_prior(&base, &prior);
 
         // Prior findings section should appear before Instructions
@@ -527,5 +657,302 @@ mod tests {
         let instr_pos = with_prior.find("## Instructions").unwrap();
         assert!(prior_pos < instr_pos);
         assert!(with_prior.contains("Critical bug"));
+    }
+
+    // --- Diff-scope filtering tests ---
+
+    fn make_diff_with_hunk(path: &str, new_start: u32, new_count: u32) -> FileDiff {
+        FileDiff {
+            old_path: path.into(),
+            new_path: path.into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: new_count,
+                new_start,
+                new_count,
+                header: None,
+                lines: (0..new_count)
+                    .map(|i| DiffLine {
+                        line_type: DiffLineType::Added,
+                        content: format!("line {}", new_start + i),
+                        old_line_no: None,
+                        new_line_no: Some(new_start + i),
+                    })
+                    .collect(),
+            }],
+        }
+    }
+
+    fn make_finding_at(file: &str, line: u32) -> Finding {
+        Finding {
+            file: file.into(),
+            line,
+            end_line: None,
+            severity: crate::models::finding::Severity::Warning,
+            title: "test".into(),
+            message: "test".into(),
+            suggestion: None,
+            agent: "test".into(),
+        }
+    }
+
+    #[test]
+    fn finding_inside_hunk_kept() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let findings = vec![make_finding_at("a.rs", 12)];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn finding_outside_hunk_filtered() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let findings = vec![make_finding_at("a.rs", 50)];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn finding_on_hunk_boundary_start() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let findings = vec![make_finding_at("a.rs", 10)];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn finding_on_hunk_boundary_end() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let findings = vec![make_finding_at("a.rs", 14)];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn finding_just_before_hunk_filtered() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let findings = vec![make_finding_at("a.rs", 9)];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn finding_just_after_hunk_filtered() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let findings = vec![make_finding_at("a.rs", 15)];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn finding_wrong_file_filtered() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)];
+        let findings = vec![make_finding_at("b.rs", 12)];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn finding_with_range_overlapping_hunk() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let mut finding = make_finding_at("a.rs", 8);
+        finding.end_line = Some(11); // range 8-11 overlaps hunk 10-14
+        let result = filter_to_diff_scope(vec![finding], &diffs);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn finding_with_range_not_overlapping_hunk() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let mut finding = make_finding_at("a.rs", 1);
+        finding.end_line = Some(5); // range 1-5, hunk 10-14 — no overlap
+        let result = filter_to_diff_scope(vec![finding], &diffs);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn mixed_findings_filtered_correctly() {
+        let diffs = vec![make_diff_with_hunk("a.rs", 10, 5)]; // lines 10-14
+        let findings = vec![
+            make_finding_at("a.rs", 10), // in scope
+            make_finding_at("a.rs", 50), // out of scope
+            make_finding_at("a.rs", 14), // in scope
+            make_finding_at("b.rs", 10), // wrong file
+        ];
+        let result = filter_to_diff_scope(findings, &diffs);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 10);
+        assert_eq!(result[1].line, 14);
+    }
+
+    #[test]
+    fn multiple_hunks_findings_in_second_hunk() {
+        let mut diff = make_diff_with_hunk("a.rs", 10, 5); // lines 10-14
+        diff.hunks.push(Hunk {
+            old_start: 50,
+            old_count: 3,
+            new_start: 50,
+            new_count: 3,
+            header: None,
+            lines: vec![DiffLine {
+                line_type: DiffLineType::Added,
+                content: "line 50".into(),
+                old_line_no: None,
+                new_line_no: Some(50),
+            }],
+        }); // lines 50-52
+        let findings = vec![
+            make_finding_at("a.rs", 12), // in hunk 1
+            make_finding_at("a.rs", 30), // between hunks — out of scope
+            make_finding_at("a.rs", 51), // in hunk 2
+        ];
+        let result = filter_to_diff_scope(findings, &vec![diff]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 12);
+        assert_eq!(result[1].line, 51);
+    }
+
+    #[test]
+    fn prompt_includes_scope_rule() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(&diff, &context, &agent, None, false);
+        assert!(prompt.contains("IMPORTANT SCOPE RULE"));
+        assert!(prompt.contains("do NOT flag pre-existing issues"));
+    }
+
+    #[test]
+    fn build_prompt_agentic_includes_tool_guidance() {
+        let diff = FileDiff {
+            old_path: "src/lib.rs".into(),
+            new_path: "src/lib.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "use crate::models::Finding;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let other_diff = FileDiff {
+            old_path: "src/models/finding.rs".into(),
+            new_path: "src/models/finding.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "pub struct Finding {}".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone(), other_diff],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(&diff, &context, &agent, None, true);
+
+        // Should include agentic exploration section
+        assert!(prompt.contains("Agentic Exploration"));
+        assert!(prompt.contains("read_file"));
+        assert!(prompt.contains("search_text"));
+        assert!(prompt.contains("list_directory"));
+        assert!(prompt.contains("relative to the repository root"));
+
+        // Should list the other changed file
+        assert!(prompt.contains("src/models/finding.rs"));
+        assert!(prompt.contains("Other Changed Files"));
+    }
+
+    #[test]
+    fn build_prompt_non_agentic_excludes_tool_guidance() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(&diff, &context, &agent, None, false);
+
+        // Non-agentic should NOT include tool guidance
+        assert!(!prompt.contains("Agentic Exploration"));
+        assert!(!prompt.contains("Other Changed Files"));
     }
 }

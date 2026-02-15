@@ -24,4 +24,6 @@ pub struct ReviewContext {
     pub baseline: BaselineContext,
     /// The root path of the repository.
     pub repo_root: String,
+    /// Whether this is a path-based scan (no diff boundaries to enforce).
+    pub is_path_scan: bool,
 }

@@ -201,6 +201,7 @@ async fn run_review(
         diffs,
         baseline,
         repo_root: repo_path.to_string_lossy().to_string(),
+        is_path_scan: false,
     };
 
     // Create real provider
@@ -212,7 +213,7 @@ async fn run_review(
     // Run the orchestrator (cache disabled for E2E)
     let cache = CacheEngine::new(false);
     let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), config, cache, progress, false, None, String::new());
 
     let result = orchestrator
         .run(&review_context, &agent_defs, 2, false, 10, 10)
@@ -520,6 +521,7 @@ async fn e2e_custom_profile() {
         diffs,
         baseline,
         repo_root: repo.to_string_lossy().to_string(),
+        is_path_scan: false,
     };
 
     let provider: Arc<dyn ReviewProvider> = Arc::new(
@@ -529,7 +531,7 @@ async fn e2e_custom_profile() {
 
     let cache = CacheEngine::new(false);
     let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None);
+    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None, String::new());
 
     let result = orchestrator
         .run(&review_context, &agent_defs, 2, false, 10, 10)
@@ -713,6 +715,7 @@ async fn e2e_cache_prior_findings() {
         diffs: diffs_v1,
         baseline: baseline_v1,
         repo_root: repo.to_string_lossy().to_string(),
+        is_path_scan: false,
     };
 
     let provider: Arc<dyn ReviewProvider> = Arc::new(
@@ -727,7 +730,7 @@ async fn e2e_cache_prior_findings() {
     let cache1 = CacheEngine::new(false);
     let progress1 = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
     let orch1 = ReviewOrchestrator::new(
-        Arc::clone(&provider), &config, cache1, progress1, false, None,
+        Arc::clone(&provider), &config, cache1, progress1, false, None, String::new(),
     );
 
     let result_v1 = orch1
@@ -757,6 +760,7 @@ async fn e2e_cache_prior_findings() {
         diffs: diffs_v2,
         baseline: baseline_v2,
         repo_root: repo.to_string_lossy().to_string(),
+        is_path_scan: false,
     };
 
     // For stage 2, we need to manually seed the cache store with v1 findings
@@ -777,7 +781,7 @@ async fn e2e_cache_prior_findings() {
     // Actually, we can just seed a sidecar with any old key that has the v1 findings.
     let v1_key = format!("e2e-cache-prior-v1-{}", std::process::id());
     real_store.put(&v1_key, findings_v1);
-    real_store.put_sidecar("calculator.rs", "backend", &model, &v1_key);
+    real_store.put_sidecar("calculator.rs", "backend", &model, &v1_key, "");
 
     // Now run the review with cache enabled — it will miss (different prompt/key)
     // and should pick up prior findings from the sidecar.
@@ -787,6 +791,7 @@ async fn e2e_cache_prior_findings() {
         Arc::clone(&provider), &config, cache2, progress2,
         false, // no_prior_context = false → inject prior findings
         None,  // unlimited
+        String::new(),
     );
 
     let result_v2 = orch2
@@ -878,6 +883,7 @@ async fn e2e_agentic_mode() {
         diffs,
         baseline,
         repo_root: repo.to_string_lossy().to_string(),
+        is_path_scan: false,
     };
 
     let provider: Arc<dyn ReviewProvider> = Arc::new(
@@ -891,7 +897,7 @@ async fn e2e_agentic_mode() {
     for attempt in 0..3u32 {
         let cache = CacheEngine::new(false);
         let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-        let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None);
+        let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None, String::new());
 
         // agentic=true, max_turns=5, max_tool_calls=10
         let result = orchestrator
