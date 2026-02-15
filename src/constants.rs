@@ -8,6 +8,13 @@
 /// Semantic version from Cargo.toml (patched from the git tag in CI).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Full version string including dev metadata.
+///
+/// For release builds (HEAD tagged `v{VERSION}`) this equals [`VERSION`].
+/// For development builds it appends `-dev+{GIT_SHA}` so that telemetry
+/// and diagnostics can distinguish local builds from released ones.
+pub const FULL_VERSION: &str = env!("FULL_VERSION");
+
 /// Short git commit hash at build time, or `"unknown"`.
 pub const GIT_SHA: &str = env!("GIT_SHA");
 

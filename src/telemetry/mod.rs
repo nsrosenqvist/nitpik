@@ -56,7 +56,7 @@ impl HeartbeatPayload {
             agent_count,
             licensed,
             is_ci: detect_ci(),
-            version: env!("CARGO_PKG_VERSION"),
+            version: crate::constants::FULL_VERSION,
         }
     }
 }
@@ -184,7 +184,7 @@ mod tests {
             agent_count: 2,
             licensed: false,
             is_ci: false,
-            version: "0.1.0",
+            version: crate::constants::FULL_VERSION,
         };
         let json = serde_json::to_value(&payload).expect("serialization should succeed");
         assert_eq!(json["file_count"], 3);
@@ -193,7 +193,7 @@ mod tests {
         assert_eq!(json["licensed"], false);
         assert_eq!(json["is_ci"], false);
         assert_eq!(json["run_id"], "test-run-id");
-        assert_eq!(json["version"], "0.1.0");
+        assert_eq!(json["version"], crate::constants::FULL_VERSION);
     }
 
     #[test]
