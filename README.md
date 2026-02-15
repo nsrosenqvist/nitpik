@@ -155,8 +155,8 @@ nitpik profiles --profile-dir ./agents
 | JSON | `--format json` | Custom tooling / dashboards |
 | GitHub annotations | `--format github` | GitHub Actions |
 | GitLab Code Quality | `--format gitlab` | GitLab CI merge request widgets |
-| Bitbucket Code Insights | `--format bitbucket` | Bitbucket Pipelines |
-| Forgejo/Gitea PR review | `--format forgejo` | Woodpecker CI / Forgejo / Gitea |
+| Bitbucket Code Insights | `--format bitbucket` | Bitbucket Pipelines (requires `BITBUCKET_TOKEN`) |
+| Forgejo/Gitea PR review | `--format forgejo` | Woodpecker CI / Forgejo / Gitea (requires `FORGEJO_TOKEN`) |
 
 Fail a CI build on findings above a threshold:
 
@@ -212,6 +212,8 @@ enabled = false
 | `ANTHROPIC_API_KEY` | Anthropic-specific key |
 | `OPENAI_API_KEY` | OpenAI-specific key (also used for openai-compatible) |
 | `GEMINI_API_KEY` | Gemini-specific key |
+| `BITBUCKET_TOKEN` | Bitbucket access token (required for `--format bitbucket`) |
+| `FORGEJO_TOKEN` | Forgejo/Gitea API token (required for `--format forgejo`) |
 
 nitpik tries to use the provider specific environment variable if it exists, and falls back to `NITPIK_API_KEY`.
 
@@ -400,6 +402,10 @@ Findings appear in the merge request Code Quality widget.
 
 ### Bitbucket Pipelines
 
+The `bitbucket` format posts findings as Code Insights annotations via the Bitbucket API. This requires a **Repository Access Token** (or App Password) with the `pullrequest` and `repository:write` scopes.
+
+Create one under **Repository settings → Access tokens** and add it as a [pipeline variable](https://support.atlassian.com/bitbucket-cloud/docs/variables-and-secrets/) named `BITBUCKET_TOKEN`.
+
 ```yaml
 definitions:
   caches:
@@ -420,9 +426,20 @@ pipelines:
                 --format bitbucket
                 --fail-on error
                 --scan-secrets
+          variables:
+            NITPIK_PROVIDER: anthropic
+            ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+            NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
+            BITBUCKET_TOKEN: $BITBUCKET_TOKEN
 ```
 
+> **Security:** Add `ANTHROPIC_API_KEY`, `NITPIK_LICENSE_KEY`, and `BITBUCKET_TOKEN` as **secured** pipeline variables — never hardcode them in `bitbucket-pipelines.yml`.
+
 ### Woodpecker CI (Forgejo / Gitea / Codeberg)
+
+The `forgejo` format posts findings as inline PR review comments via the Forgejo/Gitea API. This requires a **personal access token** with (at minimum) the **`write:repository`** scope.
+
+Create one under **User settings → Applications → Generate New Token** in your Forgejo or Gitea instance. Add it as a Woodpecker secret named `forgejo_token` so it is exposed as `FORGEJO_TOKEN` at runtime.
 
 ```yaml
 when:
@@ -445,6 +462,8 @@ steps:
     volumes:
       - nitpik-cache:/root/.config/nitpik/cache
 ```
+
+> **Security:** Add `anthropic_api_key`, `nitpik_license_key`, and `forgejo_token` as [Woodpecker secrets](https://woodpecker-ci.org/docs/usage/secrets) — never hardcode them in the pipeline file.
 
 ---
 
