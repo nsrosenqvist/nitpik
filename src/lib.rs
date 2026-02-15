@@ -7,6 +7,7 @@ pub mod cache;
 pub mod config;
 pub mod constants;
 pub mod context;
+pub mod env;
 pub mod diff;
 pub mod license;
 pub mod models;

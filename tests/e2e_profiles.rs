@@ -50,7 +50,7 @@ fn fixtures_dir() -> PathBuf {
 /// Returns `true` if an API key is available, `false` otherwise.
 /// When no key is found the test should return early (skip).
 fn has_api_key() -> bool {
-    let config = Config::load(None).unwrap_or_default();
+    let config = Config::load(None, &nitpik::env::Env::real()).unwrap_or_default();
     if config.provider.api_key.is_none() {
         eprintln!(
             "SKIPPING: no API key found for provider '{}'. \
@@ -145,7 +145,7 @@ fn copy_tree(src: &Path, dst: &Path) {
 
 /// Build a `Config` that uses real credentials from the environment.
 fn real_config() -> Config {
-    Config::load(None).unwrap_or_default()
+    Config::load(None, &nitpik::env::Env::real()).unwrap_or_default()
 }
 
 /// Run the full review pipeline for a given repo and profile name(s).

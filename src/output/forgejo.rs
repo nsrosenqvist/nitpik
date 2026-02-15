@@ -10,6 +10,7 @@
 //! The user only needs to supply `FORGEJO_TOKEN`.
 
 use crate::models::finding::{Finding, Severity};
+use crate::env::Env;
 use crate::output::OutputRenderer;
 use thiserror::Error;
 
@@ -93,8 +94,8 @@ fn format_comment_body(f: &Finding) -> String {
 }
 
 /// Read a required environment variable or return a [`ForgejoError`].
-fn require_env(name: &str) -> Result<String, ForgejoError> {
-    std::env::var(name).map_err(|_| ForgejoError::MissingEnvVar(name.into()))
+fn require_env(env: &Env, name: &str) -> Result<String, ForgejoError> {
+    env.var(name).map_err(|_| ForgejoError::MissingEnvVar(name.into()))
 }
 
 /// Post findings to the Forgejo/Gitea Pull Request Review API.
@@ -112,13 +113,13 @@ fn require_env(name: &str) -> Result<String, ForgejoError> {
 /// | `CI_COMMIT_PULL_REQUEST` | Woodpecker built-in |
 /// | `CI_COMMIT_SHA` | Woodpecker built-in |
 /// | `FORGEJO_TOKEN` | User-provided API token |
-pub async fn post_to_forgejo(findings: &[Finding]) -> Result<(), ForgejoError> {
-    let forge_url = require_env("CI_FORGE_URL")?;
-    let owner = require_env("CI_REPO_OWNER")?;
-    let repo = require_env("CI_REPO_NAME")?;
-    let pr_index_str = require_env("CI_COMMIT_PULL_REQUEST")?;
-    let commit_sha = require_env("CI_COMMIT_SHA")?;
-    let token = require_env("FORGEJO_TOKEN")?;
+pub async fn post_to_forgejo(findings: &[Finding], env: &Env) -> Result<(), ForgejoError> {
+    let forge_url = require_env(env, "CI_FORGE_URL")?;
+    let owner = require_env(env, "CI_REPO_OWNER")?;
+    let repo = require_env(env, "CI_REPO_NAME")?;
+    let pr_index_str = require_env(env, "CI_COMMIT_PULL_REQUEST")?;
+    let commit_sha = require_env(env, "CI_COMMIT_SHA")?;
+    let token = require_env(env, "FORGEJO_TOKEN")?;
 
     let pr_index: u64 = pr_index_str
         .parse()
@@ -195,7 +196,7 @@ pub async fn post_to_forgejo(findings: &[Finding]) -> Result<(), ForgejoError> {
 mod tests {
     use super::*;
     use crate::models::finding::{Finding, Severity};
-    use serial_test::serial;
+    use crate::env::Env;
 
     fn sample_findings() -> Vec<Finding> {
         vec![
@@ -325,35 +326,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn post_missing_env_vars_cascade() {
-        // Guard to clean up env vars even on panic
-        struct ForgejoEnvGuard;
-        impl Drop for ForgejoEnvGuard {
-            fn drop(&mut self) {
-                unsafe {
-                    std::env::remove_var("CI_FORGE_URL");
-                    std::env::remove_var("CI_REPO_OWNER");
-                    std::env::remove_var("CI_REPO_NAME");
-                    std::env::remove_var("CI_COMMIT_PULL_REQUEST");
-                    std::env::remove_var("CI_COMMIT_SHA");
-                    std::env::remove_var("FORGEJO_TOKEN");
-                }
-            }
-        }
-        let _guard = ForgejoEnvGuard;
-
-        unsafe {
-            std::env::remove_var("CI_FORGE_URL");
-            std::env::remove_var("CI_REPO_OWNER");
-            std::env::remove_var("CI_REPO_NAME");
-            std::env::remove_var("CI_COMMIT_PULL_REQUEST");
-            std::env::remove_var("CI_COMMIT_SHA");
-            std::env::remove_var("FORGEJO_TOKEN");
-        }
-
         // Missing CI_FORGE_URL
-        let result = post_to_forgejo(&sample_findings()).await;
+        let env = Env::mock(Vec::<(&str, &str)>::new());
+        let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("CI_FORGE_URL"),
@@ -361,8 +337,8 @@ mod tests {
         );
 
         // Missing CI_REPO_OWNER
-        unsafe { std::env::set_var("CI_FORGE_URL", "https://codeberg.org"); }
-        let result = post_to_forgejo(&sample_findings()).await;
+        let env = Env::mock([("CI_FORGE_URL", "https://codeberg.org")]);
+        let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("CI_REPO_OWNER"),
@@ -370,8 +346,11 @@ mod tests {
         );
 
         // Missing CI_REPO_NAME
-        unsafe { std::env::set_var("CI_REPO_OWNER", "test-user"); }
-        let result = post_to_forgejo(&sample_findings()).await;
+        let env = Env::mock([
+            ("CI_FORGE_URL", "https://codeberg.org"),
+            ("CI_REPO_OWNER", "test-user"),
+        ]);
+        let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("CI_REPO_NAME"),
@@ -379,8 +358,12 @@ mod tests {
         );
 
         // Missing CI_COMMIT_PULL_REQUEST
-        unsafe { std::env::set_var("CI_REPO_NAME", "test-repo"); }
-        let result = post_to_forgejo(&sample_findings()).await;
+        let env = Env::mock([
+            ("CI_FORGE_URL", "https://codeberg.org"),
+            ("CI_REPO_OWNER", "test-user"),
+            ("CI_REPO_NAME", "test-repo"),
+        ]);
+        let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("CI_COMMIT_PULL_REQUEST"),
@@ -388,8 +371,13 @@ mod tests {
         );
 
         // Missing CI_COMMIT_SHA
-        unsafe { std::env::set_var("CI_COMMIT_PULL_REQUEST", "1"); }
-        let result = post_to_forgejo(&sample_findings()).await;
+        let env = Env::mock([
+            ("CI_FORGE_URL", "https://codeberg.org"),
+            ("CI_REPO_OWNER", "test-user"),
+            ("CI_REPO_NAME", "test-repo"),
+            ("CI_COMMIT_PULL_REQUEST", "1"),
+        ]);
+        let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("CI_COMMIT_SHA"),
@@ -397,8 +385,14 @@ mod tests {
         );
 
         // Missing FORGEJO_TOKEN
-        unsafe { std::env::set_var("CI_COMMIT_SHA", "abc123"); }
-        let result = post_to_forgejo(&sample_findings()).await;
+        let env = Env::mock([
+            ("CI_FORGE_URL", "https://codeberg.org"),
+            ("CI_REPO_OWNER", "test-user"),
+            ("CI_REPO_NAME", "test-repo"),
+            ("CI_COMMIT_PULL_REQUEST", "1"),
+            ("CI_COMMIT_SHA", "abc123"),
+        ]);
+        let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("FORGEJO_TOKEN"),
@@ -407,33 +401,17 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn post_invalid_pr_index() {
-        struct ForgejoEnvGuard;
-        impl Drop for ForgejoEnvGuard {
-            fn drop(&mut self) {
-                unsafe {
-                    std::env::remove_var("CI_FORGE_URL");
-                    std::env::remove_var("CI_REPO_OWNER");
-                    std::env::remove_var("CI_REPO_NAME");
-                    std::env::remove_var("CI_COMMIT_PULL_REQUEST");
-                    std::env::remove_var("CI_COMMIT_SHA");
-                    std::env::remove_var("FORGEJO_TOKEN");
-                }
-            }
-        }
-        let _guard = ForgejoEnvGuard;
+        let env = Env::mock([
+            ("CI_FORGE_URL", "https://codeberg.org"),
+            ("CI_REPO_OWNER", "user"),
+            ("CI_REPO_NAME", "repo"),
+            ("CI_COMMIT_PULL_REQUEST", "not-a-number"),
+            ("CI_COMMIT_SHA", "abc123"),
+            ("FORGEJO_TOKEN", "tok"),
+        ]);
 
-        unsafe {
-            std::env::set_var("CI_FORGE_URL", "https://codeberg.org");
-            std::env::set_var("CI_REPO_OWNER", "user");
-            std::env::set_var("CI_REPO_NAME", "repo");
-            std::env::set_var("CI_COMMIT_PULL_REQUEST", "not-a-number");
-            std::env::set_var("CI_COMMIT_SHA", "abc123");
-            std::env::set_var("FORGEJO_TOKEN", "tok");
-        }
-
-        let result = post_to_forgejo(&sample_findings()).await;
+        let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid pull request index"), "got: {err}");

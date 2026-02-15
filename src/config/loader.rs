@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+use crate::env::Env;
 use crate::models::finding::Severity;
 use crate::models::{ProviderName, DEFAULT_PROFILE};
 
@@ -192,7 +193,7 @@ impl Config {
     ///
     /// Reads from global config, repo-local config, then applies
     /// environment variable overrides.
-    pub fn load(repo_root: Option<&Path>) -> Result<Self, ConfigError> {
+    pub fn load(repo_root: Option<&Path>, env: &Env) -> Result<Self, ConfigError> {
         let mut config = Config::default();
 
         // Layer 4: global config
@@ -213,7 +214,7 @@ impl Config {
         }
 
         // Layer 2: environment variables
-        config.apply_env_vars();
+        config.apply_env_vars(env);
 
         Ok(config)
     }
@@ -299,36 +300,36 @@ impl Config {
     }
 
     /// Apply environment variable overrides.
-    fn apply_env_vars(&mut self) {
-        if let Ok(val) = std::env::var(crate::constants::ENV_PROVIDER) {
+    fn apply_env_vars(&mut self, env: &Env) {
+        if let Ok(val) = env.var(crate::constants::ENV_PROVIDER) {
             if let Ok(name) = val.parse::<ProviderName>() {
                 self.provider.name = name;
             } else {
                 eprintln!("Warning: ignoring invalid {} value: {val}", crate::constants::ENV_PROVIDER);
             }
         }
-        if let Ok(val) = std::env::var(crate::constants::ENV_MODEL) {
+        if let Ok(val) = env.var(crate::constants::ENV_MODEL) {
             self.provider.model = val;
         }
-        if let Ok(val) = std::env::var(crate::constants::ENV_BASE_URL) {
+        if let Ok(val) = env.var(crate::constants::ENV_BASE_URL) {
             self.provider.base_url = Some(val);
         }
 
         // Provider-specific API key resolution
-        let api_key = std::env::var(crate::constants::ENV_API_KEY)
-            .or_else(|_| std::env::var(self.provider.name.api_key_env_var()))
+        let api_key = env.var(crate::constants::ENV_API_KEY)
+            .or_else(|_| env.var(self.provider.name.api_key_env_var()))
             .ok();
         if api_key.is_some() {
             self.provider.api_key = api_key;
         }
 
         // License key
-        if let Ok(val) = std::env::var(crate::constants::ENV_LICENSE_KEY) {
+        if let Ok(val) = env.var(crate::constants::ENV_LICENSE_KEY) {
             self.license.key = Some(val);
         }
 
         // Telemetry
-        if let Ok(val) = std::env::var(crate::constants::ENV_TELEMETRY) {
+        if let Ok(val) = env.var(crate::constants::ENV_TELEMETRY) {
             match val.to_lowercase().as_str() {
                 "false" | "0" | "no" | "off" => self.telemetry.enabled = false,
                 "true" | "1" | "yes" | "on" => self.telemetry.enabled = true,
@@ -341,7 +342,6 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     #[test]
     fn default_config() {
@@ -474,9 +474,7 @@ model = "gpt-4o"
 
     #[test]
     fn load_from_repo_root() {
-        // Clean env vars that could interfere
-        clear_nitpik_env_vars();
-        let _guard = EnvGuard;
+        let env = Env::mock(Vec::<(&str, &str)>::new());
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -489,20 +487,18 @@ model = "gpt-4o"
         )
         .unwrap();
 
-        let config = Config::load(Some(dir.path())).unwrap();
+        let config = Config::load(Some(dir.path()), &env).unwrap();
         assert_eq!(config.provider.name, ProviderName::OpenAI);
         assert_eq!(config.provider.model, "gpt-4o");
     }
 
     #[test]
     fn load_without_any_config_files() {
-        // Clean env vars that could interfere
-        clear_nitpik_env_vars();
-        let _guard = EnvGuard;
+        let env = Env::mock(Vec::<(&str, &str)>::new());
 
         let dir = tempfile::tempdir().unwrap();
         // No .nitpik.toml, so we should get defaults
-        let config = Config::load(Some(dir.path())).unwrap();
+        let config = Config::load(Some(dir.path()), &env).unwrap();
         assert_eq!(config.provider.name, ProviderName::Anthropic);
     }
 
@@ -516,104 +512,49 @@ model = "gpt-4o"
         }
     }
 
-    fn clear_nitpik_env_vars() {
-        unsafe {
-            std::env::remove_var("NITPIK_PROVIDER");
-            std::env::remove_var("NITPIK_API_KEY");
-            std::env::remove_var("NITPIK_MODEL");
-            std::env::remove_var("NITPIK_BASE_URL");
-            std::env::remove_var("ANTHROPIC_API_KEY");
-            std::env::remove_var("OPENAI_API_KEY");
-        }
-    }
-
-    /// Guard that cleans up environment variables when dropped.
-    struct EnvGuard;
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            clear_nitpik_env_vars();
-        }
+    #[test]
+    fn apply_env_vars_provider_and_api_key() {
+        let env = Env::mock([
+            ("NITPIK_PROVIDER", "openai"),
+            ("NITPIK_API_KEY", "sk-env-test"),
+        ]);
+        let mut config = Config::default();
+        config.apply_env_vars(&env);
+        assert_eq!(config.provider.name, ProviderName::OpenAI);
+        assert_eq!(config.provider.api_key, Some("sk-env-test".to_string()));
     }
 
     #[test]
-    #[serial]
-    #[ignore] // Mutates process env vars — incompatible with E2E tests that need them
-    fn apply_env_vars_all_scenarios() {
-        // Clean first and use guard for safety on panic
-        clear_nitpik_env_vars();
-        let _guard = EnvGuard;
+    fn apply_env_vars_model_and_base_url() {
+        let env = Env::mock([
+            ("NITPIK_MODEL", "gpt-4-turbo"),
+            ("NITPIK_BASE_URL", "https://custom.api/v1"),
+        ]);
+        let mut config = Config::default();
+        config.apply_env_vars(&env);
+        assert_eq!(config.provider.model, "gpt-4-turbo");
+        assert_eq!(
+            config.provider.base_url,
+            Some("https://custom.api/v1".to_string())
+        );
+    }
 
-        // Run all env var tests sequentially within a single test
-        // to avoid race conditions from parallel test execution.
+    #[test]
+    fn apply_env_vars_invalid_provider_falls_back() {
+        let env = Env::mock([("NITPIK_PROVIDER", "not-a-provider")]);
+        let mut config = Config::default();
+        config.apply_env_vars(&env);
+        assert_eq!(config.provider.name, ProviderName::Anthropic);
+    }
 
-        // Scenario 1: NITPIK_PROVIDER and NITPIK_API_KEY
-        {
-            unsafe {
-                std::env::set_var("NITPIK_PROVIDER", "openai");
-                std::env::set_var("NITPIK_API_KEY", "sk-env-test");
-                std::env::remove_var("NITPIK_MODEL");
-                std::env::remove_var("NITPIK_BASE_URL");
-                std::env::remove_var("ANTHROPIC_API_KEY");
-                std::env::remove_var("OPENAI_API_KEY");
-            }
-            let mut config = Config::default();
-            config.apply_env_vars();
-            assert_eq!(config.provider.name, ProviderName::OpenAI);
-            assert_eq!(config.provider.api_key, Some("sk-env-test".to_string()));
-        }
-
-        // Scenario 2: NITPIK_MODEL and NITPIK_BASE_URL
-        {
-            unsafe {
-                std::env::remove_var("NITPIK_PROVIDER");
-                std::env::remove_var("NITPIK_API_KEY");
-                std::env::set_var("NITPIK_MODEL", "gpt-4-turbo");
-                std::env::set_var("NITPIK_BASE_URL", "https://custom.api/v1");
-                std::env::remove_var("ANTHROPIC_API_KEY");
-                std::env::remove_var("OPENAI_API_KEY");
-            }
-            let mut config = Config::default();
-            config.apply_env_vars();
-            assert_eq!(config.provider.model, "gpt-4-turbo");
-            assert_eq!(
-                config.provider.base_url,
-                Some("https://custom.api/v1".to_string())
-            );
-        }
-
-        // Scenario 3: Invalid NITPIK_PROVIDER falls back to default
-        {
-            unsafe {
-                std::env::set_var("NITPIK_PROVIDER", "not-a-provider");
-                std::env::remove_var("NITPIK_API_KEY");
-                std::env::remove_var("NITPIK_MODEL");
-                std::env::remove_var("NITPIK_BASE_URL");
-                std::env::remove_var("ANTHROPIC_API_KEY");
-                std::env::remove_var("OPENAI_API_KEY");
-            }
-            let mut config = Config::default();
-            config.apply_env_vars();
-            assert_eq!(config.provider.name, ProviderName::Anthropic);
-        }
-
-        // Scenario 4: Provider-specific API key fallback
-        {
-            unsafe {
-                std::env::remove_var("NITPIK_PROVIDER");
-                std::env::remove_var("NITPIK_API_KEY");
-                std::env::remove_var("NITPIK_MODEL");
-                std::env::remove_var("NITPIK_BASE_URL");
-                std::env::remove_var("OPENAI_API_KEY");
-                std::env::set_var("ANTHROPIC_API_KEY", "sk-anthropic-test");
-            }
-            let mut config = Config::default();
-            config.apply_env_vars();
-            assert_eq!(
-                config.provider.api_key,
-                Some("sk-anthropic-test".to_string())
-            );
-        }
-
-        // _guard cleanup happens automatically via Drop
+    #[test]
+    fn apply_env_vars_provider_specific_api_key_fallback() {
+        let env = Env::mock([("ANTHROPIC_API_KEY", "sk-anthropic-test")]);
+        let mut config = Config::default();
+        config.apply_env_vars(&env);
+        assert_eq!(
+            config.provider.api_key,
+            Some("sk-anthropic-test".to_string())
+        );
     }
 }

@@ -3,6 +3,7 @@
 //! Creates reports and annotations via the Bitbucket API using reqwest.
 
 use crate::models::finding::{Finding, Severity, Summary};
+use crate::env::Env;
 use crate::output::OutputRenderer;
 use thiserror::Error;
 
@@ -65,15 +66,16 @@ impl OutputRenderer for BitbucketRenderer {
 pub async fn post_to_bitbucket(
     findings: &[Finding],
     fail_on: Option<Severity>,
+    env: &Env,
 ) -> Result<(), BitbucketError> {
     let workspace =
-        std::env::var("BITBUCKET_WORKSPACE").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_WORKSPACE".into()))?;
+        env.var("BITBUCKET_WORKSPACE").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_WORKSPACE".into()))?;
     let repo_slug =
-        std::env::var("BITBUCKET_REPO_SLUG").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_REPO_SLUG".into()))?;
+        env.var("BITBUCKET_REPO_SLUG").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_REPO_SLUG".into()))?;
     let commit =
-        std::env::var("BITBUCKET_COMMIT").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_COMMIT".into()))?;
+        env.var("BITBUCKET_COMMIT").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_COMMIT".into()))?;
     let token =
-        std::env::var("BITBUCKET_TOKEN").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_TOKEN".into()))?;
+        env.var("BITBUCKET_TOKEN").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_TOKEN".into()))?;
 
     let client = reqwest::Client::new();
     let base_url = format!(
@@ -171,7 +173,7 @@ pub async fn post_to_bitbucket(
 mod tests {
     use super::*;
     use crate::models::finding::{Finding, Severity};
-    use serial_test::serial;
+    use crate::env::Env;
 
     fn sample_findings() -> Vec<Finding> {
         vec![
@@ -272,34 +274,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn post_missing_env_vars_cascade() {
-        // Test all four env var checks in sequence within a single test
-        // to avoid race conditions from parallel test execution.
-
-        // Guard to clean up env vars even on panic
-        struct BitbucketEnvGuard;
-        impl Drop for BitbucketEnvGuard {
-            fn drop(&mut self) {
-                unsafe {
-                    std::env::remove_var("BITBUCKET_WORKSPACE");
-                    std::env::remove_var("BITBUCKET_REPO_SLUG");
-                    std::env::remove_var("BITBUCKET_COMMIT");
-                    std::env::remove_var("BITBUCKET_TOKEN");
-                }
-            }
-        }
-        let _guard = BitbucketEnvGuard;
-
-        unsafe {
-            std::env::remove_var("BITBUCKET_WORKSPACE");
-            std::env::remove_var("BITBUCKET_REPO_SLUG");
-            std::env::remove_var("BITBUCKET_COMMIT");
-            std::env::remove_var("BITBUCKET_TOKEN");
-        }
-
         // Missing BITBUCKET_WORKSPACE
-        let result = post_to_bitbucket(&sample_findings(), None).await;
+        let env = Env::mock(Vec::<(&str, &str)>::new());
+        let result = post_to_bitbucket(&sample_findings(), None, &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("BITBUCKET_WORKSPACE"),
@@ -307,8 +285,8 @@ mod tests {
         );
 
         // Missing BITBUCKET_REPO_SLUG
-        unsafe { std::env::set_var("BITBUCKET_WORKSPACE", "test-ws"); }
-        let result = post_to_bitbucket(&sample_findings(), None).await;
+        let env = Env::mock([("BITBUCKET_WORKSPACE", "test-ws")]);
+        let result = post_to_bitbucket(&sample_findings(), None, &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("BITBUCKET_REPO_SLUG"),
@@ -316,8 +294,11 @@ mod tests {
         );
 
         // Missing BITBUCKET_COMMIT
-        unsafe { std::env::set_var("BITBUCKET_REPO_SLUG", "test-repo"); }
-        let result = post_to_bitbucket(&sample_findings(), None).await;
+        let env = Env::mock([
+            ("BITBUCKET_WORKSPACE", "test-ws"),
+            ("BITBUCKET_REPO_SLUG", "test-repo"),
+        ]);
+        let result = post_to_bitbucket(&sample_findings(), None, &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("BITBUCKET_COMMIT"),
@@ -325,14 +306,16 @@ mod tests {
         );
 
         // Missing BITBUCKET_TOKEN
-        unsafe { std::env::set_var("BITBUCKET_COMMIT", "abc123"); }
-        let result = post_to_bitbucket(&sample_findings(), None).await;
+        let env = Env::mock([
+            ("BITBUCKET_WORKSPACE", "test-ws"),
+            ("BITBUCKET_REPO_SLUG", "test-repo"),
+            ("BITBUCKET_COMMIT", "abc123"),
+        ]);
+        let result = post_to_bitbucket(&sample_findings(), None, &env).await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("BITBUCKET_TOKEN"),
             "expected BITBUCKET_TOKEN error"
         );
-
-        // _guard cleanup happens automatically via Drop
     }
 }

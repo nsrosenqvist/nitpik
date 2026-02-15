@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use super::DiffError;
+use crate::env::Env;
 
 /// Run `git diff <base_ref>` and return the unified diff output.
 pub async fn git_diff(repo_root: &Path, base_ref: &str) -> Result<String, DiffError> {
@@ -37,7 +38,7 @@ pub async fn git_diff(repo_root: &Path, base_ref: &str) -> Result<String, DiffEr
 ///
 /// The result is used to scope sidecar `.meta` files so that parallel
 /// PRs/branches reviewing the same file don't cross-contaminate prior findings.
-pub async fn detect_branch(repo_root: &Path) -> String {
+pub async fn detect_branch(repo_root: &Path, env: &Env) -> String {
     // Try git first
     if let Ok(output) = tokio::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -62,7 +63,7 @@ pub async fn detect_branch(repo_root: &Path) -> String {
         "BITBUCKET_BRANCH",
         "CI_BRANCH",
     ] {
-        if let Ok(val) = std::env::var(var) {
+        if let Ok(val) = env.var(var) {
             let val = val.trim().to_string();
             if !val.is_empty() {
                 return val;
@@ -95,6 +96,7 @@ pub async fn find_repo_root(start_dir: &Path) -> Result<String, DiffError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env::Env;
 
     #[tokio::test]
     async fn git_diff_in_non_git_dir() {
@@ -209,14 +211,14 @@ mod tests {
             .await
             .unwrap();
 
-        let branch = detect_branch(p).await;
+        let branch = detect_branch(p, &Env::real()).await;
         assert_eq!(branch, "test-branch");
     }
 
     #[tokio::test]
     async fn detect_branch_returns_empty_for_non_git_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let branch = detect_branch(dir.path()).await;
+        let branch = detect_branch(dir.path(), &Env::real()).await;
         assert!(branch.is_empty(), "non-git dir should return empty, got: {branch}");
     }
 
@@ -264,10 +266,9 @@ mod tests {
             .await
             .unwrap();
 
-        // Set a CI env var
-        std::env::set_var("GITHUB_HEAD_REF", "pr-42-branch");
-        let branch = detect_branch(p).await;
-        std::env::remove_var("GITHUB_HEAD_REF");
+        // Set a CI env var via mock
+        let env = Env::mock([("GITHUB_HEAD_REF", "pr-42-branch")]);
+        let branch = detect_branch(p, &env).await;
 
         assert_eq!(branch, "pr-42-branch");
     }

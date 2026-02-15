@@ -9,6 +9,7 @@ mod cli;
 mod config;
 mod constants;
 mod context;
+mod env;
 mod diff;
 mod license;
 mod models;
@@ -30,6 +31,7 @@ use clap::Parser;
 
 use cli::args::{CacheAction, Cli, Command, LicenseAction, OutputFormat, UpdateArgs};
 use config::Config;
+use env::Env;
 use models::{Severity, DEFAULT_PROFILE};
 use progress::ProgressTracker;
 use providers::rig::RigProvider;
@@ -236,7 +238,7 @@ async fn run_license(action: LicenseAction) -> Result<()> {
             );
         }
         LicenseAction::Status => {
-            let config = Config::load(None).context("failed to load configuration")?;
+            let config = Config::load(None, &Env::real()).context("failed to load configuration")?;
 
             match config.license.key {
                 Some(ref key) => {
@@ -323,7 +325,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     let repo_root_path = Path::new(&repo_root);
 
     // Load config with layering
-    let config = Config::load(Some(repo_root_path))
+    let config = Config::load(Some(repo_root_path), &Env::real())
         .context("failed to load configuration")?;
 
     // Verify license key (if present)
@@ -458,7 +460,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     );
 
     // Detect branch/PR scope for sidecar isolation
-    let review_scope = diff::git::detect_branch(repo_root_path).await;
+    let review_scope = diff::git::detect_branch(repo_root_path, &Env::real()).await;
 
     // Run orchestrator
     let cache = cache::CacheEngine::new(!no_cache);
@@ -635,16 +637,18 @@ async fn render_and_output(
     let rendered = format.render(findings);
     print!("{rendered}");
 
+    let env = Env::real();
+
     // Bitbucket: also post to API if env vars are set
-    if *format == OutputFormat::Bitbucket && std::env::var("BITBUCKET_WORKSPACE").is_ok() {
-        if let Err(e) = output::bitbucket::post_to_bitbucket(findings, fail_on).await {
+    if *format == OutputFormat::Bitbucket && env.is_set("BITBUCKET_WORKSPACE") {
+        if let Err(e) = output::bitbucket::post_to_bitbucket(findings, fail_on, &env).await {
             eprintln!("Warning: failed to post to Bitbucket: {e}");
         }
     }
 
     // Forgejo/Gitea: post review via API if env vars are set
-    if *format == OutputFormat::Forgejo && std::env::var("CI_FORGE_URL").is_ok() {
-        if let Err(e) = output::forgejo::post_to_forgejo(findings).await {
+    if *format == OutputFormat::Forgejo && env.is_set("CI_FORGE_URL") {
+        if let Err(e) = output::forgejo::post_to_forgejo(findings, &env).await {
             eprintln!("Warning: failed to post to Forgejo: {e}");
         }
     }

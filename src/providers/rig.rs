@@ -427,6 +427,10 @@ fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderError
     )))
 }
 
+/// Regex for extracting content inside markdown code fences.
+static FENCE_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)```(?:json)?\s*\n(.*?)```").unwrap());
+
 /// Extract candidate JSON strings from a response.
 ///
 /// Returns the trimmed response itself plus any content inside markdown
@@ -438,8 +442,7 @@ fn extract_json_candidates(text: &str) -> Vec<String> {
     candidates.push(text.to_string());
 
     // Extract content from markdown code fences
-    let fence_re = regex::Regex::new(r"(?s)```(?:json)?\s*\n(.*?)```").unwrap();
-    for cap in fence_re.captures_iter(text) {
+    for cap in FENCE_RE.captures_iter(text) {
         if let Some(inner) = cap.get(1) {
             let inner_trimmed = inner.as_str().trim();
             if !inner_trimmed.is_empty() {
