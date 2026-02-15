@@ -51,7 +51,7 @@ impl OutputRenderer for ForgejoRenderer {
 
         let summary = crate::models::finding::Summary::from_findings(findings);
         let body = format!(
-            "**{}** found {} {} ({} error{}, {} warning{}, {} info)",
+            "**{}** found {} {} ({} error{}, {} warning{}, {} info)\n\n_{}_",
             crate::constants::APP_NAME,
             summary.total,
             if summary.total == 1 { "finding" } else { "findings" },
@@ -60,6 +60,7 @@ impl OutputRenderer for ForgejoRenderer {
             summary.warnings,
             if summary.warnings == 1 { "" } else { "s" },
             summary.info,
+            crate::constants::AI_DISCLOSURE,
         );
 
         let review = serde_json::json!({
@@ -139,7 +140,7 @@ pub async fn post_to_forgejo(findings: &[Finding]) -> Result<(), ForgejoError> {
 
     let summary = crate::models::finding::Summary::from_findings(findings);
     let review_body = format!(
-        "**{}** found {} {} ({} error{}, {} warning{}, {} info)",
+        "**{}** found {} {} ({} error{}, {} warning{}, {} info)\n\n_{}_",
         crate::constants::APP_NAME,
         summary.total,
         if summary.total == 1 { "finding" } else { "findings" },
@@ -148,6 +149,7 @@ pub async fn post_to_forgejo(findings: &[Finding]) -> Result<(), ForgejoError> {
         summary.warnings,
         if summary.warnings == 1 { "" } else { "s" },
         summary.info,
+        crate::constants::AI_DISCLOSURE,
     );
 
     let review_payload = serde_json::json!({

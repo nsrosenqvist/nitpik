@@ -84,6 +84,10 @@ impl OutputRenderer for TerminalRenderer {
             summary.info.to_string().blue().bold(),
             if summary.info == 1 { "info" } else { "infos" },
         ));
+        output.push_str(&format!(
+            " {}\n",
+            crate::constants::AI_DISCLOSURE.dimmed()
+        ));
 
         output
     }

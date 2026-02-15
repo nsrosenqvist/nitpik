@@ -15,6 +15,10 @@ impl OutputRenderer for JsonRenderer {
         let output = serde_json::json!({
             "findings": findings,
             "summary": summary,
+            "meta": {
+                "notice": crate::constants::AI_DISCLOSURE,
+                "tool": crate::constants::APP_NAME,
+            },
         });
 
         serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())

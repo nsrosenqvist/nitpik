@@ -89,8 +89,11 @@ pub async fn post_to_bitbucket(
 
     let report_body = serde_json::json!({
         "title": format!("{} Code Review", crate::constants::APP_NAME),
-        "details": format!("{} findings: {} errors, {} warnings, {} info",
-            summary.total, summary.errors, summary.warnings, summary.info),
+        "details": format!(
+            "{} findings: {} errors, {} warnings, {} info. {}",
+            summary.total, summary.errors, summary.warnings, summary.info,
+            crate::constants::AI_DISCLOSURE,
+        ),
         "report_type": "BUG",
         "result": result,
     });

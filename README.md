@@ -326,6 +326,8 @@ jobs:
 
 The action auto-detects the PR target branch, downloads the binary, and outputs findings as inline annotations.
 
+> **Security:** Always pass API keys via `${{ secrets.* }}` — never hardcode them in workflow files.
+
 <details>
 <summary>Manual setup (without the action)</summary>
 
@@ -484,9 +486,29 @@ Disable caching for a single run with `--no-cache`.
 
 ---
 
+## Limitations & Disclaimer
+
+nitpik uses third-party large language models (LLMs) to analyse code. **All findings are AI-generated and advisory.** They may be incorrect, incomplete, or hallucinated. nitpik does not guarantee code quality, security, or correctness.
+
+- **Always review AI suggestions with human judgment** before acting on them.
+- **Code diffs are sent to your configured LLM provider** (e.g. Anthropic, OpenAI, Gemini). nitpik does not store or retain your code, but the LLM provider's data policies apply. Choose a provider whose terms you trust.
+- **Enable `--scan-secrets`** to detect and redact secrets before code is sent to the LLM. Without this flag, secrets present in your diffs will be transmitted to the provider.
+- nitpik is a development aid, not a replacement for human code review, testing, or security auditing.
+
+---
+
 ## Telemetry
 
 nitpik sends a single anonymous heartbeat per review run — **no code, file names, findings, or PII**. Just aggregate counts (files, lines, profiles) and whether you're in CI. You can verify exactly what is sent by reading [`src/telemetry/mod.rs`](src/telemetry/mod.rs).
+
+The heartbeat payload contains only:
+
+- A random run ID (not persisted across runs)
+- File count and total changed lines
+- Number of agent profiles used
+- Whether a commercial license is active
+- Whether the run is in a CI environment
+- CLI version string
 
 Disable it:
 
@@ -561,6 +583,12 @@ nitpik help cache        # cache management
 nitpik help update       # self-update
 nitpik version           # version, commit, build date, target
 ```
+
+---
+
+## Feedback & Issues
+
+Found a bug, false positive, or harmful AI output? Please [open an issue](https://github.com/nsrosenqvist/nitpik/issues) on GitHub. Feedback helps improve nitpik for everyone.
 
 ---
 
