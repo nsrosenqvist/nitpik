@@ -2,6 +2,10 @@
 //!
 //! Caches review results to skip redundant LLM calls when
 //! the same file+agent+model combination is reviewed again.
+//!
+//! A sidecar `.meta` file per file×agent×model triple tracks the
+//! most recent cache key so that prior findings can be retrieved
+//! after a content change invalidates the cache.
 
 pub mod store;
 
@@ -49,6 +53,39 @@ impl CacheEngine {
         self.store.put(key, findings);
     }
 
+    /// Write the sidecar that maps a file×agent×model triple to its
+    /// latest content-hash cache key.
+    pub fn put_sidecar(
+        &self,
+        file_path: &str,
+        agent_name: &str,
+        model: &str,
+        cache_key: &str,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        self.store.put_sidecar(file_path, agent_name, model, cache_key);
+    }
+
+    /// Retrieve findings from the *previous* review of a file×agent×model
+    /// triple, if the cache key has changed (content invalidation).
+    ///
+    /// Returns `None` when caching is disabled, on first run, or when
+    /// the cache key hasn't changed (pure hit).
+    pub fn get_previous(
+        &self,
+        file_path: &str,
+        agent_name: &str,
+        model: &str,
+        current_cache_key: &str,
+    ) -> Option<Vec<Finding>> {
+        if !self.enabled {
+            return None;
+        }
+        self.store.get_previous(file_path, agent_name, model, current_cache_key)
+    }
+
     /// Remove all cached entries.
     pub fn clear(&self) -> Result<store::CacheStats, std::io::Error> {
         self.store.clear()
@@ -88,5 +125,19 @@ mod tests {
         let k1 = cache_key("content", "agent1", "model");
         let k2 = cache_key("content", "agent2", "model");
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn get_previous_returns_none_when_disabled() {
+        // CacheEngine with enabled=false should never return prior findings
+        let engine = CacheEngine::new(false);
+        assert!(engine.get_previous("f.rs", "backend", "model", "key").is_none());
+    }
+
+    #[test]
+    fn put_sidecar_noop_when_disabled() {
+        // Should not panic or write anything when disabled
+        let engine = CacheEngine::new(false);
+        engine.put_sidecar("f.rs", "backend", "model", "key");
     }
 }

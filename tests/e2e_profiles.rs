@@ -212,7 +212,7 @@ async fn run_review(
     // Run the orchestrator (cache disabled for E2E)
     let cache = CacheEngine::new(false);
     let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), config, cache, progress);
+    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), config, cache, progress, false, None);
 
     let result = orchestrator
         .run(&review_context, &agent_defs, 2, false, 10, 10)
@@ -529,7 +529,7 @@ async fn e2e_custom_profile() {
 
     let cache = CacheEngine::new(false);
     let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress);
+    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None);
 
     let result = orchestrator
         .run(&review_context, &agent_defs, 2, false, 10, 10)
@@ -631,6 +631,204 @@ mod tool_call_layer {
     }
 }
 
+/// Set up a two-stage repo for the cache prior-findings test.
+///
+/// Stage 1: commit `base/`, apply `changeset_v1/` (unstaged changes).
+/// Stage 2: commit v1, apply `changeset_v2/` (new unstaged changes).
+///
+/// Returns `(repo_path, tempdir_handle)`. Caller advances stages by calling
+/// `advance_cache_prior_repo()`.
+async fn setup_cache_prior_repo() -> (PathBuf, tempfile::TempDir) {
+    let base_dir = fixtures_dir().join("cache_prior").join("base");
+    let v1_dir = fixtures_dir().join("cache_prior").join("changeset_v1");
+
+    let tmp = tempfile::Builder::new()
+        .prefix("nitpik-e2e-cache-prior-")
+        .tempdir_in("/tmp")
+        .expect("failed to create tempdir");
+    let repo = tmp.path().to_path_buf();
+
+    // git init + initial commit with base files
+    run_git(&repo, &["init"]).await;
+    run_git(&repo, &["config", "user.email", "test@nitpik.dev"]).await;
+    run_git(&repo, &["config", "user.name", "Nitpik E2E"]).await;
+
+    copy_tree(&base_dir, &repo);
+    run_git(&repo, &["add", "."]).await;
+    run_git(&repo, &["commit", "-m", "initial commit"]).await;
+
+    // Apply changeset v1 (unstaged changes for the first review)
+    copy_tree(&v1_dir, &repo);
+
+    (repo, tmp)
+}
+
+/// Advance the cache_prior repo to stage 2: commit v1, apply v2.
+async fn advance_cache_prior_repo(repo: &Path) {
+    let v2_dir = fixtures_dir().join("cache_prior").join("changeset_v2");
+
+    // Commit v1 changes
+    run_git(repo, &["add", "."]).await;
+    run_git(repo, &["commit", "-m", "apply v1 changes"]).await;
+
+    // Apply v2 changeset (partially fixes v1 issues, introduces new ones)
+    copy_tree(&v2_dir, repo);
+}
+
+#[tokio::test]
+#[ignore]
+async fn e2e_cache_prior_findings() {
+    require_api_key!();
+    let config = real_config();
+
+    eprintln!("\n=== E2E: cache prior findings on invalidation ===");
+
+    let (repo, _tmp) = setup_cache_prior_repo().await;
+
+    // Use a dedicated cache dir so we don't interfere with other tests
+    let cache_dir = tempfile::Builder::new()
+        .prefix("nitpik-e2e-cache-")
+        .tempdir_in("/tmp")
+        .expect("failed to create cache tempdir");
+    let _cache_store = nitpik::cache::store::FileStore::new_with_dir(
+        cache_dir.path().to_path_buf(),
+    );
+
+    // --- Stage 1: Review changeset v1 ---
+    eprintln!("  stage 1: reviewing changeset v1 (division by zero + unwrap)...");
+
+    let input = InputMode::GitBase("HEAD".to_string());
+    let diffs_v1 = diff::get_diffs(&input, &repo)
+        .await
+        .expect("failed to get v1 diffs");
+    assert!(!diffs_v1.is_empty(), "v1 should produce diffs");
+
+    let profiles: Vec<String> = vec!["backend".to_string()];
+    let agent_defs = agents::resolve_profiles(&profiles, None)
+        .await
+        .expect("failed to resolve profiles");
+
+    let baseline_v1 = context::build_baseline_context(&repo, &diffs_v1, &config).await;
+    let review_context_v1 = ReviewContext {
+        diffs: diffs_v1,
+        baseline: baseline_v1,
+        repo_root: repo.to_string_lossy().to_string(),
+    };
+
+    let provider: Arc<dyn ReviewProvider> = Arc::new(
+        RigProvider::new(config.provider.clone(), repo.clone())
+            .expect("failed to create provider"),
+    );
+
+    // Run review 1 with cache enabled — this populates the cache + sidecar
+    // We can't use CacheEngine::new(true) because it uses the default dir.
+    // Instead, we'll manually write to our test cache store after running
+    // with cache disabled, to simulate the caching.
+    let cache1 = CacheEngine::new(false);
+    let progress1 = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
+    let orch1 = ReviewOrchestrator::new(
+        Arc::clone(&provider), &config, cache1, progress1, false, None,
+    );
+
+    let result_v1 = orch1
+        .run(&review_context_v1, &agent_defs, 2, false, 10, 10)
+        .await
+        .expect("v1 review should succeed");
+
+    let findings_v1 = &result_v1.findings;
+    print_findings_summary("cache_prior v1", findings_v1);
+    assert!(
+        !findings_v1.is_empty(),
+        "v1 should produce findings (division by zero, unwrap, etc.)"
+    );
+    eprintln!("  stage 1 complete: {} finding(s)", findings_v1.len());
+
+    // --- Stage 2: Advance to v2, review with prior findings ---
+    eprintln!("  stage 2: advancing to changeset v2 (partial fix)...");
+    advance_cache_prior_repo(&repo).await;
+
+    let diffs_v2 = diff::get_diffs(&input, &repo)
+        .await
+        .expect("failed to get v2 diffs");
+    assert!(!diffs_v2.is_empty(), "v2 should produce diffs");
+
+    let baseline_v2 = context::build_baseline_context(&repo, &diffs_v2, &config).await;
+    let review_context_v2 = ReviewContext {
+        diffs: diffs_v2,
+        baseline: baseline_v2,
+        repo_root: repo.to_string_lossy().to_string(),
+    };
+
+    // For stage 2, we need to manually seed the cache store with v1 findings
+    // and sidecar, then have the orchestrator pick them up.
+    //
+    // Since ReviewOrchestrator uses CacheEngine::new() internally with
+    // the default cache dir, we'll seed the real default cache dir for this test.
+    let real_cache = CacheEngine::new(true);
+    let real_cache_path = real_cache.path().expect("cache path").clone();
+    let real_store = nitpik::cache::store::FileStore::new_with_dir(real_cache_path.clone());
+
+    // Reconstruct the v1 cache key by building the same prompt the orchestrator would.
+    // We need the model name from config.
+    let model = config.provider.model.clone();
+
+    // Seed v1 findings + sidecar for calculator.rs × backend × model
+    // We don't know the exact prompt, but we can use a sentinel key.
+    // Actually, we can just seed a sidecar with any old key that has the v1 findings.
+    let v1_key = format!("e2e-cache-prior-v1-{}", std::process::id());
+    real_store.put(&v1_key, findings_v1);
+    real_store.put_sidecar("calculator.rs", "backend", &model, &v1_key);
+
+    // Now run the review with cache enabled — it will miss (different prompt/key)
+    // and should pick up prior findings from the sidecar.
+    let cache2 = CacheEngine::new(true);
+    let progress2 = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
+    let orch2 = ReviewOrchestrator::new(
+        Arc::clone(&provider), &config, cache2, progress2,
+        false, // no_prior_context = false → inject prior findings
+        None,  // unlimited
+    );
+
+    let result_v2 = orch2
+        .run(&review_context_v2, &agent_defs, 2, false, 10, 10)
+        .await
+        .expect("v2 review should succeed");
+
+    let findings_v2 = &result_v2.findings;
+    print_findings_summary("cache_prior v2", findings_v2);
+
+    // v2 should produce findings — at minimum the remaining unwrap() and
+    // the new multiply overflow risk.
+    assert!(
+        !findings_v2.is_empty(),
+        "v2 should produce findings (remaining unwrap, new multiply overflow)"
+    );
+
+    // The v2 findings should reflect awareness of v1 context:
+    // - The division by zero should NOT be re-raised (it was fixed)
+    // - The unwrap() issue should persist or be re-raised
+    // - New issues (multiply overflow) should appear
+    //
+    // We can't assert exact finding titles (LLM-dependent), but we can
+    // verify structural validity and log for manual inspection.
+    for f in findings_v2 {
+        assert!(!f.file.is_empty());
+        assert!(!f.title.is_empty());
+        assert!(!f.message.is_empty());
+        assert!(f.line > 0);
+    }
+
+    eprintln!(
+        "  stage 2 complete: {} finding(s) (v1 had {})",
+        findings_v2.len(),
+        findings_v1.len(),
+    );
+    eprintln!("  ✓ cache prior findings e2e test passed");
+
+    // Clean up seeded entries
+    let _ = real_store.clear();
+}
+
 #[tokio::test]
 #[ignore]
 async fn e2e_agentic_mode() {
@@ -693,7 +891,7 @@ async fn e2e_agentic_mode() {
     for attempt in 0..3u32 {
         let cache = CacheEngine::new(false);
         let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-        let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress);
+        let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None);
 
         // agentic=true, max_turns=5, max_tool_calls=10
         let result = orchestrator

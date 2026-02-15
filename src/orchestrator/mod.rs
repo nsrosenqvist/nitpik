@@ -44,6 +44,10 @@ pub struct ReviewOrchestrator {
     config: Config,
     cache: Arc<CacheEngine>,
     progress: Arc<ProgressTracker>,
+    /// When `true`, skip injecting prior findings into the prompt.
+    no_prior_context: bool,
+    /// Optional cap on how many prior findings are included.
+    max_prior_findings: Option<usize>,
 }
 
 impl ReviewOrchestrator {
@@ -53,12 +57,16 @@ impl ReviewOrchestrator {
         config: &Config,
         cache: CacheEngine,
         progress: Arc<ProgressTracker>,
+        no_prior_context: bool,
+        max_prior_findings: Option<usize>,
     ) -> Self {
         Self {
             provider,
             config: config.clone(),
             cache: Arc::new(cache),
             progress,
+            no_prior_context,
+            max_prior_findings,
         }
     }
 
@@ -99,24 +107,56 @@ impl ReviewOrchestrator {
                     let cache = Arc::clone(&self.cache);
                     let progress = Arc::clone(&self.progress);
                     let agent = agent.clone();
+                    let no_prior_context = self.no_prior_context;
+                    let max_prior_findings = self.max_prior_findings;
                     let model = agent
                         .profile
                         .model
                         .as_deref()
                         .unwrap_or(&self.config.provider.model)
                         .to_string();
-                    let prompt = build_prompt(&chunk, context, &agent);
                     let file_path = chunk.path().to_string();
 
-                    // Compute content for cache key from the prompt (deterministic)
-                    let cache_key = cache::cache_key(&prompt, &agent.profile.name, &model);
+                    // Build the base prompt (without prior findings —
+                    // they are injected below only on cache miss).
+                    let base_prompt = build_prompt(&chunk, context, &agent, None);
+
+                    // Compute content for cache key from the base prompt (deterministic)
+                    let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
 
                     join_set.spawn(async move {
                         // Check cache first
                         if let Some(cached) = cache.get(&cache_key) {
+                            // Sidecar stays current — write it in case
+                            // this is the first run with sidecar support.
+                            cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key);
                             progress.update(&file_path, TaskStatus::Done);
                             return (cached, false);
                         }
+
+                        // Cache miss — look up prior findings from the
+                        // previous (now-invalidated) cache entry.
+                        let prompt = if no_prior_context {
+                            base_prompt
+                        } else {
+                            let prior = cache.get_previous(
+                                &file_path,
+                                &agent.profile.name,
+                                &model,
+                                &cache_key,
+                            );
+                            match prior {
+                                Some(mut findings) if !findings.is_empty() => {
+                                    // Sort by severity (errors first) before capping
+                                    findings.sort_by(|a, b| b.severity.cmp(&a.severity));
+                                    if let Some(cap) = max_prior_findings {
+                                        findings.truncate(cap);
+                                    }
+                                    build_prompt_with_prior(&base_prompt, &findings)
+                                }
+                                _ => base_prompt,
+                            }
+                        };
 
                         progress.update(&file_path, TaskStatus::InProgress);
                         let _permit = sem.acquire().await.expect("semaphore closed");
@@ -127,6 +167,7 @@ impl ReviewOrchestrator {
                             match provider.review(&agent, &prompt, agentic, max_turns, max_tool_calls).await {
                                 Ok(findings) => {
                                     cache.put(&cache_key, &findings);
+                                    cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key);
                                     progress.update(&file_path, TaskStatus::Done);
                                     return (findings, false);
                                 }
@@ -208,6 +249,7 @@ fn build_prompt(
     diff: &FileDiff,
     context: &ReviewContext,
     agent: &AgentDefinition,
+    previous_findings: Option<&[Finding]>,
 ) -> String {
     let mut prompt = String::new();
 
@@ -252,6 +294,13 @@ fn build_prompt(
     }
     prompt.push_str("```\n\n");
 
+    // Previous findings (if any)
+    if let Some(findings) = previous_findings {
+        if !findings.is_empty() {
+            prompt.push_str(&format_prior_findings_section(findings));
+        }
+    }
+
     // Instructions
     prompt.push_str(&format!(
         "## Instructions\n\n\
@@ -275,6 +324,37 @@ fn build_prompt(
     ));
 
     prompt
+}
+
+/// Append the prior-findings section to an already-built base prompt.
+///
+/// This is used on cache miss when prior findings are available,
+/// so the cache key (computed from the base prompt) stays stable.
+fn build_prompt_with_prior(base_prompt: &str, findings: &[Finding]) -> String {
+    let mut prompt = base_prompt.to_string();
+    // Insert the prior findings section just before the "## Instructions" header
+    if let Some(pos) = prompt.find("## Instructions") {
+        prompt.insert_str(pos, &format_prior_findings_section(findings));
+    } else {
+        // Fallback: append at the end
+        prompt.push_str(&format_prior_findings_section(findings));
+    }
+    prompt
+}
+
+/// Format the "Previous Review Findings" prompt section.
+fn format_prior_findings_section(findings: &[Finding]) -> String {
+    let json = serde_json::to_string_pretty(findings).unwrap_or_else(|_| "[]".to_string());
+    format!(
+        "## Previous Review Findings\n\n\
+        The following findings were reported in a previous review of this file. \
+        The file has changed since then.\n\n\
+        - **Re-raise** any findings that still apply to the current diff.\n\
+        - **Drop** any findings that have been resolved by the changes.\n\
+        - **Add** any genuinely new issues introduced by the current changes.\n\
+        - Do **not** duplicate previous findings that are unchanged.\n\n\
+        ```json\n{json}\n```\n\n"
+    )
 }
 
 #[cfg(test)]
@@ -313,9 +393,139 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent);
+        let prompt = build_prompt(&diff, &context, &agent, None);
         assert!(prompt.contains("+let x = 1;"));
         assert!(prompt.contains("test.rs"));
         assert!(prompt.contains("backend"));
+    }
+
+    #[test]
+    fn build_prompt_includes_prior_findings() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let prior = vec![Finding {
+            file: "test.rs".into(),
+            line: 1,
+            end_line: None,
+            severity: crate::models::finding::Severity::Warning,
+            title: "Old issue".into(),
+            message: "This was found before".into(),
+            suggestion: None,
+            agent: "backend".into(),
+        }];
+
+        let prompt = build_prompt(&diff, &context, &agent, Some(&prior));
+        assert!(prompt.contains("Previous Review Findings"));
+        assert!(prompt.contains("Old issue"));
+        assert!(prompt.contains("Re-raise"));
+    }
+
+    #[test]
+    fn build_prompt_excludes_prior_when_none() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(&diff, &context, &agent, None);
+        assert!(!prompt.contains("Previous Review Findings"));
+    }
+
+    #[test]
+    fn build_prompt_with_prior_injects_before_instructions() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let prior = vec![Finding {
+            file: "test.rs".into(),
+            line: 5,
+            end_line: None,
+            severity: crate::models::finding::Severity::Error,
+            title: "Critical bug".into(),
+            message: "Needs fixing".into(),
+            suggestion: None,
+            agent: "backend".into(),
+        }];
+
+        let base = build_prompt(&diff, &context, &agent, None);
+        let with_prior = build_prompt_with_prior(&base, &prior);
+
+        // Prior findings section should appear before Instructions
+        let prior_pos = with_prior.find("Previous Review Findings").unwrap();
+        let instr_pos = with_prior.find("## Instructions").unwrap();
+        assert!(prior_pos < instr_pos);
+        assert!(with_prior.contains("Critical bug"));
     }
 }

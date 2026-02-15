@@ -175,6 +175,14 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub no_cache: bool,
 
+    /// Disable injection of prior review findings into the prompt on cache invalidation.
+    #[arg(long, default_value_t = false)]
+    pub no_prior_context: bool,
+
+    /// Maximum number of prior findings to include in the prompt (unlimited by default).
+    #[arg(long)]
+    pub max_prior_findings: Option<usize>,
+
     /// Disable live progress output (useful for CI or piped output).
     #[arg(long, default_value_t = false)]
     pub no_progress: bool,
@@ -281,6 +289,8 @@ mod tests {
             secrets_rules: None,
             max_concurrent: 5,
             no_cache: false,
+            no_prior_context: false,
+            max_prior_findings: None,
             no_progress: false,
         }
     }

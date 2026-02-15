@@ -463,6 +463,8 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         &config,
         cache,
         Arc::clone(&progress),
+        args.no_prior_context,
+        args.max_prior_findings,
     );
 
     let review_result = orchestrator

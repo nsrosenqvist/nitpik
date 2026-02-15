@@ -476,13 +476,23 @@ nitpik review --diff-base main --scan-secrets --secrets-rules ./custom-rules.tom
 
 nitpik caches review results by content hash. Unchanged files are not re-reviewed, saving time and API cost.
 
+When a file changes and the cache is invalidated, nitpik automatically includes the **previous findings** in the LLM prompt. This lets the model distinguish resolved issues from persistent or new ones, improving consistency across successive reviews of the same file.
+
+Previous findings are sorted by severity (errors first) before being injected, so the most important context is always preserved.
+
 ```bash
 nitpik cache stats   # show entry count and size
 nitpik cache clear   # wipe the cache
 nitpik cache path    # print the cache directory
 ```
 
-Disable caching for a single run with `--no-cache`.
+| Flag | Default | Effect |
+|---|---|---|
+| `--no-cache` | `false` | Disable caching entirely for this run |
+| `--no-prior-context` | `false` | Skip injecting previous findings on cache invalidation |
+| `--max-prior-findings <N>` | unlimited | Cap the number of prior findings included in the prompt |
+
+Disable caching for a single run with `--no-cache`. Use `--no-prior-context` for a clean-slate review without prior-finding context, or `--max-prior-findings` to limit prompt token usage when prior reviews produced many findings.
 
 ---
 

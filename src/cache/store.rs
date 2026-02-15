@@ -1,8 +1,13 @@
 //! Filesystem-based cache store.
 //!
 //! Stores cached results as JSON files in `~/.config/nitpik/cache/`.
+//! Each entry also writes a sidecar `.meta` file keyed by
+//! `(file_path, agent_name, model)` so that prior findings can be
+//! retrieved after a cache key changes (content invalidation).
 
 use std::path::PathBuf;
+
+use sha2::{Digest, Sha256};
 
 use crate::models::finding::Finding;
 
@@ -89,9 +94,18 @@ impl FileStore {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
-                entries += 1;
-                total_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let ext = path.extension().and_then(|e| e.to_str());
+            match ext {
+                Some("json") => {
+                    entries += 1;
+                    total_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                }
+                Some("meta") => {
+                    // Sidecar files are not counted as cache entries
+                    // but their size is included in the total.
+                    total_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                }
+                _ => {}
             }
         }
 
@@ -106,10 +120,82 @@ impl FileStore {
         self.cache_dir.as_ref()
     }
 
+    /// Retrieve the previous findings for a file×agent×model triple.
+    ///
+    /// Returns `Some(findings)` when the sidecar exists, references a
+    /// *different* cache key than `current_cache_key`, and the old entry
+    /// is still readable. Returns `None` on first run, cache hit
+    /// (keys match), or any I/O / deserialisation error.
+    pub fn get_previous(
+        &self,
+        file_path: &str,
+        agent_name: &str,
+        model: &str,
+        current_cache_key: &str,
+    ) -> Option<Vec<Finding>> {
+        let sidecar = self.sidecar_path(file_path, agent_name, model)?;
+        if !sidecar.exists() {
+            return None;
+        }
+        let previous_key = std::fs::read_to_string(&sidecar).ok()?;
+        let previous_key = previous_key.trim();
+        if previous_key == current_cache_key || previous_key.is_empty() {
+            return None;
+        }
+        // Read the old cache entry
+        self.get(previous_key)
+    }
+
+    /// Write (or overwrite) the sidecar that maps a file×agent×model
+    /// triple to the latest content-hash cache key.
+    pub fn put_sidecar(
+        &self,
+        file_path: &str,
+        agent_name: &str,
+        model: &str,
+        cache_key: &str,
+    ) {
+        let Some(sidecar) = self.sidecar_path(file_path, agent_name, model) else {
+            return;
+        };
+        if let Some(parent) = sidecar.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&sidecar, cache_key);
+    }
+
     /// Get the file path for a cache key.
     fn key_path(&self, key: &str) -> Option<PathBuf> {
         self.cache_dir.as_ref().map(|dir| dir.join(format!("{key}.json")))
     }
+
+    /// Compute the sidecar `.meta` path for a file×agent×model triple.
+    fn sidecar_path(
+        &self,
+        file_path: &str,
+        agent_name: &str,
+        model: &str,
+    ) -> Option<PathBuf> {
+        self.cache_dir.as_ref().map(|dir| {
+            let lookup_key = lookup_key(file_path, agent_name, model);
+            dir.join(format!("{lookup_key}.meta"))
+        })
+    }
+}
+
+/// Compute a stable lookup key from a file×agent×model triple.
+///
+/// This is separate from the content-hash cache key — it identifies
+/// *which* file×agent×model combination the sidecar tracks, regardless
+/// of the prompt content that went into the review.
+pub fn lookup_key(file_path: &str, agent_name: &str, model: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(file_path.as_bytes());
+    hasher.update(b"|");
+    hasher.update(agent_name.as_bytes());
+    hasher.update(b"|");
+    hasher.update(model.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 /// Statistics about the cache.
@@ -259,5 +345,108 @@ mod tests {
     fn human_size_mib() {
         let stats = CacheStats { entries: 1, total_bytes: 2 * 1024 * 1024 };
         assert_eq!(stats.human_size(), "2.0 MiB");
+    }
+
+    // ── Sidecar / prior-findings tests ──────────────────────────────
+
+    #[test]
+    fn get_previous_returns_none_on_first_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+        assert!(store.get_previous("file.rs", "backend", "model-v1", "key-abc").is_none());
+    }
+
+    #[test]
+    fn get_previous_returns_none_when_key_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+        store.put("key-abc", &sample_findings());
+        store.put_sidecar("file.rs", "backend", "model-v1", "key-abc");
+
+        // Same cache key → cache hit, no prior needed
+        assert!(store.get_previous("file.rs", "backend", "model-v1", "key-abc").is_none());
+    }
+
+    #[test]
+    fn get_previous_returns_old_findings_after_invalidation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+
+        // First run: store findings + sidecar
+        let old_findings = sample_findings();
+        store.put("key-old", &old_findings);
+        store.put_sidecar("file.rs", "backend", "model-v1", "key-old");
+
+        // Second run: file changed → new cache key
+        let prior = store.get_previous("file.rs", "backend", "model-v1", "key-new");
+        assert!(prior.is_some());
+        let prior = prior.unwrap();
+        assert_eq!(prior.len(), 1);
+        assert_eq!(prior[0].file, "test.rs");
+    }
+
+    #[test]
+    fn put_sidecar_overwrites_previous() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+
+        store.put("key-v1", &sample_findings());
+        store.put_sidecar("file.rs", "backend", "model", "key-v1");
+
+        // Overwrite sidecar with new key
+        store.put("key-v2", &[]);
+        store.put_sidecar("file.rs", "backend", "model", "key-v2");
+
+        // Now prior should point to key-v2, not key-v1
+        // Asking with key-v3 should return key-v2's findings (empty vec)
+        let prior = store.get_previous("file.rs", "backend", "model", "key-v3");
+        assert!(prior.is_some());
+        assert!(prior.unwrap().is_empty());
+    }
+
+    #[test]
+    fn lookup_key_is_deterministic() {
+        let k1 = lookup_key("file.rs", "backend", "model");
+        let k2 = lookup_key("file.rs", "backend", "model");
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn lookup_key_varies_with_inputs() {
+        let k1 = lookup_key("a.rs", "backend", "model");
+        let k2 = lookup_key("b.rs", "backend", "model");
+        let k3 = lookup_key("a.rs", "frontend", "model");
+        let k4 = lookup_key("a.rs", "backend", "other-model");
+        assert_ne!(k1, k2);
+        assert_ne!(k1, k3);
+        assert_ne!(k1, k4);
+    }
+
+    #[test]
+    fn stats_excludes_meta_from_entry_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+        store.put("key1", &sample_findings());
+        store.put_sidecar("file.rs", "backend", "model", "key1");
+
+        let stats = store.stats().unwrap();
+        // Only 1 .json entry, .meta is not counted as an entry
+        assert_eq!(stats.entries, 1);
+        // But total bytes includes both files
+        assert!(stats.total_bytes > 0);
+    }
+
+    #[test]
+    fn clear_removes_meta_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = dir.path().join("cache");
+        let store = FileStore {
+            cache_dir: Some(cache_dir.clone()),
+        };
+        store.put("key1", &sample_findings());
+        store.put_sidecar("file.rs", "backend", "model", "key1");
+
+        store.clear().unwrap();
+        assert!(!cache_dir.exists());
     }
 }
