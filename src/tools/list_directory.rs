@@ -65,7 +65,8 @@ impl Tool for ListDirectoryTool {
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative path to the directory (default: '.' for repo root)"
+                        "description": "Relative path to the directory within the repository. Use '.' or omit to list the repo root.",
+                        "default": "."
                     }
                 }
             }),

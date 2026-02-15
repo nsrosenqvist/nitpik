@@ -355,6 +355,7 @@ fn build_prompt(
 /// Build the agentic context section for the user prompt.
 ///
 /// Provides the LLM with:
+/// - A snapshot of the repository root directory listing
 /// - A list of all files changed in this review (for cross-referencing)
 /// - Guidance on using tools with relative paths
 /// - Encouragement to explore before concluding
@@ -364,6 +365,21 @@ fn build_agentic_context(
     agent: &AgentDefinition,
 ) -> String {
     let mut section = String::new();
+
+    // Embed a snapshot of the repo root so the LLM knows the project layout
+    // without needing to make a speculative list_directory tool call.
+    if let Ok(entries) = list_repo_root(&context.repo_root) {
+        section.push_str("## Repository Structure\n\n");
+        section.push_str(
+            "The following files and directories are at the repository root:\n\n",
+        );
+        section.push_str("```\n");
+        for entry in &entries {
+            section.push_str(entry);
+            section.push('\n');
+        }
+        section.push_str("```\n\n");
+    }
 
     // List all changed files so the LLM knows what else to explore
     let other_files: Vec<&str> = context
@@ -415,6 +431,53 @@ fn build_agentic_context(
     );
 
     section
+}
+
+/// Synchronously list the top-level entries in a repo directory.
+///
+/// Returns a compact formatted list (directories with trailing `/`, files
+/// with sizes). Hidden entries (`.git`, etc.) are skipped. Used to embed
+/// a project structure snapshot in the agentic user prompt so the LLM
+/// doesn't have to make a speculative first tool call.
+fn list_repo_root(repo_root: &str) -> Result<Vec<String>, std::io::Error> {
+    let root = std::path::Path::new(repo_root);
+    let mut entries: Vec<(String, bool, Option<u64>)> = Vec::new();
+
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden files/directories
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let metadata = entry.metadata().ok();
+        let is_dir = metadata.as_ref().map_or(false, |m| m.is_dir());
+        let size = if is_dir {
+            None
+        } else {
+            metadata.map(|m| m.len())
+        };
+
+        entries.push((name, is_dir, size));
+    }
+
+    // Sort: directories first, then alphabetically
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+    Ok(entries
+        .into_iter()
+        .map(|(name, is_dir, size)| {
+            if is_dir {
+                format!("{name}/")
+            } else if let Some(size) = size {
+                format!("{name} ({size} bytes)")
+            } else {
+                name
+            }
+        })
+        .collect())
 }
 
 /// Append the prior-findings section to an already-built base prompt.

@@ -338,6 +338,10 @@ fn build_agentic_system_prompt(base_prompt: &str) -> String {
          than a missed finding.\n\n\
          All tool paths are **relative to the repository root** \
          (e.g., `src/models/finding.rs`, not an absolute path).\n\n\
+         ### Example tool calls\n\n\
+         - List the repo root: `list_directory` with `{{\"path\": \".\"}}`\n\
+         - Read a file: `read_file` with `{{\"path\": \"src/handler.rs\"}}`\n\
+         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n\n\
          After exploring, return your findings as a JSON array as described in the \
          instructions."
     )
