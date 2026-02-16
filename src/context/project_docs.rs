@@ -25,10 +25,20 @@ const PROJECT_DOC_FILES: &[&str] = &[
 const MAX_DOC_SIZE: u64 = 256 * 1024;
 
 /// Detect and load project documentation files from the repo root.
-pub async fn detect_project_docs(repo_root: &Path) -> IndexMap<String, String> {
+///
+/// Pass `exclude` to skip specific filenames (e.g. `["AGENTS.md"]`).
+/// The names are matched exactly against the well-known filename list.
+pub async fn detect_project_docs(
+    repo_root: &Path,
+    exclude: &[String],
+) -> IndexMap<String, String> {
     let mut docs = IndexMap::new();
 
     for &filename in PROJECT_DOC_FILES {
+        if exclude.iter().any(|e| e == filename) {
+            continue;
+        }
+
         let path = repo_root.join(filename);
         if !path.exists() {
             continue;
@@ -56,7 +66,7 @@ mod tests {
     #[tokio::test]
     async fn detect_docs_in_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let docs = detect_project_docs(dir.path()).await;
+        let docs = detect_project_docs(dir.path(), &[]).await;
         assert!(docs.is_empty());
     }
 
@@ -64,8 +74,45 @@ mod tests {
     async fn detect_agents_md() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "# Agent Guide").unwrap();
-        let docs = detect_project_docs(dir.path()).await;
+        let docs = detect_project_docs(dir.path(), &[]).await;
         assert_eq!(docs.len(), 1);
         assert_eq!(docs["AGENTS.md"], "# Agent Guide");
+    }
+
+    #[tokio::test]
+    async fn exclude_specific_doc() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# Agent Guide").unwrap();
+        std::fs::write(dir.path().join("CONVENTIONS.md"), "# Conventions").unwrap();
+
+        let exclude = vec!["AGENTS.md".to_string()];
+        let docs = detect_project_docs(dir.path(), &exclude).await;
+        assert_eq!(docs.len(), 1);
+        assert!(!docs.contains_key("AGENTS.md"));
+        assert!(docs.contains_key("CONVENTIONS.md"));
+    }
+
+    #[tokio::test]
+    async fn exclude_multiple_docs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# Agents").unwrap();
+        std::fs::write(dir.path().join("CONVENTIONS.md"), "# Conventions").unwrap();
+        std::fs::write(dir.path().join("CONTRIBUTING.md"), "# Contributing").unwrap();
+
+        let exclude = vec!["AGENTS.md".to_string(), "CONTRIBUTING.md".to_string()];
+        let docs = detect_project_docs(dir.path(), &exclude).await;
+        assert_eq!(docs.len(), 1);
+        assert!(docs.contains_key("CONVENTIONS.md"));
+    }
+
+    #[tokio::test]
+    async fn exclude_nonexistent_doc_is_harmless() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
+
+        let exclude = vec!["NONEXISTENT.md".to_string()];
+        let docs = detect_project_docs(dir.path(), &exclude).await;
+        assert_eq!(docs.len(), 1);
+        assert!(docs.contains_key("AGENTS.md"));
     }
 }

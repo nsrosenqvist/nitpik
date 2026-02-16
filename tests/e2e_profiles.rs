@@ -195,7 +195,7 @@ async fn run_review(
     );
 
     // Build baseline context
-    let baseline = context::build_baseline_context(repo_path, &diffs, config).await;
+    let baseline = context::build_baseline_context(repo_path, &diffs, config, false, &[]).await;
 
     let review_context = ReviewContext {
         diffs,
@@ -516,7 +516,7 @@ async fn e2e_custom_profile() {
         .expect("failed to get diffs");
     assert!(!diffs.is_empty());
 
-    let baseline = context::build_baseline_context(&repo, &diffs, &config).await;
+    let baseline = context::build_baseline_context(&repo, &diffs, &config, false, &[]).await;
     let review_context = ReviewContext {
         diffs,
         baseline,
@@ -634,7 +634,7 @@ async fn e2e_custom_tool_agentic() {
         .expect("failed to get diffs");
     assert!(!diffs.is_empty(), "changeset should produce diffs");
 
-    let baseline = context::build_baseline_context(&repo, &diffs, &config).await;
+    let baseline = context::build_baseline_context(&repo, &diffs, &config, false, &[]).await;
     let review_context = ReviewContext {
         diffs,
         baseline,
@@ -874,7 +874,7 @@ async fn e2e_cache_prior_findings() {
         .await
         .expect("failed to resolve profiles");
 
-    let baseline_v1 = context::build_baseline_context(&repo, &diffs_v1, &config).await;
+    let baseline_v1 = context::build_baseline_context(&repo, &diffs_v1, &config, false, &[]).await;
     let review_context_v1 = ReviewContext {
         diffs: diffs_v1,
         baseline: baseline_v1,
@@ -919,7 +919,7 @@ async fn e2e_cache_prior_findings() {
         .expect("failed to get v2 diffs");
     assert!(!diffs_v2.is_empty(), "v2 should produce diffs");
 
-    let baseline_v2 = context::build_baseline_context(&repo, &diffs_v2, &config).await;
+    let baseline_v2 = context::build_baseline_context(&repo, &diffs_v2, &config, false, &[]).await;
     let review_context_v2 = ReviewContext {
         diffs: diffs_v2,
         baseline: baseline_v2,
@@ -1042,7 +1042,7 @@ async fn e2e_agentic_mode() {
         .await
         .expect("failed to resolve profiles");
 
-    let baseline = context::build_baseline_context(&repo, &diffs, &config).await;
+    let baseline = context::build_baseline_context(&repo, &diffs, &config, false, &[]).await;
     let review_context = ReviewContext {
         diffs,
         baseline,

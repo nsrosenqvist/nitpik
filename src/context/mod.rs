@@ -8,6 +8,8 @@ pub mod project_docs;
 
 use std::path::Path;
 
+use indexmap::IndexMap;
+
 use crate::config::Config;
 use crate::models::context::BaselineContext;
 use crate::models::diff::FileDiff;
@@ -16,10 +18,15 @@ use crate::models::diff::FileDiff;
 ///
 /// Loads full file contents for all changed files and discovers
 /// project documentation files in the repository root.
+///
+/// When `skip_project_docs` is true, no project docs are included.
+/// Otherwise, `exclude_docs` can filter out specific filenames.
 pub async fn build_baseline_context(
     repo_root: &Path,
     diffs: &[FileDiff],
     config: &Config,
+    skip_project_docs: bool,
+    exclude_docs: &[String],
 ) -> BaselineContext {
     let file_contents = files::load_file_contents(
         repo_root,
@@ -28,7 +35,11 @@ pub async fn build_baseline_context(
     )
     .await;
 
-    let project_docs = project_docs::detect_project_docs(repo_root).await;
+    let project_docs = if skip_project_docs {
+        IndexMap::new()
+    } else {
+        project_docs::detect_project_docs(repo_root, exclude_docs).await
+    };
 
     BaselineContext {
         file_contents,
@@ -69,7 +80,7 @@ mod tests {
         let diffs = vec![make_diff("main.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config).await;
+        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[]).await;
         assert_eq!(ctx.file_contents.len(), 1);
         assert!(ctx.file_contents.contains_key("main.rs"));
         assert_eq!(ctx.project_docs.len(), 1);
@@ -81,7 +92,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &[], &config).await;
+        let ctx = build_baseline_context(dir.path(), &[], &config, false, &[]).await;
         assert!(ctx.file_contents.is_empty());
     }
 
@@ -94,7 +105,7 @@ mod tests {
         diff.is_deleted = true;
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &[diff], &config).await;
+        let ctx = build_baseline_context(dir.path(), &[diff], &config, false, &[]).await;
         assert!(ctx.file_contents.is_empty());
     }
 
@@ -105,7 +116,51 @@ mod tests {
         let diffs = vec![make_diff("nonexistent.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config).await;
+        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[]).await;
         assert!(ctx.file_contents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn build_context_skip_all_project_docs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
+        std::fs::write(dir.path().join("CONVENTIONS.md"), "# Rules").unwrap();
+
+        let diffs = vec![make_diff("main.rs")];
+        let config = Config::default();
+
+        let ctx = build_baseline_context(dir.path(), &diffs, &config, true, &[]).await;
+        assert_eq!(ctx.file_contents.len(), 1);
+        assert!(ctx.project_docs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn build_context_exclude_specific_doc() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
+        std::fs::write(dir.path().join("CONVENTIONS.md"), "# Rules").unwrap();
+
+        let diffs = vec![make_diff("main.rs")];
+        let config = Config::default();
+        let exclude = vec!["AGENTS.md".to_string()];
+
+        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &exclude).await;
+        assert_eq!(ctx.file_contents.len(), 1);
+        assert_eq!(ctx.project_docs.len(), 1);
+        assert!(!ctx.project_docs.contains_key("AGENTS.md"));
+        assert!(ctx.project_docs.contains_key("CONVENTIONS.md"));
+    }
+
+    #[tokio::test]
+    async fn build_context_skip_overrides_exclude() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
+
+        let config = Config::default();
+        // Even with an empty exclude list, skip_project_docs=true wins
+        let ctx = build_baseline_context(dir.path(), &[], &config, true, &[]).await;
+        assert!(ctx.project_docs.is_empty());
     }
 }

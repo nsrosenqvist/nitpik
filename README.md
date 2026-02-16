@@ -515,6 +515,36 @@ nitpik review --diff-base main --scan-secrets --secrets-rules ./custom-rules.tom
 
 ---
 
+## Project Documentation Context
+
+nitpik automatically detects well-known documentation files in your repository root and includes them in the review prompt so the LLM understands your team's conventions:
+
+`AGENTS.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`, `CODING_GUIDELINES.md`, `STYLE_GUIDE.md`, `DEVELOPMENT.md`
+
+Files larger than 256 KB are skipped.
+
+### Controlling project docs
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--no-project-docs` | `false` | Skip all auto-detected project documentation files |
+| `--exclude-doc <NAME>` | *(none)* | Exclude specific docs by filename (comma-separated) |
+
+Skip all project docs (useful to reduce prompt size or cost):
+
+```bash
+nitpik review --diff-base main --no-project-docs
+```
+
+Exclude only specific files while keeping the rest:
+
+```bash
+nitpik review --diff-base main --exclude-doc AGENTS.md
+nitpik review --diff-base main --exclude-doc AGENTS.md,CONTRIBUTING.md
+```
+
+---
+
 ## Caching
 
 nitpik caches review results by content hash. Unchanged files are not re-reviewed, saving time and API cost.

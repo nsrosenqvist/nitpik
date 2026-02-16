@@ -191,6 +191,16 @@ pub struct ReviewArgs {
     /// Disable live progress output (useful for CI or piped output).
     #[arg(long, default_value_t = false)]
     pub no_progress: bool,
+
+    // --- Context ---
+    /// Skip auto-detected project documentation files (AGENTS.md, CONVENTIONS.md, etc.).
+    #[arg(long, default_value_t = false)]
+    pub no_project_docs: bool,
+
+    /// Comma-separated list of project documentation files to exclude by name.
+    /// Example: --exclude-doc AGENTS.md,CONVENTIONS.md
+    #[arg(long, value_name = "FILENAME", value_delimiter = ',')]
+    pub exclude_doc: Vec<String>,
 }
 
 /// Output format options.
@@ -298,6 +308,8 @@ mod tests {
             no_prior_context: false,
             max_prior_findings: None,
             no_progress: false,
+            no_project_docs: false,
+            exclude_doc: vec![],
         }
     }
 

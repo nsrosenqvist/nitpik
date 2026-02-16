@@ -378,7 +378,14 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     }
 
     // Build baseline context
-    let baseline = context::build_baseline_context(repo_root_path, &diffs, &config).await;
+    let baseline = context::build_baseline_context(
+        repo_root_path,
+        &diffs,
+        &config,
+        args.no_project_docs,
+        &args.exclude_doc,
+    )
+    .await;
 
     // Resolve agent profiles
     let agent_defs = resolve_agents(&args, &config, &diffs).await?;

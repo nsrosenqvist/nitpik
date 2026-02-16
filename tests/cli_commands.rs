@@ -278,3 +278,53 @@ async fn tag_is_case_insensitive() {
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
     assert!(names.contains(&"frontend"), "case-insensitive; got: {names:?}");
 }
+
+// ---------------------------------------------------------------------------
+// project docs flags
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn no_project_docs_skips_all_docs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("AGENTS.md"), "# Agents").unwrap();
+    std::fs::write(dir.path().join("CONVENTIONS.md"), "# Conv").unwrap();
+    std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+
+    let config = nitpik::config::Config::default();
+    let diffs = vec![];
+    let ctx =
+        nitpik::context::build_baseline_context(dir.path(), &diffs, &config, true, &[]).await;
+    assert!(
+        ctx.project_docs.is_empty(),
+        "expected no docs with --no-project-docs"
+    );
+}
+
+#[tokio::test]
+async fn exclude_doc_filters_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("AGENTS.md"), "# Agents").unwrap();
+    std::fs::write(dir.path().join("CONVENTIONS.md"), "# Conv").unwrap();
+
+    let config = nitpik::config::Config::default();
+    let exclude = vec!["AGENTS.md".to_string()];
+    let ctx =
+        nitpik::context::build_baseline_context(dir.path(), &[], &config, false, &exclude).await;
+    assert!(!ctx.project_docs.contains_key("AGENTS.md"));
+    assert!(ctx.project_docs.contains_key("CONVENTIONS.md"));
+}
+
+#[tokio::test]
+async fn exclude_doc_multiple_names() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("AGENTS.md"), "# Agents").unwrap();
+    std::fs::write(dir.path().join("CONVENTIONS.md"), "# Conv").unwrap();
+    std::fs::write(dir.path().join("CONTRIBUTING.md"), "# Contrib").unwrap();
+
+    let config = nitpik::config::Config::default();
+    let exclude = vec!["AGENTS.md".to_string(), "CONTRIBUTING.md".to_string()];
+    let ctx =
+        nitpik::context::build_baseline_context(dir.path(), &[], &config, false, &exclude).await;
+    assert_eq!(ctx.project_docs.len(), 1);
+    assert!(ctx.project_docs.contains_key("CONVENTIONS.md"));
+}
