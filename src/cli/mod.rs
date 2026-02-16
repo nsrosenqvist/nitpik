@@ -13,7 +13,7 @@ pub const LICENSE_BANNER_STYLED: &str =
 
 /// Print the license/thank-you banner to stderr.
 ///
-/// When `claims` is `Some`, shows a personalised thank-you message.
+/// When `claims` is `Some`, shows a personalized thank-you message.
 /// Otherwise shows the default "free for personal use" notice.
 pub fn print_banner(claims: Option<&LicenseClaims>) {
     use colored::Colorize;

@@ -348,7 +348,7 @@ fn build_prompt(
         - \"suggestion\": (optional) the concrete fix — show corrected code when possible, don't just say \"consider fixing this\"\n\
         - \"agent\": \"{}\"\n\n\
         Severity definitions:\n\
-        - \"error\": confirmed bug or vulnerability that will cause incorrect behaviour or a security breach\n\
+        - \"error\": confirmed bug or vulnerability that will cause incorrect behavior or a security breach\n\
         - \"warning\": likely issue or significant code smell that should be addressed\n\
         - \"info\": suggestion, minor improvement, or observation worth noting\n\n\
         IMPORTANT: The \"severity\" field must be one of \"error\", \"warning\", or \"info\". \
@@ -403,7 +403,7 @@ fn build_coordination_note(current: &AgentDefinition, all_agents: &[AgentDefinit
         String::new()
     } else {
         format!(
-            "You are one of several specialised reviewers running in parallel. \
+            "You are one of several specialized reviewers running in parallel. \
              The other active reviewers are: {}. \
              Stay in your lane — avoid duplicating findings that fall squarely \
              in another reviewer's focus area.\n\n",
@@ -1115,7 +1115,7 @@ mod tests {
         let prompt = build_prompt(&diff, &context, &backend, &all_agents, None, false);
 
         // Should include coordination note mentioning the security reviewer
-        assert!(prompt.contains("specialised reviewers running in parallel"));
+        assert!(prompt.contains("specialized reviewers running in parallel"));
         assert!(prompt.contains("**security**"));
         // Should list security's tags
         assert!(prompt.contains("auth"));
@@ -1159,6 +1159,6 @@ mod tests {
         let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
 
         // Single agent should NOT have a coordination note
-        assert!(!prompt.contains("specialised reviewers running in parallel"));
+        assert!(!prompt.contains("specialized reviewers running in parallel"));
     }
 }

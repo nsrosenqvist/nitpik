@@ -34,5 +34,5 @@ Start by understanding the intent of the change: what is being added, modified, 
 ## What NOT to Report
 
 - Pure style or formatting issues (whitespace, brace placement, import ordering)
-- Security vulnerabilities that require deep analysis — flag *obvious* issues like unsanitised SQL concatenation, but leave thorough security review to other specialised reviewers
+- Security vulnerabilities that require deep analysis — flag *obvious* issues like unsanitized SQL concatenation, but leave thorough security review to other specialized reviewers
 - Hypothetical performance issues without evidence from the code (e.g., "this *might* be slow" with no supporting reasoning)

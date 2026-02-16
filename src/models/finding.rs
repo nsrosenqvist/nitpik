@@ -36,7 +36,7 @@ impl<'de> Deserialize<'de> for Severity {
             "error" | "critical" | "high" | "severe" | "blocker" | "fatal"
                 => Ok(Severity::Error),
             _ => {
-                // Fall back to warning for unrecognised severities rather than failing
+                // Fall back to warning for unrecognized severities rather than failing
                 Ok(Severity::Warning)
             }
         }

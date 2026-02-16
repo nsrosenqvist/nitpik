@@ -1,6 +1,6 @@
 //! App-wide constants.
 //!
-//! Centralises the tool name, config paths, environment variable names,
+//! Centralizes the tool name, config paths, environment variable names,
 //! and URLs so a rename only requires changing this file.
 
 // ── Version & build metadata ────────────────────────────────────────

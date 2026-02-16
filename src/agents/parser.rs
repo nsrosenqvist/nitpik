@@ -193,14 +193,14 @@ name: security
 description: Security reviewer
 agentic_instructions: |
   Use search_text to trace data flow from user input to sinks.
-  Use read_file to inspect sanitisation helpers.
+  Use read_file to inspect sanitization helpers.
 ---
 
 You are a security reviewer."#;
         let agent = parse_agent_definition(content).unwrap();
         assert_eq!(
             agent.profile.agentic_instructions.as_deref().unwrap().trim(),
-            "Use search_text to trace data flow from user input to sinks.\nUse read_file to inspect sanitisation helpers."
+            "Use search_text to trace data flow from user input to sinks.\nUse read_file to inspect sanitization helpers."
         );
         // agentic_instructions should NOT leak into the system prompt body
         assert!(!agent.system_prompt.contains("search_text"));

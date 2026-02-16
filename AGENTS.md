@@ -22,7 +22,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 
 | Module | Purpose |
 |---|---|
-| `constants.rs` | Centralised app name, config paths, env var names, and URLs — a rename only requires changing this file |
+| `constants.rs` | Centralized app name, config paths, env var names, and URLs — a rename only requires changing this file |
 | `cli/` | clap arg parsing, subcommands (`review`, `profiles`, `validate`, `cache`, `license`), CLI entry point wiring |
 | `config/` | `.nitpik.toml` loading, env var resolution, config layering (CLI → env → repo config → global config → defaults) |
 | `diff/` | Git CLI wrapper, unified diff parsing, file scanning, chunk splitting |
@@ -44,7 +44,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 - **Modules communicate through `models/`** — import shared types from `models/`, not from sibling module internals.
 - **`main.rs` is the composition root** — it wires modules together. The orchestrator coordinates execution; everything else is a leaf.
 - **Async-first** — all I/O uses `tokio`. Parallel work uses `JoinSet` with a semaphore for concurrency control. Git is invoked via `tokio::process::Command`.
-- **Single source of truth for names and paths** — `constants.rs` centralises the app name, config filenames, env var names, and URLs. Use those constants instead of hard-coding strings.
+- **Single source of truth for names and paths** — `constants.rs` centralizes the app name, config filenames, env var names, and URLs. Use those constants instead of hard-coding strings.
 
 ## Conventions
 
@@ -63,9 +63,13 @@ Extend the system by implementing a trait, not by modifying existing implementat
 - Constants: `SCREAMING_SNAKE_CASE`
 - Traits: describe a capability (`OutputRenderer`, `ReviewProvider`)
 
+### Spelling
+
+Use **American English** throughout: code comments, doc comments, agent profile prompts, and documentation. For example: `sanitization` not `sanitisation`, `behavior` not `behaviour`, `specialized` not `specialised`.
+
 ### Enums & Constants Over Magic Strings
 
-Prefer enums and constants over raw string literals. Variant names, format identifiers, provider names, severity levels, and similar fixed sets should be modelled as enums with `Display`/`FromStr` impls (or `strum` derives) rather than compared as ad-hoc strings. For application-wide names, paths, and env vars, use the constants defined in `constants.rs`.
+Prefer enums and constants over raw string literals. Variant names, format identifiers, provider names, severity levels, and similar fixed sets should be modeled as enums with `Display`/`FromStr` impls (or `strum` derives) rather than compared as ad-hoc strings. For application-wide names, paths, and env vars, use the constants defined in `constants.rs`.
 
 ### Dependencies
 

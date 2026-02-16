@@ -582,7 +582,7 @@ Disable caching for a single run with `--no-cache`. Use `--no-prior-context` for
 
 ## Limitations & Disclaimer
 
-nitpik uses third-party large language models (LLMs) to analyse code. **All findings are AI-generated and advisory.** They may be incorrect, incomplete, or hallucinated. nitpik does not guarantee code quality, security, or correctness.
+nitpik uses third-party large language models (LLMs) to analyze code. **All findings are AI-generated and advisory.** They may be incorrect, incomplete, or hallucinated. nitpik does not guarantee code quality, security, or correctness.
 
 - **Always review AI suggestions with human judgment** before acting on them.
 - **Code diffs are sent to your configured LLM provider** (e.g. Anthropic, OpenAI, Gemini). nitpik does not store or retain your code, but the LLM provider's data policies apply. Choose a provider whose terms you trust.
