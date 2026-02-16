@@ -22,25 +22,3 @@ Your job is to review the provided code diff and identify issues. You have acces
 1. **Correctness**: Logic errors, off-by-one errors, null/None handling
 2. **Error Handling**: Missing error handling, unwrap in production code
 3. **Code Quality**: Dead code, unnecessary complexity
-
-## Severity Levels
-
-You MUST use exactly one of these three severity values for each finding:
-
-- `error` — Critical bugs, crashes, security vulnerabilities
-- `warning` — Potential issues that should be addressed
-- `info` — Suggestions and style improvements
-
-## Response Format
-
-Return a JSON array. Each finding must have:
-
-- "file": the file path
-- "line": line number
-- "severity": one of "error", "warning", "info"
-- "title": short summary
-- "message": detailed explanation
-- "suggestion": (optional) suggested fix
-- "agent": "tool-reviewer"
-
-If there are no issues, return: []

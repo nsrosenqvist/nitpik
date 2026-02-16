@@ -185,4 +185,36 @@ Review database code."#;
         assert!(!tool.parameters[1].required);
         assert_eq!(tool.parameters[1].param_type, "boolean");
     }
+
+    #[test]
+    fn parse_agent_with_agentic_instructions() {
+        let content = r#"---
+name: security
+description: Security reviewer
+agentic_instructions: |
+  Use search_text to trace data flow from user input to sinks.
+  Use read_file to inspect sanitisation helpers.
+---
+
+You are a security reviewer."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert_eq!(
+            agent.profile.agentic_instructions.as_deref().unwrap().trim(),
+            "Use search_text to trace data flow from user input to sinks.\nUse read_file to inspect sanitisation helpers."
+        );
+        // agentic_instructions should NOT leak into the system prompt body
+        assert!(!agent.system_prompt.contains("search_text"));
+    }
+
+    #[test]
+    fn parse_agent_without_agentic_instructions() {
+        let content = r#"---
+name: basic
+description: Basic reviewer
+---
+
+Review this code."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert!(agent.profile.agentic_instructions.is_none());
+    }
 }

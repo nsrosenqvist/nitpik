@@ -133,6 +133,12 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 1. Create `src/agents/builtin/my_profile.md` (YAML frontmatter + system prompt)
 2. Register with `include_str!` in `src/agents/builtin/mod.rs`
 
+**Frontmatter fields**: `name`, `description`, `model` (optional), `tags`, `tools` (optional), `agentic_instructions` (optional).
+
+- The `agentic_instructions` field contains tool-usage guidance that is **only** injected in agentic mode (when the LLM has access to tools). Keep it out of the main system prompt body so non-agentic reviews aren't confused by references to tools.
+- Use `tags` to describe the profile's focus areas. Tags serve double duty: users can select profiles with `--tag`, and the orchestrator uses them to build a dynamic coordination note telling each reviewer what the sibling reviewers cover.
+- Do **not** hardcode references to other profile names in the system prompt body. When multiple agents run in parallel, the orchestrator injects a coordination note listing sibling reviewers and their tags automatically.
+
 ### Add an Agentic Tool
 
 1. Create `src/tools/my_tool.rs`, implement rig-core's `Tool` trait

@@ -30,6 +30,13 @@ pub struct AgentProfile {
     /// Custom tool definitions for agentic mode.
     #[serde(default)]
     pub tools: Vec<CustomToolDefinition>,
+    /// Optional profile-specific instructions for agentic mode.
+    ///
+    /// When present, these are appended to the agentic system prompt
+    /// to give profile-specific tool-usage guidance (e.g., "use
+    /// `search_text` to trace tainted data flow").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agentic_instructions: Option<String>,
 }
 
 /// A custom tool defined in agent profile frontmatter.

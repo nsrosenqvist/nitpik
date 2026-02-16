@@ -298,7 +298,11 @@ impl ReviewProvider for RigProvider {
 
             // Enhance the system prompt with tool-usage guidance so the
             // LLM knows it should actively explore before concluding.
-            let agentic_system_prompt = build_agentic_system_prompt(&agent.system_prompt, &agent.profile.tools);
+            let agentic_system_prompt = build_agentic_system_prompt(
+                &agent.system_prompt,
+                &agent.profile.tools,
+                agent.profile.agentic_instructions.as_deref(),
+            );
 
             self.call_rig_agentic(model, &agentic_system_prompt, prompt, max_turns, custom_tools).await
         } else {
@@ -321,7 +325,11 @@ impl ReviewProvider for RigProvider {
 ///
 /// Custom tools from the agent profile are included alongside the
 /// built-in tools so the LLM knows they are available.
-fn build_agentic_system_prompt(base_prompt: &str, custom_tools: &[CustomToolDefinition]) -> String {
+fn build_agentic_system_prompt(
+    base_prompt: &str,
+    custom_tools: &[CustomToolDefinition],
+    agentic_instructions: Option<&str>,
+) -> String {
     let mut prompt = format!(
         "{base_prompt}\n\n\
          ## Tool-Assisted Review\n\n\
@@ -376,7 +384,12 @@ fn build_agentic_system_prompt(base_prompt: &str, custom_tools: &[CustomToolDefi
             ));
         }
     }
-
+    // Profile-specific agentic guidance (from frontmatter `agentic_instructions`)
+    if let Some(instructions) = agentic_instructions {
+        prompt.push_str(&format!(
+            "\n### Profile-Specific Tool Guidance\n\n{instructions}\n"
+        ));
+    }
     prompt.push_str(
         "\n\
          After exploring, return your findings as a JSON array as described in the \
@@ -675,7 +688,7 @@ mod tests {
     #[test]
     fn agentic_system_prompt_includes_tool_instructions() {
         let base = "You are a backend reviewer.";
-        let enhanced = build_agentic_system_prompt(base, &[]);
+        let enhanced = build_agentic_system_prompt(base, &[], None);
 
         // Preserves the original prompt
         assert!(enhanced.starts_with(base));
@@ -713,7 +726,7 @@ mod tests {
             },
         ];
 
-        let enhanced = build_agentic_system_prompt("Base prompt.", &tools);
+        let enhanced = build_agentic_system_prompt("Base prompt.", &tools, None);
 
         // Custom tools appear in the numbered guidance list
         assert!(enhanced.contains("Use `run_tests`"), "numbered list should include run_tests");
@@ -860,5 +873,26 @@ That's all."#;
     fn retryable_rate_limit_message() {
         let err = ProviderError::ApiError("rate limit exceeded".into());
         assert!(is_retryable(&err));
+    }
+
+    #[test]
+    fn agentic_prompt_includes_profile_tool_guidance() {
+        let base = "You are a code reviewer.";
+        let instructions = "Use search_text to trace data flow before flagging injection risks.";
+        let result = build_agentic_system_prompt(base, &[], Some(instructions));
+
+        assert!(result.contains("Profile-Specific Tool Guidance"));
+        assert!(result.contains(instructions));
+        // Should also contain the base prompt
+        assert!(result.contains(base));
+    }
+
+    #[test]
+    fn agentic_prompt_without_profile_guidance() {
+        let base = "You are a code reviewer.";
+        let result = build_agentic_system_prompt(base, &[], None);
+
+        assert!(!result.contains("Profile-Specific Tool Guidance"));
+        assert!(result.contains(base));
     }
 }

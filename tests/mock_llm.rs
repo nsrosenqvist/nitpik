@@ -92,6 +92,7 @@ fn test_agent(name: &str) -> AgentDefinition {
             model: None,
             tags: vec![],
             tools: vec![],
+            agentic_instructions: None,
         },
         system_prompt: "You are a test reviewer.".to_string(),
     }
@@ -719,6 +720,7 @@ fn test_agent_with_tools(name: &str, tools: Vec<nitpik::models::agent::CustomToo
             model: None,
             tags: vec![],
             tools,
+            agentic_instructions: None,
         },
         system_prompt: "You are a test reviewer with tools.".to_string(),
     }

@@ -236,7 +236,7 @@ nitpik tries to use the provider specific environment variable if it exists, and
 
 ## Custom Agent Profiles
 
-Create a Markdown file with YAML frontmatter to define your own reviewer:
+Create a Markdown file with YAML frontmatter to define your own reviewer. See the [built-in profiles](src/agents/builtin/) for real examples of how to structure effective review prompts.
 
 ```markdown
 ---
@@ -244,6 +244,9 @@ name: team-conventions
 description: Enforces our internal coding standards
 model: claude-sonnet-4-20250514            # optional model override
 tags: [style, conventions]
+agentic_instructions: >                    # optional — only used in --agent mode
+  Use `search_text` to find other usages of renamed symbols and verify
+  they follow the new naming convention.
 ---
 
 You are a code reviewer enforcing our team's conventions.

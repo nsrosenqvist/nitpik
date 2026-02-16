@@ -127,7 +127,7 @@ impl ReviewOrchestrator {
                     // Agentic context is included in the base prompt so
                     // the LLM always sees tool guidance and changed-file
                     // paths regardless of cache state.
-                    let base_prompt = build_prompt(&chunk, context, &agent, None, agentic);
+                    let base_prompt = build_prompt(&chunk, context, &agent, agents, None, agentic);
 
                     // Compute content for cache key from the base prompt (deterministic)
                     let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
@@ -266,6 +266,7 @@ fn build_prompt(
     diff: &FileDiff,
     context: &ReviewContext,
     agent: &AgentDefinition,
+    all_agents: &[AgentDefinition],
     previous_findings: Option<&[Finding]>,
     agentic: bool,
 ) -> String {
@@ -325,31 +326,90 @@ fn build_prompt(
     }
 
     // Instructions
+    let coordination_note = build_coordination_note(agent, all_agents);
     prompt.push_str(&format!(
         "## Instructions\n\n\
         Review the diff above for file `{file_path}`. \
         You are the **{}** reviewer: {}\n\n\
+        {coordination_note}\
         IMPORTANT SCOPE RULE: Only report findings on lines that appear in the diff hunks above. \
         The full file content is provided for context only — do NOT flag pre-existing issues in \
         unchanged code outside the diff. Every finding's line number must fall within a diff hunk range.\n\n\
+        Prefer precision over recall. If you are uncertain whether something is a real issue, \
+        lower the severity to \"info\" or omit it entirely. Do not report hypothetical issues \
+        that require runtime context you cannot verify from the diff and file contents.\n\n\
         Return your findings as a JSON array. For each finding include:\n\
         - \"file\": the file path (\"{}\")\n\
         - \"line\": the line number in the new file (must be within a diff hunk)\n\
+        - \"end_line\": (optional) the last line of the affected range, for multi-line issues\n\
         - \"severity\": MUST be exactly one of: \"error\", \"warning\", \"info\"\n\
-        - \"title\": short summary of the issue\n\
-        - \"message\": detailed explanation\n\
-        - \"suggestion\": (optional) suggested fix\n\
+        - \"title\": a concise summary (10 words or fewer)\n\
+        - \"message\": detailed explanation of the issue and why it matters\n\
+        - \"suggestion\": (optional) the concrete fix — show corrected code when possible, don't just say \"consider fixing this\"\n\
         - \"agent\": \"{}\"\n\n\
+        Severity definitions:\n\
+        - \"error\": confirmed bug or vulnerability that will cause incorrect behaviour or a security breach\n\
+        - \"warning\": likely issue or significant code smell that should be addressed\n\
+        - \"info\": suggestion, minor improvement, or observation worth noting\n\n\
         IMPORTANT: The \"severity\" field must be one of \"error\", \"warning\", or \"info\". \
         Do NOT use values like \"critical\", \"major\", \"minor\", \"high\", or \"low\".\n\n\
+        Example finding:\n\
+        ```json\n\
+        {{\n\
+          \"file\": \"src/handler.rs\",\n\
+          \"line\": 42,\n\
+          \"end_line\": 45,\n\
+          \"severity\": \"error\",\n\
+          \"title\": \"Unhandled error from file I/O\",\n\
+          \"message\": \"The `read_config` call uses `unwrap()` which will panic if the file is missing or unreadable. This crashes the process instead of returning a meaningful error to the caller.\",\n\
+          \"suggestion\": \"Replace `.unwrap()` with `.map_err(|e| AppError::ConfigLoad(e))?` to propagate the error.\",\n\
+          \"agent\": \"{}\"\n\
+        }}\n\
+        ```\n\n\
         If there are no issues, return an empty array: []\n",
         agent.profile.name,
         agent.profile.description,
         file_path,
         agent.profile.name,
+        agent.profile.name,
     ));
 
     prompt
+}
+
+/// Build a coordination note listing sibling reviewers and their focus areas.
+///
+/// When multiple agents are active, this tells the current reviewer what the
+/// other reviewers cover so it can avoid duplicating their work. Uses each
+/// profile's tags to summarise focus areas.
+fn build_coordination_note(current: &AgentDefinition, all_agents: &[AgentDefinition]) -> String {
+    let others: Vec<String> = all_agents
+        .iter()
+        .filter(|a| a.profile.name != current.profile.name)
+        .map(|a| {
+            if a.profile.tags.is_empty() {
+                format!("**{}** ({})", a.profile.name, a.profile.description)
+            } else {
+                format!(
+                    "**{}** (focuses on: {})",
+                    a.profile.name,
+                    a.profile.tags.join(", ")
+                )
+            }
+        })
+        .collect();
+
+    if others.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "You are one of several specialised reviewers running in parallel. \
+             The other active reviewers are: {}. \
+             Stay in your lane — avoid duplicating findings that fall squarely \
+             in another reviewer's focus area.\n\n",
+            others.join("; ")
+        )
+    }
 }
 
 /// Build the agentic context section for the user prompt.
@@ -583,7 +643,7 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, None, false);
+        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
         assert!(prompt.contains("+let x = 1;"));
         assert!(prompt.contains("test.rs"));
         assert!(prompt.contains("backend"));
@@ -630,7 +690,7 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let prompt = build_prompt(&diff, &context, &agent, Some(&prior), false);
+        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], Some(&prior), false);
         assert!(prompt.contains("Previous Review Findings"));
         assert!(prompt.contains("Old issue"));
         assert!(prompt.contains("Re-raise"));
@@ -667,7 +727,7 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, None, false);
+        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
         assert!(!prompt.contains("Previous Review Findings"));
     }
 
@@ -712,7 +772,7 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let base = build_prompt(&diff, &context, &agent, None, false);
+        let base = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
         let with_prior = build_prompt_with_prior(&base, &prior);
 
         // Prior findings section should appear before Instructions
@@ -910,7 +970,7 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, None, false);
+        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
         assert!(prompt.contains("IMPORTANT SCOPE RULE"));
         assert!(prompt.contains("do NOT flag pre-existing issues"));
     }
@@ -967,7 +1027,7 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, None, true);
+        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, true);
 
         // Should include agentic exploration section
         assert!(prompt.contains("Agentic Exploration"));
@@ -1012,10 +1072,93 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, None, false);
+        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
 
         // Non-agentic should NOT include tool guidance
         assert!(!prompt.contains("Agentic Exploration"));
         assert!(!prompt.contains("Other Changed Files"));
+    }
+
+    #[test]
+    fn coordination_note_with_multiple_agents() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let backend = crate::agents::builtin::get_builtin("backend").unwrap();
+        let security = crate::agents::builtin::get_builtin("security").unwrap();
+        let all_agents = vec![backend.clone(), security.clone()];
+
+        let prompt = build_prompt(&diff, &context, &backend, &all_agents, None, false);
+
+        // Should include coordination note mentioning the security reviewer
+        assert!(prompt.contains("specialised reviewers running in parallel"));
+        assert!(prompt.contains("**security**"));
+        // Should list security's tags
+        assert!(prompt.contains("auth"));
+        assert!(prompt.contains("injection"));
+        // The coordination note should NOT list the current agent as a sibling
+        let coord_note = build_coordination_note(&backend, &all_agents);
+        assert!(!coord_note.contains("**backend**"));
+    }
+
+    #[test]
+    fn coordination_note_absent_with_single_agent() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
+
+        // Single agent should NOT have a coordination note
+        assert!(!prompt.contains("specialised reviewers running in parallel"));
     }
 }
