@@ -705,3 +705,221 @@ async fn no_prior_context_flag_suppresses_injection() {
     // Clean up
     let _ = seeded_store.clear();
 }
+
+// ---------------------------------------------------------------------------
+// Custom tool integration tests
+// ---------------------------------------------------------------------------
+
+/// Helper: build a test agent definition with custom tools.
+fn test_agent_with_tools(name: &str, tools: Vec<nitpik::models::agent::CustomToolDefinition>) -> AgentDefinition {
+    AgentDefinition {
+        profile: AgentProfile {
+            name: name.to_string(),
+            description: format!("Test agent with tools: {name}"),
+            model: None,
+            tags: vec![],
+            tools,
+        },
+        system_prompt: "You are a test reviewer with tools.".to_string(),
+    }
+}
+
+/// Verifies that custom tools defined in an agent profile appear in the
+/// user prompt's agentic exploration section when agentic mode is enabled.
+#[tokio::test]
+async fn custom_tools_appear_in_agentic_prompt() {
+    use std::sync::Mutex;
+    use nitpik::models::agent::{CustomToolDefinition, ToolParameter};
+
+    struct PromptCapture {
+        prompts: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl ReviewProvider for PromptCapture {
+        async fn review(
+            &self,
+            _agent: &AgentDefinition,
+            prompt: &str,
+            _agentic: bool,
+            _max_turns: usize,
+            _max_tool_calls: usize,
+        ) -> Result<Vec<Finding>, ProviderError> {
+            self.prompts.lock().unwrap().push(prompt.to_string());
+            Ok(vec![Finding {
+                file: "src/app.rs".to_string(),
+                line: 2,
+                end_line: None,
+                severity: Severity::Info,
+                title: "Style nit".to_string(),
+                message: "Minor style issue.".to_string(),
+                suggestion: None,
+                agent: "tool-agent".to_string(),
+            }])
+        }
+    }
+
+    let tools = vec![
+        CustomToolDefinition {
+            name: "run_tests".to_string(),
+            description: "Run the project test suite".to_string(),
+            command: "cargo test".to_string(),
+            parameters: vec![ToolParameter {
+                name: "filter".to_string(),
+                param_type: "string".to_string(),
+                description: "Test name filter".to_string(),
+                required: false,
+            }],
+        },
+        CustomToolDefinition {
+            name: "lint".to_string(),
+            description: "Run the linter".to_string(),
+            command: "cargo clippy".to_string(),
+            parameters: vec![],
+        },
+    ];
+
+    let provider = Arc::new(PromptCapture {
+        prompts: Mutex::new(Vec::new()),
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/app.rs".to_string()],
+        &["tool-agent".to_string()],
+        false,
+    ));
+    let provider_trait: Arc<dyn ReviewProvider> = Arc::clone(&provider) as Arc<dyn ReviewProvider>;
+    let orchestrator = ReviewOrchestrator::new(
+        provider_trait, &config, cache, progress, false, None, String::new(),
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/app.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+    let agents = vec![test_agent_with_tools("tool-agent", tools)];
+
+    // Run with agentic=true
+    let _result = orchestrator
+        .run(&context, &agents, 4, true, 5, 10)
+        .await
+        .expect("orchestrator should succeed");
+
+    let prompts = provider.prompts.lock().unwrap();
+    assert_eq!(prompts.len(), 1, "provider should have been called once");
+
+    let prompt = &prompts[0];
+
+    // The user prompt's agentic section should list custom tools
+    assert!(
+        prompt.contains("`run_tests`"),
+        "prompt should mention the run_tests custom tool"
+    );
+    assert!(
+        prompt.contains("`lint`"),
+        "prompt should mention the lint custom tool"
+    );
+    assert!(
+        prompt.contains("Run the project test suite"),
+        "prompt should contain the run_tests description"
+    );
+    assert!(
+        prompt.contains("Run the linter"),
+        "prompt should contain the lint description"
+    );
+}
+
+/// Verifies that custom tools do NOT appear in the user prompt when
+/// agentic mode is disabled (non-agentic review).
+#[tokio::test]
+async fn custom_tools_absent_in_non_agentic_prompt() {
+    use std::sync::Mutex;
+    use nitpik::models::agent::{CustomToolDefinition, ToolParameter};
+
+    struct PromptCapture {
+        prompts: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl ReviewProvider for PromptCapture {
+        async fn review(
+            &self,
+            _agent: &AgentDefinition,
+            prompt: &str,
+            _agentic: bool,
+            _max_turns: usize,
+            _max_tool_calls: usize,
+        ) -> Result<Vec<Finding>, ProviderError> {
+            self.prompts.lock().unwrap().push(prompt.to_string());
+            Ok(vec![Finding {
+                file: "src/app.rs".to_string(),
+                line: 2,
+                end_line: None,
+                severity: Severity::Info,
+                title: "Style nit".to_string(),
+                message: "Minor.".to_string(),
+                suggestion: None,
+                agent: "tool-agent".to_string(),
+            }])
+        }
+    }
+
+    let tools = vec![CustomToolDefinition {
+        name: "run_tests".to_string(),
+        description: "Run the project test suite".to_string(),
+        command: "cargo test".to_string(),
+        parameters: vec![ToolParameter {
+            name: "filter".to_string(),
+            param_type: "string".to_string(),
+            description: "Test name filter".to_string(),
+            required: false,
+        }],
+    }];
+
+    let provider = Arc::new(PromptCapture {
+        prompts: Mutex::new(Vec::new()),
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/app.rs".to_string()],
+        &["tool-agent".to_string()],
+        false,
+    ));
+    let provider_trait: Arc<dyn ReviewProvider> = Arc::clone(&provider) as Arc<dyn ReviewProvider>;
+    let orchestrator = ReviewOrchestrator::new(
+        provider_trait, &config, cache, progress, false, None, String::new(),
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/app.rs", "let y = 99;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+    let agents = vec![test_agent_with_tools("tool-agent", tools)];
+
+    // Run with agentic=false
+    let _result = orchestrator
+        .run(&context, &agents, 4, false, 5, 10)
+        .await
+        .expect("orchestrator should succeed");
+
+    let prompts = provider.prompts.lock().unwrap();
+    assert_eq!(prompts.len(), 1);
+
+    let prompt = &prompts[0];
+
+    // In non-agentic mode, the agentic exploration section (and custom tools) should be absent
+    assert!(
+        !prompt.contains("Agentic Exploration"),
+        "non-agentic prompt should not contain agentic exploration section"
+    );
+    assert!(
+        !prompt.contains("`run_tests`"),
+        "non-agentic prompt should not mention custom tools"
+    );
+}

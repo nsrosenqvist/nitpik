@@ -555,6 +555,170 @@ async fn e2e_custom_profile() {
     );
 }
 
+/// E2E test that uses a custom profile with a tool definition and runs in
+/// agentic mode. Verifies that:
+/// 1. The custom tool is surfaced to the LLM (via the system/user prompt).
+/// 2. The review produces valid findings attributed to the custom profile.
+/// 3. If the model decides to call the custom tool, tool-call events are captured.
+#[tokio::test]
+#[ignore]
+async fn e2e_custom_tool_agentic() {
+    require_api_key!();
+    let config = real_config();
+
+    eprintln!("\n=== E2E: custom tool agentic (tool-reviewer) ===");
+
+    // The custom-tool profile lives in fixtures/e2e/custom_tool/
+    let custom_profile_path = fixtures_dir()
+        .join("custom_tool")
+        .join("reviewer.md");
+    assert!(
+        custom_profile_path.exists(),
+        "custom tool profile fixture should exist at {}",
+        custom_profile_path.display()
+    );
+
+    // Reuse the backend scenario
+    let (repo, _tmp) = setup_repo("backend").await;
+
+    // Resolve the profile by file path
+    let profile_path_str = custom_profile_path.to_string_lossy().to_string();
+    let profiles = vec![profile_path_str];
+    let agent_defs = agents::resolve_profiles(&profiles, None)
+        .await
+        .expect("should resolve custom tool profile from file path");
+
+    assert_eq!(agent_defs.len(), 1);
+    assert_eq!(agent_defs[0].profile.name, "tool-reviewer");
+
+    // Verify the profile actually has custom tools parsed
+    assert!(
+        !agent_defs[0].profile.tools.is_empty(),
+        "tool-reviewer profile should have at least one custom tool definition"
+    );
+    assert_eq!(agent_defs[0].profile.tools[0].name, "check_syntax");
+    eprintln!(
+        "  resolved profile '{}' with {} custom tool(s): [{}]",
+        agent_defs[0].profile.name,
+        agent_defs[0].profile.tools.len(),
+        agent_defs[0]
+            .profile
+            .tools
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    // --- Install tracing subscriber to capture tool-call events ---
+    use tracing_subscriber::layer::SubscriberExt;
+
+    let collector = tool_call_layer::ToolCallCollector::default();
+    let tool_spans = Arc::clone(&collector.tool_spans);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(collector)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(std::io::stderr),
+        )
+        .with(tracing_subscriber::filter::EnvFilter::new("info"));
+
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    // --- Run the review in agentic mode ---
+    let input = InputMode::GitBase("HEAD".to_string());
+    let diffs = diff::get_diffs(&input, &repo)
+        .await
+        .expect("failed to get diffs");
+    assert!(!diffs.is_empty(), "changeset should produce diffs");
+
+    let baseline = context::build_baseline_context(&repo, &diffs, &config).await;
+    let review_context = ReviewContext {
+        diffs,
+        baseline,
+        repo_root: repo.to_string_lossy().to_string(),
+        is_path_scan: false,
+    };
+
+    let provider: Arc<dyn ReviewProvider> = Arc::new(
+        RigProvider::new(config.provider.clone(), repo.clone())
+            .expect("failed to create provider"),
+    );
+
+    // Retry loop for rate-limiting resilience
+    let mut findings = Vec::new();
+    for attempt in 0..3u32 {
+        let cache = CacheEngine::new(false);
+        let progress =
+            std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
+        let orchestrator = ReviewOrchestrator::new(
+            Arc::clone(&provider),
+            &config,
+            cache,
+            progress,
+            false,
+            None,
+            String::new(),
+        );
+
+        // agentic=true, max_turns=5, max_tool_calls=10
+        let result = orchestrator
+            .run(&review_context, &agent_defs, 2, true, 5, 10)
+            .await
+            .expect("agentic orchestrator should succeed with custom tool profile");
+
+        findings = result.findings;
+
+        if result.failed_tasks > 0 && findings.is_empty() && attempt < 2 {
+            let backoff = 10 * (attempt + 1);
+            eprintln!(
+                "  ⚠ attempt {} failed ({} task errors, likely rate-limited) — retrying in {backoff}s",
+                attempt + 1,
+                result.failed_tasks,
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(backoff as u64)).await;
+            continue;
+        }
+        break;
+    }
+
+    print_findings_summary("custom-tool/tool-reviewer", &findings);
+    assert_findings_valid(&findings, "handler.rs");
+
+    // Findings should be attributed to our custom profile
+    assert!(
+        findings.iter().all(|f| f.agent == "tool-reviewer"),
+        "all findings should come from the 'tool-reviewer' agent, got agents: {:?}",
+        findings.iter().map(|f| &f.agent).collect::<Vec<_>>()
+    );
+
+    // --- Check for tool-call events ---
+    let captured = tool_spans.lock().unwrap();
+    if captured.is_empty() {
+        eprintln!(
+            "  ⚠ no tool calls captured — model reviewed without invoking custom tools"
+        );
+    } else {
+        eprintln!(
+            "  captured {} tool-call event(s): {:?}",
+            captured.len(),
+            captured.iter().take(10).collect::<Vec<_>>()
+        );
+    }
+
+    eprintln!(
+        "  ✓ custom tool agentic test produced {} finding(s){}",
+        findings.len(),
+        if captured.is_empty() {
+            " (no tool calls)".to_string()
+        } else {
+            format!(" and invoked {} tool call(s)", captured.len())
+        }
+    );
+}
+
 /// A custom tracing layer that records tool-call events emitted by rig-core.
 ///
 /// rig-core logs `tracing::info!("executed tool {tool_name} ...")` inside an
