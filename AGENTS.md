@@ -27,7 +27,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 | `config/` | `.nitpik.toml` loading, env var resolution, config layering (CLI → env → repo config → global config → defaults) |
 | `diff/` | Git CLI wrapper, unified diff parsing, file scanning, chunk splitting |
 | `context/` | Baseline context: full file loading, project doc detection |
-| `agents/` | Built-in profiles (`backend`, `frontend`, `architect`, `security`), markdown+YAML parser, auto-profile selection |
+| `agents/` | Built-in profiles (`backend`, `frontend`, `architect`, `security`), markdown+YAML parser, auto-profile selection, tag-based profile resolution |
 | `providers/` | `ReviewProvider` trait, rig-core multi-provider integration (Anthropic, OpenAI, Gemini, Cohere, DeepSeek, xAI, Groq, Perplexity, OpenAI-compatible) |
 | `tools/` | Agentic tools: `ReadFileTool`, `SearchTextTool`, `ListDirectoryTool`, `CustomCommandTool` (user-defined CLI tools from profile frontmatter) |
 | `orchestrator/` | Parallel review execution, prompt construction, deduplication |

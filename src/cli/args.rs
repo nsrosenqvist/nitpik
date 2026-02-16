@@ -135,6 +135,11 @@ pub struct ReviewArgs {
     #[arg(long)]
     pub profile_dir: Option<PathBuf>,
 
+    /// Select profiles by tag. All profiles (built-in and custom) whose tags
+    /// contain any of the given values will be included. Combines with --profile.
+    #[arg(long, value_delimiter = ',')]
+    pub tag: Vec<String>,
+
     // --- Output ---
     /// Output format.
     #[arg(long, default_value = "terminal")]
@@ -280,6 +285,7 @@ mod tests {
             scan: scan.map(PathBuf::from),
             profile: vec!["backend".to_string()],
             profile_dir: None,
+            tag: vec![],
             format: OutputFormat::Terminal,
             fail_on: None,
             agent: false,

@@ -563,9 +563,27 @@ async fn resolve_agents(
         profile_names
     };
 
-    agents::resolve_profiles(&profiles, args.profile_dir.as_deref())
+    let mut agent_defs = agents::resolve_profiles(&profiles, args.profile_dir.as_deref())
         .await
-        .context("failed to resolve agent profiles")
+        .context("failed to resolve agent profiles")?;
+
+    // --tag: add any profiles that match the requested tags
+    if !args.tag.is_empty() {
+        let by_tag = agents::resolve_profiles_by_tags(&args.tag, args.profile_dir.as_deref())
+            .await
+            .context("failed to resolve profiles by tag")?;
+
+        // Merge, avoiding duplicates (by profile name)
+        let existing_names: std::collections::HashSet<String> =
+            agent_defs.iter().map(|a| a.profile.name.clone()).collect();
+        for agent in by_tag {
+            if !existing_names.contains(&agent.profile.name) {
+                agent_defs.push(agent);
+            }
+        }
+    }
+
+    Ok(agent_defs)
 }
 
 /// Build review context, optionally scanning and redacting secrets.

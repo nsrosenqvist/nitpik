@@ -140,6 +140,21 @@ Auto-select profiles based on the files in the diff:
 nitpik review --diff-base main --profile auto
 ```
 
+Select profiles by tag — all profiles (built-in and custom) whose tags match are included:
+
+```bash
+nitpik review --diff-base main --tag security          # all profiles tagged "security"
+nitpik review --diff-base main --tag css,accessibility  # union of both tags
+```
+
+Combine `--tag` with `--profile` to add tag-matched profiles on top of explicit ones:
+
+```bash
+nitpik review --diff-base main --profile backend --tag css
+```
+
+Tag matching is case-insensitive. See [Custom Agent Profiles](#custom-agent-profiles) for how to set tags on your own profiles.
+
 List all available profiles (including custom ones):
 
 ```bash
@@ -238,6 +253,15 @@ Check for:
 - Result-based error handling (no unwrap in production)
 - Doc comments on all public items
 ```
+
+The `tags` field lets you select this profile with `--tag` instead of (or alongside) `--profile`:
+
+```bash
+# Select every profile tagged "style" — including team-conventions above
+nitpik review --diff-base main --profile-dir ./agents --tag style
+```
+
+Multiple profiles can share tags. For example, if two custom profiles are both tagged `css`, running `--tag css` selects them both (along with any built-in profiles that also carry the tag, such as `frontend`).
 
 Use it directly by path, or place it in a directory and reference by name:
 

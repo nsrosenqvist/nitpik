@@ -21,7 +21,10 @@ pub struct AgentProfile {
     /// Optional model override for this agent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Tags for categorization and auto-selection.
+    /// Tags for categorization and selection via `--tag`.
+    ///
+    /// When `--tag` is passed on the CLI, all loaded profiles whose tags
+    /// contain any of the requested values are included in the review.
     #[serde(default)]
     pub tags: Vec<String>,
     /// Custom tool definitions for agentic mode.

@@ -102,6 +102,32 @@ pub async fn list_all_profiles(
     Ok(agents)
 }
 
+/// Resolve profiles whose tags match any of the given tag values.
+///
+/// Loads all available profiles (built-in + custom from `agent_dir`), then
+/// returns those that contain at least one of the requested tags.
+/// Tag matching is case-insensitive.
+pub async fn resolve_profiles_by_tags(
+    tags: &[String],
+    agent_dir: Option<&Path>,
+) -> Result<Vec<AgentDefinition>, AgentError> {
+    let all = list_all_profiles(agent_dir).await?;
+    let lower_tags: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
+
+    let matched: Vec<AgentDefinition> = all
+        .into_iter()
+        .filter(|agent| {
+            agent
+                .profile
+                .tags
+                .iter()
+                .any(|t| lower_tags.contains(&t.to_lowercase()))
+        })
+        .collect();
+
+    Ok(matched)
+}
+
 /// Resolve a single profile name or path.
 async fn resolve_single_profile(
     profile: &str,
@@ -277,5 +303,84 @@ mod tests {
         // Non-existent dir is not an error — it's just not a directory, so skip
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 4); // just built-ins
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_profiles_by_tags
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn resolve_by_tag_matches_builtin() {
+        // "backend" is a tag on the backend profile
+        let agents = resolve_profiles_by_tags(&["backend".to_string()], None)
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(names.contains(&"backend"), "got: {names:?}");
+    }
+
+    #[tokio::test]
+    async fn resolve_by_tag_matches_multiple_profiles() {
+        // "security" is a tag on the security profile; "performance" is on backend
+        let agents = resolve_profiles_by_tags(
+            &["security".to_string(), "performance".to_string()],
+            None,
+        )
+        .await
+        .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(names.contains(&"backend"), "performance tag → backend; got: {names:?}");
+        assert!(names.contains(&"security"), "security tag → security; got: {names:?}");
+    }
+
+    #[tokio::test]
+    async fn resolve_by_tag_is_case_insensitive() {
+        let agents = resolve_profiles_by_tags(&["BACKEND".to_string()], None)
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(names.contains(&"backend"), "case-insensitive match; got: {names:?}");
+    }
+
+    #[tokio::test]
+    async fn resolve_by_tag_no_match_returns_empty() {
+        let agents = resolve_profiles_by_tags(&["nonexistent-tag".to_string()], None)
+            .await
+            .unwrap();
+        assert!(agents.is_empty(), "should return empty for unknown tag");
+    }
+
+    #[tokio::test]
+    async fn resolve_by_tag_includes_custom_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("custom.md"),
+            "---\nname: custom\ndescription: Custom\ntags: [my-tag, css]\n---\nPrompt.",
+        )
+        .unwrap();
+
+        let agents = resolve_profiles_by_tags(&["my-tag".to_string()], Some(dir.path()))
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert_eq!(names, vec!["custom"], "only custom has my-tag; got: {names:?}");
+    }
+
+    #[tokio::test]
+    async fn resolve_by_tag_shared_tag_selects_multiple() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("design.md"),
+            "---\nname: design-system\ndescription: Design\ntags: [css, design]\n---\nPrompt.",
+        )
+        .unwrap();
+
+        // "css" is on the built-in frontend AND the custom design-system profile
+        let agents = resolve_profiles_by_tags(&["css".to_string()], Some(dir.path()))
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(names.contains(&"frontend"), "frontend has css tag; got: {names:?}");
+        assert!(names.contains(&"design-system"), "custom has css tag; got: {names:?}");
     }
 }

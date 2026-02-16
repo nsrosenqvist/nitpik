@@ -227,3 +227,54 @@ fn cache_stats_human_size() {
     let mib = CacheStats { entries: 100, total_bytes: 3 * 1024 * 1024 };
     assert_eq!(mib.human_size(), "3.0 MiB");
 }
+
+// ---------------------------------------------------------------------------
+// --tag selection
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn tag_selects_matching_builtin_profiles() {
+    // "api" is a tag on backend; "accessibility" is on frontend
+    let agents = agents::resolve_profiles_by_tags(
+        &["api".to_string(), "accessibility".to_string()],
+        None,
+    )
+    .await
+    .unwrap();
+    let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+    assert!(names.contains(&"backend"), "api → backend; got: {names:?}");
+    assert!(names.contains(&"frontend"), "accessibility → frontend; got: {names:?}");
+}
+
+#[tokio::test]
+async fn tag_selects_custom_profiles_from_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a11y.md"),
+        "---\nname: a11y-checker\ndescription: Accessibility\ntags: [a11y, wcag]\n---\nCheck WCAG.",
+    )
+    .unwrap();
+
+    let agents = agents::resolve_profiles_by_tags(&["wcag".to_string()], Some(dir.path()))
+        .await
+        .unwrap();
+    let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+    assert_eq!(names, vec!["a11y-checker"]);
+}
+
+#[tokio::test]
+async fn tag_with_no_matches_returns_empty() {
+    let agents = agents::resolve_profiles_by_tags(&["does-not-exist".to_string()], None)
+        .await
+        .unwrap();
+    assert!(agents.is_empty());
+}
+
+#[tokio::test]
+async fn tag_is_case_insensitive() {
+    let agents = agents::resolve_profiles_by_tags(&["CSS".to_string()], None)
+        .await
+        .unwrap();
+    let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+    assert!(names.contains(&"frontend"), "case-insensitive; got: {names:?}");
+}
