@@ -3,24 +3,24 @@
 //! Entry point and error handling boundary. Uses `anyhow` for
 //! ergonomic error propagation and user-facing messages.
 
-mod agents;
-mod cache;
 mod cli;
-mod config;
-mod constants;
-mod context;
-mod env;
-mod diff;
-mod license;
-mod models;
-mod orchestrator;
-mod output;
-mod progress;
-mod providers;
-mod security;
-mod telemetry;
-mod tools;
-mod update;
+
+use nitpik::agents;
+use nitpik::cache;
+use nitpik::config;
+use nitpik::constants;
+use nitpik::context;
+use nitpik::diff;
+use nitpik::env;
+use nitpik::license;
+use nitpik::models;
+use nitpik::orchestrator;
+use nitpik::output;
+use nitpik::progress;
+use nitpik::providers;
+use nitpik::security;
+use nitpik::telemetry;
+use nitpik::update;
 
 use std::path::Path;
 use std::process;

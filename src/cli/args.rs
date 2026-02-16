@@ -3,13 +3,13 @@
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
-use crate::models::{Severity, DEFAULT_PROFILE};
+use nitpik::models::{Severity, DEFAULT_PROFILE};
 
 /// AI-powered code review CLI.
 #[derive(Parser, Debug)]
 #[command(
     name = "nitpik",
-    version = crate::constants::VERSION,
+    version = nitpik::constants::VERSION,
     about = super::LICENSE_BANNER_STYLED,
 )]
 pub struct Cli {
@@ -206,15 +206,15 @@ pub enum OutputFormat {
 
 impl OutputFormat {
     /// Render findings using the renderer for this format.
-    pub fn render(&self, findings: &[crate::models::finding::Finding]) -> String {
-        use crate::output::OutputRenderer;
+    pub fn render(&self, findings: &[nitpik::models::finding::Finding]) -> String {
+        use nitpik::output::OutputRenderer;
         match self {
-            OutputFormat::Terminal => crate::output::terminal::TerminalRenderer.render(findings),
-            OutputFormat::Json => crate::output::json::JsonRenderer.render(findings),
-            OutputFormat::Github => crate::output::github::GithubRenderer.render(findings),
-            OutputFormat::Gitlab => crate::output::gitlab::GitlabRenderer.render(findings),
-            OutputFormat::Bitbucket => crate::output::bitbucket::BitbucketRenderer.render(findings),
-            OutputFormat::Forgejo => crate::output::forgejo::ForgejoRenderer.render(findings),
+            OutputFormat::Terminal => nitpik::output::terminal::TerminalRenderer.render(findings),
+            OutputFormat::Json => nitpik::output::json::JsonRenderer.render(findings),
+            OutputFormat::Github => nitpik::output::github::GithubRenderer.render(findings),
+            OutputFormat::Gitlab => nitpik::output::gitlab::GitlabRenderer.render(findings),
+            OutputFormat::Bitbucket => nitpik::output::bitbucket::BitbucketRenderer.render(findings),
+            OutputFormat::Forgejo => nitpik::output::forgejo::ForgejoRenderer.render(findings),
         }
     }
 }
@@ -256,7 +256,7 @@ impl ReviewArgs {
 }
 
 // InputMode is defined in models/ and re-exported here for convenience.
-pub use crate::models::InputMode;
+pub use nitpik::models::InputMode;
 
 #[cfg(test)]
 mod tests {
@@ -361,12 +361,12 @@ mod tests {
         assert!(result.unwrap_err().contains("only one input source allowed"));
     }
 
-    fn sample_finding() -> crate::models::finding::Finding {
-        crate::models::finding::Finding {
+    fn sample_finding() -> nitpik::models::finding::Finding {
+        nitpik::models::finding::Finding {
             file: "src/main.rs".to_string(),
             line: 42,
             end_line: None,
-            severity: crate::models::Severity::Warning,
+            severity: nitpik::models::Severity::Warning,
             title: "Test issue".to_string(),
             message: "This is a test finding".to_string(),
             suggestion: Some("Fix it".to_string()),
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn output_format_render_empty_findings() {
         // All formats should handle empty findings without panicking
-        let empty: Vec<crate::models::finding::Finding> = vec![];
+        let empty: Vec<nitpik::models::finding::Finding> = vec![];
         let _ = OutputFormat::Terminal.render(&empty);
         let _ = OutputFormat::Json.render(&empty);
         let _ = OutputFormat::Github.render(&empty);

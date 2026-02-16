@@ -98,6 +98,8 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 - **Integration tests**: `tests/` directory. Mock the LLM provider — never make real API calls in CI.
 - **Snapshot tests**: expected output files in `tests/fixtures/` for output renderers.
 - **Edge cases to cover**: empty diffs, binary files, renames, permission changes, provider failures.
+- **Test runner**: use [`cargo-nextest`](https://nexte.st/) instead of `cargo test`. It runs each test as a separate process and parallelises across all test binaries simultaneously, which is significantly faster. Install with `cargo install cargo-nextest --locked`, then run `cargo nextest run`. CI should use `cargo nextest run` as well.
+- **Slow tests**: the `security::rules::tests::default_rules_*` tests compile 219 gitleaks regexes (~25 s). They share a `LazyLock` within each binary so the cost is paid once per process, but they will always dominate wall-clock time.
 
 ### Documentation
 
@@ -182,7 +184,7 @@ Follow these practices when working on this codebase as an AI coding agent.
 
 ### Before You're Done
 
-- Run the full test suite (`cargo test`) and confirm all tests pass.
+- Run the full test suite (`cargo nextest run`) and confirm all tests pass.
 - If you added new functionality, add tests for it.
 - If you changed a public API, update callers and tests accordingly.
 - If you made architectural changes (new modules, new traits, changed module boundaries), update this file and `README.md`.

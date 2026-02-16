@@ -209,9 +209,15 @@ pub fn load_rules_from_file(path: &Path) -> Result<Vec<SecretRule>, String> {
 mod tests {
     use super::*;
 
+    /// Compile the full gitleaks ruleset once and share across tests.
+    /// This avoids recompiling 219 regexes (each with a 50 MB size limit)
+    /// in every test that needs the default rules.
+    static DEFAULT_RULES: std::sync::LazyLock<Vec<SecretRule>> =
+        std::sync::LazyLock::new(default_rules);
+
     #[test]
     fn default_rules_are_valid() {
-        let rules = default_rules();
+        let rules = &*DEFAULT_RULES;
         // All 218 regex-bearing rules should load now that we use an
         // elevated regex size limit (minus 1 path-only rule).
         assert!(
@@ -221,7 +227,7 @@ mod tests {
         );
 
         // Verify all pre-compiled regexes are usable
-        for rule in &rules {
+        for rule in rules {
             assert!(
                 !rule.compiled_regex.as_str().is_empty(),
                 "rule '{}' has an empty compiled regex",
@@ -388,9 +394,9 @@ keywords = ["bad"]
 
     #[test]
     fn default_rules_allowlist_field_exists() {
-        let rules = default_rules();
+        let rules = &*DEFAULT_RULES;
         // All rules should have the allowlist_regexes field (even if empty)
-        for rule in &rules {
+        for rule in rules {
             // This just verifies the field is initialized (not None/missing)
             let _ = rule.allowlist_regexes.len();
         }

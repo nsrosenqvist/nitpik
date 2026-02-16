@@ -16,6 +16,7 @@ use rig::completion::Prompt;
 use rig::providers;
 
 use crate::config::ProviderConfig;
+use crate::models::agent::CustomToolDefinition;
 use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
 use crate::tools::{CustomCommandTool, ListDirectoryTool, ReadFileTool, SearchTextTool};
@@ -297,7 +298,7 @@ impl ReviewProvider for RigProvider {
 
             // Enhance the system prompt with tool-usage guidance so the
             // LLM knows it should actively explore before concluding.
-            let agentic_system_prompt = build_agentic_system_prompt(&agent.system_prompt);
+            let agentic_system_prompt = build_agentic_system_prompt(&agent.system_prompt, &agent.profile.tools);
 
             self.call_rig_agentic(model, &agentic_system_prompt, prompt, max_turns, custom_tools).await
         } else {
@@ -317,8 +318,11 @@ impl ReviewProvider for RigProvider {
 /// for codebase exploration before finalising its review findings.
 /// The base profile prompt is preserved unchanged; the agentic
 /// supplement is appended so it applies regardless of profile.
-fn build_agentic_system_prompt(base_prompt: &str) -> String {
-    format!(
+///
+/// Custom tools from the agent profile are included alongside the
+/// built-in tools so the LLM knows they are available.
+fn build_agentic_system_prompt(base_prompt: &str, custom_tools: &[CustomToolDefinition]) -> String {
+    let mut prompt = format!(
         "{base_prompt}\n\n\
          ## Tool-Assisted Review\n\n\
          You have access to tools for exploring the repository. \
@@ -335,16 +339,51 @@ fn build_agentic_system_prompt(base_prompt: &str) -> String {
          where a file lives or what a module contains.\n\
          4. **Verify before reporting** — do not flag an issue unless you have confirmed \
          it by reading the relevant code. False positives from guessing are worse \
-         than a missed finding.\n\n\
+         than a missed finding.\n"
+    );
+
+    // Append custom tool guidance
+    let mut tool_number = 5;
+    for tool in custom_tools {
+        prompt.push_str(&format!(
+            "         {tool_number}. **Use `{}`** — {}\n",
+            tool.name, tool.description
+        ));
+        tool_number += 1;
+    }
+
+    prompt.push_str(
+        "\n\
          All tool paths are **relative to the repository root** \
          (e.g., `src/models/finding.rs`, not an absolute path).\n\n\
          ### Example tool calls\n\n\
          - List the repo root: `list_directory` with `{{\"path\": \".\"}}`\n\
          - Read a file: `read_file` with `{{\"path\": \"src/handler.rs\"}}`\n\
-         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n\n\
+         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n"
+    );
+
+    // Append custom tool examples
+    for tool in custom_tools {
+        if let Some(first_param) = tool.parameters.first() {
+            prompt.push_str(&format!(
+                "         - {}: `{}` with `{{\"{}\":\"...\"}}`\n",
+                tool.description, tool.name, first_param.name
+            ));
+        } else {
+            prompt.push_str(&format!(
+                "         - {}: `{}` with `{{}}`\n",
+                tool.description, tool.name
+            ));
+        }
+    }
+
+    prompt.push_str(
+        "\n\
          After exploring, return your findings as a JSON array as described in the \
          instructions."
-    )
+    );
+
+    prompt
 }
 
 /// Check whether a provider error is transient and worth retrying.
@@ -636,7 +675,7 @@ mod tests {
     #[test]
     fn agentic_system_prompt_includes_tool_instructions() {
         let base = "You are a backend reviewer.";
-        let enhanced = build_agentic_system_prompt(base);
+        let enhanced = build_agentic_system_prompt(base, &[]);
 
         // Preserves the original prompt
         assert!(enhanced.starts_with(base));
@@ -648,6 +687,44 @@ mod tests {
         assert!(enhanced.contains("list_directory"));
         assert!(enhanced.contains("relative to the repository root"));
         assert!(enhanced.contains("proactively"));
+    }
+
+    #[test]
+    fn agentic_system_prompt_includes_custom_tools() {
+        use crate::models::agent::{CustomToolDefinition, ToolParameter};
+
+        let tools = vec![
+            CustomToolDefinition {
+                name: "run_tests".to_string(),
+                description: "Run the test suite".to_string(),
+                command: "cargo test".to_string(),
+                parameters: vec![ToolParameter {
+                    name: "filter".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Test name filter".to_string(),
+                    required: false,
+                }],
+            },
+            CustomToolDefinition {
+                name: "lint".to_string(),
+                description: "Run the linter".to_string(),
+                command: "cargo clippy".to_string(),
+                parameters: vec![],
+            },
+        ];
+
+        let enhanced = build_agentic_system_prompt("Base prompt.", &tools);
+
+        // Custom tools appear in the numbered guidance list
+        assert!(enhanced.contains("Use `run_tests`"), "numbered list should include run_tests");
+        assert!(enhanced.contains("Use `lint`"), "numbered list should include lint");
+
+        // Custom tools appear in the example calls section
+        assert!(enhanced.contains("`run_tests` with"), "examples should include run_tests");
+        assert!(enhanced.contains("`lint` with"), "examples should include lint");
+
+        // Tool with params shows param name in example
+        assert!(enhanced.contains("\"filter\""), "run_tests example should reference filter param");
     }
 
     #[test]

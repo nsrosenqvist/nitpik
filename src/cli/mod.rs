@@ -4,7 +4,7 @@
 
 pub mod args;
 
-use crate::license::LicenseClaims;
+use nitpik::license::LicenseClaims;
 
 /// License banner with ANSI styling for clap help output.
 /// Bold "nitpik", dimmed rest. (Static — used for --help only.)
