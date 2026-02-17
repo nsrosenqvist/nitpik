@@ -40,7 +40,8 @@ use providers::ReviewProvider;
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {
-        eprintln!("Error: {err:#}");
+        use colored::Colorize;
+        eprintln!("{} {err:#}", "Error:".red().bold());
         process::exit(1);
     }
 }
@@ -532,7 +533,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     });
 
     // Finish progress display
-    progress.finish(findings.len());
+    progress.finish();
 
     // Resolve fail-on threshold (CLI flag takes priority over config)
     let fail_on_severity: Option<Severity> = args.fail_on.or(config.review.fail_on);

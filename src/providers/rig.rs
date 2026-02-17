@@ -63,7 +63,8 @@ macro_rules! prompt_simple {
 
 /// Build an agentic agent with tools from a rig-core client and prompt it.
 ///
-/// Always sets `max_tokens` — see `prompt_simple!` rationale.
+/// Unlike `prompt_simple!`, this intentionally omits `max_tokens` so the
+/// model has the full output budget for tool calls and reasoning.
 /// Registers the three built-in tools plus any custom command tools
 /// defined in the agent profile.
 macro_rules! prompt_agentic {
@@ -73,11 +74,15 @@ macro_rules! prompt_agentic {
         // calls and immediately return schema-conforming JSON (often `[]`).
         // We rely on the system prompt for JSON format instructions and
         // `parse_findings_response` for parsing.
+        //
+        // NOTE: `max_tokens` is intentionally omitted. Agentic mode needs
+        // the full output budget for tool calls + reasoning tokens. An
+        // artificial cap here was causing truncated responses. The model
+        // will stop generating when it's done regardless.
         let mut builder = $client
             .agent($model)
             .preamble($system)
             .temperature(0.0)
-            .max_tokens(MAX_TOKENS)
             .tool(ReadFileTool::new($repo.clone()))
             .tool(SearchTextTool::new($repo.clone()))
             .tool(ListDirectoryTool::new($repo.clone()));
@@ -293,7 +298,7 @@ impl ReviewProvider for RigProvider {
                 .profile
                 .tools
                 .iter()
-                .map(|def| CustomCommandTool::new(def, self.repo_root.clone()))
+                .map(|def| CustomCommandTool::new(def, self.repo_root.clone(), agent.profile.environment.clone()))
                 .collect();
 
             // Enhance the system prompt with tool-usage guidance so the
@@ -404,8 +409,14 @@ fn build_agentic_system_prompt(
 /// Matches HTTP status codes commonly used for rate limiting and
 /// temporary unavailability: 429 (Too Many Requests), 503 (Service
 /// Unavailable), 529 (Overloaded), and connection/timeout errors.
+///
+/// Parse errors are never retried — the LLM is likely to produce the
+/// same malformed output on a retry (especially truncated responses).
 pub fn is_retryable(err: &ProviderError) -> bool {
-    classify_error(err).is_some()
+    match err {
+        ProviderError::ParseError(_) => false,
+        _ => classify_error(err).is_some(),
+    }
 }
 
 /// Classifies a provider error into a short, user-friendly message.
@@ -433,6 +444,7 @@ pub fn classify_error(err: &ProviderError) -> Option<&'static str> {
                 None
             }
         }
+        ProviderError::ParseError(_) => Some("Failed to parse LLM response"),
         _ => None,
     }
 }
@@ -484,8 +496,12 @@ fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderError
 }
 
 /// Regex for extracting content inside markdown code fences.
+///
+/// The closing ``` must appear at the start of a line (`\n````) to avoid
+/// matching triple-backticks embedded inside JSON string values (e.g.
+/// suggestion fields containing ```rust code examples).
 static FENCE_RE: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)```(?:json)?\s*\n(.*?)```").unwrap());
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)```(?:json)?\s*\n(.*?)\n```").unwrap());
 
 /// Extract candidate JSON strings from a response.
 ///
@@ -497,21 +513,23 @@ fn extract_json_candidates(text: &str) -> Vec<String> {
     // First candidate: the raw text
     candidates.push(text.to_string());
 
-    // Extract content from markdown code fences
+    // Second: bracket extraction — find the first '[' and last ']'.
+    // This is the most robust strategy when the response contains
+    // nested code fences inside JSON string values.
+    if let (Some(start), Some(end)) = (text.find('['), text.rfind(']')) {
+        if start < end {
+            let slice = &text[start..=end];
+            candidates.push(slice.to_string());
+        }
+    }
+
+    // Third: extract content from markdown code fences.
     for cap in FENCE_RE.captures_iter(text) {
         if let Some(inner) = cap.get(1) {
             let inner_trimmed = inner.as_str().trim();
             if !inner_trimmed.is_empty() {
                 candidates.push(inner_trimmed.to_string());
             }
-        }
-    }
-
-    // Also try: find the first '[' and last ']' to extract a JSON array
-    if let (Some(start), Some(end)) = (text.find('['), text.rfind(']')) {
-        if start < end {
-            let slice = &text[start..=end];
-            candidates.push(slice.to_string());
         }
     }
 
@@ -823,6 +841,26 @@ That's all."#;
     fn classify_error_returns_none_for_unknown() {
         let err = ProviderError::ApiError("some unknown error".into());
         assert_eq!(classify_error(&err), None);
+    }
+
+    #[test]
+    fn classify_error_parse_error() {
+        let err = ProviderError::ParseError("could not parse JSON".into());
+        assert_eq!(classify_error(&err), Some("Failed to parse LLM response"));
+    }
+
+    #[test]
+    fn extract_json_candidates_nested_fences() {
+        // Simulate an LLM response where suggestion fields contain ```rust fences.
+        // The bracket extraction should produce a valid candidate even though
+        // the inner fences confuse the fence regex.
+        let response = "```json\n[\n  {\n    \"file\": \"db.rs\",\n    \"line\": 10,\n    \"severity\": \"error\",\n    \"title\": \"SQL Injection\",\n    \"message\": \"Vulnerable.\",\n    \"suggestion\": \"Use parameterized queries:\\n```\\nrust\\nquery(?)\\n```\",\n    \"agent\": \"backend\"\n  }\n]\n```";
+        let candidates = extract_json_candidates(response);
+        // At least one candidate should parse as valid JSON
+        let parsed = candidates.iter().any(|c| {
+            serde_json::from_str::<Vec<Finding>>(c).is_ok()
+        });
+        assert!(parsed, "should find a parseable candidate despite nested fences");
     }
 
     #[test]

@@ -217,4 +217,39 @@ Review this code."#;
         let agent = parse_agent_definition(content).unwrap();
         assert!(agent.profile.agentic_instructions.is_none());
     }
+
+    #[test]
+    fn parse_agent_with_environment_passthrough() {
+        let content = r#"---
+name: infra-reviewer
+description: Infrastructure reviewer
+environment:
+  - JIRA_TOKEN
+  - AWS_*
+  - DOCKER_HOST
+tools:
+  - name: deploy_check
+    description: Check deployment status
+    command: curl -s $JIRA_TOKEN/status
+---
+
+You are an infrastructure reviewer."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert_eq!(agent.profile.environment.len(), 3);
+        assert_eq!(agent.profile.environment[0], "JIRA_TOKEN");
+        assert_eq!(agent.profile.environment[1], "AWS_*");
+        assert_eq!(agent.profile.environment[2], "DOCKER_HOST");
+    }
+
+    #[test]
+    fn parse_agent_without_environment_defaults_empty() {
+        let content = r#"---
+name: basic
+description: Basic reviewer
+---
+
+Review this code."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert!(agent.profile.environment.is_empty());
+    }
 }

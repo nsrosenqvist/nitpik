@@ -85,7 +85,7 @@ impl ProgressTracker {
     }
 
     /// Clear progress lines and print a final summary.
-    pub fn finish(&self, total_findings: usize) {
+    pub fn finish(&self) {
         if !self.enabled {
             return;
         }
@@ -112,11 +112,36 @@ impl ProgressTracker {
             let _ = writeln!(handle, "  {icon} {file_display} {status_text}");
         }
 
-        // Summary line
-        let _ = writeln!(handle);
-        if total_findings == 0 {
-            let _ = writeln!(handle, "  {} {}", "✔".green().bold(), "No issues found.".green());
+        // Tool-call audit summary (if any tools were invoked)
+        let tool_calls = crate::tools::ToolCallLog::drain();
+        if !tool_calls.is_empty() {
+            let _ = writeln!(handle);
+            let _ = writeln!(
+                handle,
+                "  {} {}",
+                "▸".cyan().bold(),
+                format!("{} tool call{}", tool_calls.len(), if tool_calls.len() == 1 { "" } else { "s" }).dimmed(),
+            );
+            for tc in &tool_calls {
+                let duration = if tc.duration.as_millis() < 1000 {
+                    format!("{}ms", tc.duration.as_millis())
+                } else {
+                    format!("{:.1}s", tc.duration.as_secs_f64())
+                };
+                let _ = writeln!(
+                    handle,
+                    "    {} {} {} {}",
+                    "→".dimmed(),
+                    tc.tool_name.cyan(),
+                    tc.args_summary.dimmed(),
+                    format!("({}, {})", tc.result_summary, duration).dimmed(),
+                );
+            }
         }
+
+        // Summary line — just a blank line separator.
+        // The "No issues found" message is handled by the output renderer.
+        let _ = writeln!(handle);
     }
 
     /// Render the current state to stderr, clearing previous output.
@@ -206,7 +231,7 @@ mod tests {
         tracker.start();
         tracker.update("file.rs", TaskStatus::InProgress);
         tracker.update("file.rs", TaskStatus::Done);
-        tracker.finish(0);
+        tracker.finish();
     }
 
     #[test]
@@ -258,7 +283,7 @@ mod tests {
     fn tracker_empty_files_no_panic() {
         let tracker = ProgressTracker::new(&[], &[], false);
         tracker.start();
-        tracker.finish(0);
+        tracker.finish();
     }
 
     #[test]
@@ -270,7 +295,7 @@ mod tests {
         );
         tracker.update("a.rs", TaskStatus::Done);
         // Finish with nonzero findings should not print "No issues found."
-        tracker.finish(5);
+        tracker.finish();
     }
 
     #[test]

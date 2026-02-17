@@ -81,9 +81,22 @@ impl Tool for SearchTextTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let start = crate::tools::start_tool_call();
         let results = search_text(&self.repo_root, &args.pattern, args.is_regex)
             .await
             .map_err(SearchTextError)?;
+
+        let result_summary = if results.is_empty() {
+            "no matches".to_string()
+        } else {
+            format!("{} result{}", results.len(), if results.len() == 1 { "" } else { "s" })
+        };
+        let args_summary = if args.pattern.len() > 40 {
+            format!("\"{}...\"" , &args.pattern[..37])
+        } else {
+            format!("\"{}\"" , &args.pattern)
+        };
+        crate::tools::finish_tool_call(start, "search_text", args_summary, result_summary);
 
         // Format results as a human-readable string for the LLM
         if results.is_empty() {

@@ -37,6 +37,22 @@ pub struct AgentProfile {
     /// `search_text` to trace tainted data flow").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agentic_instructions: Option<String>,
+    /// Environment variable names (or prefixes ending with `*`) that
+    /// custom command tools are allowed to inherit.
+    ///
+    /// By default, nitpik strips all sensitive env vars (LLM API keys,
+    /// license key) from the subprocess environment. Variables listed
+    /// here are re-injected from the parent process so that custom
+    /// tools can authenticate against external services.
+    ///
+    /// Example:
+    /// ```yaml
+    /// environment:
+    ///   - JIRA_TOKEN
+    ///   - AWS_*
+    /// ```
+    #[serde(default)]
+    pub environment: Vec<String>,
 }
 
 /// A custom tool defined in agent profile frontmatter.

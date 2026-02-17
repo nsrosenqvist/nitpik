@@ -5,6 +5,7 @@
 //! command is run as a subprocess (sandboxed to the repo root) and the
 //! combined stdout/stderr is returned.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -41,6 +42,10 @@ pub struct CustomCommandError(pub String);
 ///
 /// Constructed from a [`CustomToolDefinition`] parsed from agent profile
 /// frontmatter. The command runs in the repo root directory.
+///
+/// By default, sensitive environment variables (LLM API keys, license
+/// keys) are stripped from the subprocess. The `env_passthrough` list
+/// allows profile authors to explicitly re-inject specific variables.
 #[derive(Serialize, Deserialize)]
 pub struct CustomCommandTool {
     /// Tool name (matches `CustomToolDefinition::name`).
@@ -57,11 +62,18 @@ pub struct CustomCommandTool {
     all_param_names: Vec<String>,
     /// Repository root directory (commands run here).
     repo_root: PathBuf,
+    /// Environment variable names (or prefix globs like `AWS_*`) to
+    /// allow through to the subprocess despite being on the sensitive list.
+    env_passthrough: Vec<String>,
 }
 
 impl CustomCommandTool {
     /// Create a new `CustomCommandTool` from a profile definition and repo root.
-    pub fn new(def: &CustomToolDefinition, repo_root: PathBuf) -> Self {
+    ///
+    /// `env_passthrough` lists variable names (or prefix globs like `AWS_*`)
+    /// that the subprocess is allowed to inherit even if they appear on the
+    /// sensitive-variable strip list.
+    pub fn new(def: &CustomToolDefinition, repo_root: PathBuf, env_passthrough: Vec<String>) -> Self {
         // Build JSON Schema properties from the parameter definitions
         let mut properties = serde_json::Map::new();
         let mut required = Vec::new();
@@ -95,6 +107,7 @@ impl CustomCommandTool {
             required_params: required.clone(),
             all_param_names: all_names,
             repo_root,
+            env_passthrough,
         }
     }
 
@@ -128,6 +141,39 @@ impl CustomCommandTool {
 
         cmd
     }
+
+    /// Build a sanitized copy of the current environment.
+    ///
+    /// Starts with all inherited variables, then removes every key in
+    /// [`crate::constants::SENSITIVE_ENV_VARS`] *unless* the key matches
+    /// an entry in `env_passthrough`. Passthrough entries ending with `*`
+    /// are treated as prefix matches (e.g. `AWS_*` matches `AWS_REGION`).
+    fn build_sanitized_env(&self) -> HashMap<String, String> {
+        let mut env: HashMap<String, String> = std::env::vars().collect();
+
+        for &sensitive in crate::constants::SENSITIVE_ENV_VARS {
+            if self.is_passthrough(sensitive) {
+                continue;
+            }
+            env.remove(sensitive);
+        }
+
+        env
+    }
+
+    /// Returns `true` if `var_name` is explicitly allowed by the passthrough list.
+    fn is_passthrough(&self, var_name: &str) -> bool {
+        for pattern in &self.env_passthrough {
+            if let Some(prefix) = pattern.strip_suffix('*') {
+                if var_name.starts_with(prefix) {
+                    return true;
+                }
+            } else if pattern == var_name {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl Tool for CustomCommandTool {
@@ -159,6 +205,8 @@ impl Tool for CustomCommandTool {
         }
 
         let full_command = self.build_command(&args.params);
+        let sanitized_env = self.build_sanitized_env();
+        let start = crate::tools::start_tool_call();
 
         // Execute via shell to support pipes, redirects, etc.
         let output = tokio::time::timeout(
@@ -167,6 +215,8 @@ impl Tool for CustomCommandTool {
                 .arg("-c")
                 .arg(&full_command)
                 .current_dir(&self.repo_root)
+                .env_clear()
+                .envs(&sanitized_env)
                 .output(),
         )
         .await
@@ -207,7 +257,26 @@ impl Tool for CustomCommandTool {
             result.push_str("\n... [output truncated]");
         }
 
+        let exit_code = output.status.code().unwrap_or(-1);
+        crate::tools::finish_tool_call(
+            start,
+            &self.tool_name,
+            &full_command,
+            format!("exit {exit_code}, {}", format_byte_size(result.len())),
+        );
+
         Ok(result)
+    }
+}
+
+/// Format a byte count as a human-readable size string.
+fn format_byte_size(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes}B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }
 
@@ -257,14 +326,14 @@ mod tests {
 
     #[test]
     fn build_command_no_params() {
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let params = serde_json::Map::new();
         assert_eq!(tool.build_command(&params), "cargo test");
     }
 
     #[test]
     fn build_command_with_string_param() {
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let mut params = serde_json::Map::new();
         params.insert(
             "filter".to_string(),
@@ -275,7 +344,7 @@ mod tests {
 
     #[test]
     fn build_command_with_bool_true() {
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let mut params = serde_json::Map::new();
         params.insert("verbose".to_string(), serde_json::Value::Bool(true));
         assert_eq!(tool.build_command(&params), "cargo test --verbose");
@@ -283,7 +352,7 @@ mod tests {
 
     #[test]
     fn build_command_with_bool_false() {
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let mut params = serde_json::Map::new();
         params.insert("verbose".to_string(), serde_json::Value::Bool(false));
         assert_eq!(tool.build_command(&params), "cargo test");
@@ -291,7 +360,7 @@ mod tests {
 
     #[test]
     fn build_command_escapes_special_chars() {
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let mut params = serde_json::Map::new();
         params.insert(
             "filter".to_string(),
@@ -305,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_definition_matches() {
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let def = tool.definition(String::new()).await;
         assert_eq!(def.name, "run_tests");
         assert_eq!(def.description, "Run the test suite");
@@ -317,7 +386,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_name_override() {
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         assert_eq!(Tool::name(&tool), "run_tests");
     }
 
@@ -329,7 +398,7 @@ mod tests {
             command: "echo hello".to_string(),
             parameters: vec![],
         };
-        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"), vec![]);
         let args = CustomCommandArgs {
             params: serde_json::Map::new(),
         };
@@ -350,7 +419,7 @@ mod tests {
                 required: true,
             }],
         };
-        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"));
+        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"), vec![]);
         let args = CustomCommandArgs {
             params: serde_json::Map::new(),
         };
@@ -371,5 +440,111 @@ mod tests {
         assert_eq!(shell_escape("hello world"), "'hello world'");
         assert_eq!(shell_escape("$(whoami)"), "'$(whoami)'");
         assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn env_sanitization_strips_sensitive_vars() {
+        // Set a known sensitive var
+        unsafe { std::env::set_var("NITPIK_API_KEY", "secret-key-123") };
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-secret") };
+
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
+        let env = tool.build_sanitized_env();
+
+        assert!(!env.contains_key("NITPIK_API_KEY"), "NITPIK_API_KEY should be stripped");
+        assert!(!env.contains_key("ANTHROPIC_API_KEY"), "ANTHROPIC_API_KEY should be stripped");
+
+        // PATH should still be present (not a sensitive var)
+        assert!(env.contains_key("PATH"), "PATH should be preserved");
+
+        // Cleanup
+        unsafe { std::env::remove_var("NITPIK_API_KEY") };
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+    }
+
+    #[test]
+    fn env_passthrough_exact_match() {
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-passthrough") };
+
+        let tool = CustomCommandTool::new(
+            &test_def(),
+            PathBuf::from("/tmp"),
+            vec!["ANTHROPIC_API_KEY".to_string()],
+        );
+        let env = tool.build_sanitized_env();
+
+        assert_eq!(
+            env.get("ANTHROPIC_API_KEY").map(|s| s.as_str()),
+            Some("sk-ant-passthrough"),
+            "explicitly passed-through var should be preserved"
+        );
+
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+    }
+
+    #[test]
+    fn env_passthrough_prefix_glob() {
+        unsafe { std::env::set_var("NITPIK_API_KEY", "key-with-prefix-glob") };
+        unsafe { std::env::set_var("NITPIK_LICENSE_KEY", "license-with-prefix-glob") };
+
+        let tool = CustomCommandTool::new(
+            &test_def(),
+            PathBuf::from("/tmp"),
+            vec!["NITPIK_*".to_string()],
+        );
+        let env = tool.build_sanitized_env();
+
+        assert_eq!(
+            env.get("NITPIK_API_KEY").map(|s| s.as_str()),
+            Some("key-with-prefix-glob"),
+            "NITPIK_* glob should pass through NITPIK_API_KEY"
+        );
+        assert_eq!(
+            env.get("NITPIK_LICENSE_KEY").map(|s| s.as_str()),
+            Some("license-with-prefix-glob"),
+            "NITPIK_* glob should pass through NITPIK_LICENSE_KEY"
+        );
+
+        unsafe { std::env::remove_var("NITPIK_API_KEY") };
+        unsafe { std::env::remove_var("NITPIK_LICENSE_KEY") };
+    }
+
+    #[test]
+    fn is_passthrough_logic() {
+        let tool = CustomCommandTool::new(
+            &test_def(),
+            PathBuf::from("/tmp"),
+            vec!["JIRA_TOKEN".to_string(), "AWS_*".to_string()],
+        );
+
+        assert!(tool.is_passthrough("JIRA_TOKEN"));
+        assert!(tool.is_passthrough("AWS_REGION"));
+        assert!(tool.is_passthrough("AWS_SECRET_ACCESS_KEY"));
+        assert!(!tool.is_passthrough("ANTHROPIC_API_KEY"));
+        assert!(!tool.is_passthrough("RANDOM_VAR"));
+    }
+
+    #[tokio::test]
+    async fn execute_command_env_sanitized() {
+        // Verify that a sensitive env var is NOT visible to the subprocess
+        unsafe { std::env::set_var("GEMINI_API_KEY", "test-gemini-key-for-sanitization") };
+
+        let def = CustomToolDefinition {
+            name: "check_env".to_string(),
+            description: "Print env var".to_string(),
+            command: "printenv GEMINI_API_KEY || echo MISSING".to_string(),
+            parameters: vec![],
+        };
+        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"), vec![]);
+        let args = CustomCommandArgs {
+            params: serde_json::Map::new(),
+        };
+        let result = tool.call(args).await.unwrap();
+        assert!(
+            result.contains("MISSING"),
+            "GEMINI_API_KEY should not be visible in subprocess, got: {result}"
+        );
+
+        unsafe { std::env::remove_var("GEMINI_API_KEY") };
     }
 }

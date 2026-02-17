@@ -74,9 +74,17 @@ impl Tool for ListDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let start = crate::tools::start_tool_call();
         let entries = list_directory(&self.repo_root, &args.path)
             .await
             .map_err(ListDirectoryError)?;
+
+        let result_summary = format!(
+            "{} entr{}",
+            entries.len(),
+            if entries.len() == 1 { "y" } else { "ies" }
+        );
+        crate::tools::finish_tool_call(start, "list_directory", &args.path, result_summary);
 
         // Format as a readable listing for the LLM
         if entries.is_empty() {

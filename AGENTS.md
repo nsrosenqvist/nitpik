@@ -29,7 +29,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 | `context/` | Baseline context: full file loading, project doc detection (supports `--no-project-docs` and `--exclude-doc`) |
 | `agents/` | Built-in profiles (`backend`, `frontend`, `architect`, `security`), markdown+YAML parser, auto-profile selection, tag-based profile resolution |
 | `providers/` | `ReviewProvider` trait, rig-core multi-provider integration (Anthropic, OpenAI, Gemini, Cohere, DeepSeek, xAI, Groq, Perplexity, OpenAI-compatible) |
-| `tools/` | Agentic tools: `ReadFileTool`, `SearchTextTool`, `ListDirectoryTool`, `CustomCommandTool` (user-defined CLI tools from profile frontmatter) |
+| `tools/` | Agentic tools: `ReadFileTool`, `SearchTextTool`, `ListDirectoryTool`, `CustomCommandTool` (user-defined CLI tools from profile frontmatter), `ToolCallLog` (audit log for tool invocations) |
 | `orchestrator/` | Parallel review execution, prompt construction, deduplication |
 | `output/` | `OutputRenderer` trait + format implementations (terminal, JSON, GitHub, GitLab, Bitbucket, Forgejo) |
 | `security/` | Secret scanner, vendored gitleaks rules, entropy checks, redaction |
@@ -137,9 +137,10 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 1. Create `src/agents/builtin/my_profile.md` (YAML frontmatter + system prompt)
 2. Register with `include_str!` in `src/agents/builtin/mod.rs`
 
-**Frontmatter fields**: `name`, `description`, `model` (optional), `tags`, `tools` (optional), `agentic_instructions` (optional).
+**Frontmatter fields**: `name`, `description`, `model` (optional), `tags`, `tools` (optional), `agentic_instructions` (optional), `environment` (optional).
 
 - The `agentic_instructions` field contains tool-usage guidance that is **only** injected in agentic mode (when the LLM has access to tools). Keep it out of the main system prompt body so non-agentic reviews aren't confused by references to tools.
+- The `environment` field lists env var names (or prefix globs like `AWS_*`) that custom command tools are allowed to inherit. By default, all LLM API keys and nitpik secrets are stripped from subprocess environments. See **Environment Sanitization** below.
 - Use `tags` to describe the profile's focus areas. Tags serve double duty: users can select profiles with `--tag`, and the orchestrator uses them to build a dynamic coordination note telling each reviewer what the sibling reviewers cover.
 - Do **not** hardcode references to other profile names in the system prompt body. When multiple agents run in parallel, the orchestrator injects a coordination note listing sibling reviewers and their tags automatically.
 
@@ -167,6 +168,42 @@ tools:
 ```
 
 At runtime each entry becomes a `CustomCommandTool` the LLM can invoke. Commands are sandboxed to the repo root with a 120 s timeout and 256 KB output cap.
+
+#### Environment Sanitization
+
+Custom command subprocesses inherit the parent environment **minus** all sensitive variables listed in `constants::SENSITIVE_ENV_VARS` (LLM API keys like `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc., plus `NITPIK_API_KEY` and `NITPIK_LICENSE_KEY`). This prevents accidental key leakage to user-defined commands.
+
+If a custom tool needs specific env vars (e.g. to authenticate with Jira, Docker, or AWS), declare them in the profile's `environment` frontmatter field:
+
+```yaml
+environment:
+  - JIRA_TOKEN
+  - AWS_*          # prefix glob — matches AWS_REGION, AWS_SECRET_ACCESS_KEY, etc.
+  - DOCKER_HOST
+tools:
+  - name: deploy_check
+    description: Check deployment status
+    command: curl -sH "Authorization: Bearer $JIRA_TOKEN" https://jira.example.com/status
+```
+
+Exact names and prefix globs (ending with `*`) are supported. Variables not in the sensitive list pass through unconditionally — you only need `environment` entries to re-allow variables that would otherwise be stripped.
+
+### Tool-Call Audit Log
+
+Every agentic tool invocation (built-in and custom) is recorded in a process-global `ToolCallLog` (`src/tools/mod.rs`). Each entry captures:
+
+- Tool name, argument summary, result summary, and wall-clock duration.
+
+The progress display (`src/progress/mod.rs`) drains this log at the end of a review run and prints a compact summary showing what the LLM explored:
+
+```
+  ▸ 5 tool calls
+    → read_file src/main.rs (1.2KB, 3ms)
+    → search_text "fn process" (3 results, 45ms)
+    → run_tests --filter auth (exit 0, 2.1s)
+```
+
+This is shown after the file-status summary and before the findings count. It is suppressed with `--quiet`.
 
 ### Add LLM Provider Support
 

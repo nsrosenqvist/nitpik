@@ -74,40 +74,51 @@ pub fn parse_unified_diff(input: &str) -> Vec<FileDiff> {
 fn parse_diff_header(line: &str) -> (String, String) {
     let rest = line.strip_prefix("diff --git ").unwrap_or(line);
 
-    // Handle paths with spaces by finding the " b/" separator
-    // Paths are prefixed with a/ and b/
-    if let Some(b_idx) = find_b_separator(rest) {
+    // Handle paths with spaces by finding the second prefix separator
+    // Paths are prefixed with a/ and b/ (default), or c/w/i/o/ when
+    // git's diff.mnemonicPrefix is enabled.
+    if let Some(b_idx) = find_second_prefix(rest) {
         let a_part = &rest[..b_idx];
         let b_part = &rest[b_idx + 1..]; // skip the space
 
-        let old_path = a_part.strip_prefix("a/").unwrap_or(a_part).to_string();
-        let new_path = b_part.strip_prefix("b/").unwrap_or(b_part).to_string();
+        let old_path = strip_diff_prefix(a_part).to_string();
+        let new_path = strip_diff_prefix(b_part).to_string();
         (old_path, new_path)
     } else {
         // Fallback: split on space
         let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-        let old_path = parts
-            .first()
-            .unwrap_or(&"")
-            .strip_prefix("a/")
-            .unwrap_or(parts.first().unwrap_or(&""))
-            .to_string();
-        let new_path = parts
-            .get(1)
-            .unwrap_or(&"")
-            .strip_prefix("b/")
-            .unwrap_or(parts.get(1).unwrap_or(&""))
-            .to_string();
+        let old_path = strip_diff_prefix(parts.first().unwrap_or(&"")).to_string();
+        let new_path = strip_diff_prefix(parts.get(1).unwrap_or(&"")).to_string();
         (old_path, new_path)
     }
 }
 
-/// Find the position of " b/" separator in the diff header.
-fn find_b_separator(s: &str) -> Option<usize> {
-    // Look for " b/" pattern - the space before b/
+/// Strip a single-character git diff prefix (`a/`, `b/`, `c/`, `w/`, `i/`, `o/`).
+///
+/// These prefixes appear in `diff --git` headers:
+/// - `a/` and `b/` are the defaults.
+/// - `c/` (commit), `w/` (working tree), `i/` (index), `o/` (object)
+///   are used when `diff.mnemonicPrefix` is enabled.
+fn strip_diff_prefix(path: &str) -> &str {
+    if path.len() >= 2 {
+        let bytes = path.as_bytes();
+        if bytes[1] == b'/' && matches!(bytes[0], b'a' | b'b' | b'c' | b'w' | b'i' | b'o') {
+            return &path[2..];
+        }
+    }
+    path
+}
+
+/// Find the position of the second path prefix separator in a diff header.
+///
+/// Looks for ` X/` where X is any known single-letter prefix (`a`..`o`).
+fn find_second_prefix(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     for i in 1..bytes.len().saturating_sub(1) {
-        if bytes[i] == b' ' && bytes.get(i + 1) == Some(&b'b') && bytes.get(i + 2) == Some(&b'/') {
+        if bytes[i] == b' '
+            && bytes.get(i + 2) == Some(&b'/')
+            && matches!(bytes.get(i + 1), Some(b'a' | b'b' | b'c' | b'w' | b'i' | b'o'))
+        {
             return Some(i);
         }
     }
@@ -442,5 +453,41 @@ index 1234567..abcdefg 100644
         let files = parse_unified_diff(diff);
         let hunk = &files[0].hunks[0];
         assert_eq!(hunk.header.as_deref(), Some("fn some_function() {"));
+    }
+
+    #[test]
+    fn parse_mnemonic_prefix_cw() {
+        // diff.mnemonicPrefix: c/ = commit, w/ = working tree
+        let diff = "diff --git c/auth.rs w/auth.rs\nindex 1234567..abcdefg 100644\n--- c/auth.rs\n+++ w/auth.rs\n@@ -1,2 +1,3 @@\n fn main() {\n+    todo!();\n }\n";
+        let files = parse_unified_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].old_path, "auth.rs");
+        assert_eq!(files[0].new_path, "auth.rs");
+    }
+
+    #[test]
+    fn parse_mnemonic_prefix_iw() {
+        // diff.mnemonicPrefix: i/ = index, w/ = working tree
+        let diff = "diff --git i/db.rs w/db.rs\nindex 1234567..abcdefg 100644\n--- i/db.rs\n+++ w/db.rs\n@@ -1,2 +1,3 @@\n fn main() {\n+    todo!();\n }\n";
+        let files = parse_unified_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].old_path, "db.rs");
+        assert_eq!(files[0].new_path, "db.rs");
+    }
+
+    #[test]
+    fn strip_diff_prefix_all_variants() {
+        assert_eq!(strip_diff_prefix("a/file.rs"), "file.rs");
+        assert_eq!(strip_diff_prefix("b/file.rs"), "file.rs");
+        assert_eq!(strip_diff_prefix("c/file.rs"), "file.rs");
+        assert_eq!(strip_diff_prefix("w/file.rs"), "file.rs");
+        assert_eq!(strip_diff_prefix("i/file.rs"), "file.rs");
+        assert_eq!(strip_diff_prefix("o/file.rs"), "file.rs");
+        // Should not strip unknown prefixes
+        assert_eq!(strip_diff_prefix("x/file.rs"), "x/file.rs");
+        assert_eq!(strip_diff_prefix("src/file.rs"), "src/file.rs");
+        // Edge cases
+        assert_eq!(strip_diff_prefix("a"), "a");
+        assert_eq!(strip_diff_prefix(""), "");
     }
 }

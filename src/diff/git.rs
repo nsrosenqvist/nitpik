@@ -10,7 +10,7 @@ use crate::env::Env;
 /// Run `git diff <base_ref>` and return the unified diff output.
 pub async fn git_diff(repo_root: &Path, base_ref: &str) -> Result<String, DiffError> {
     let output = tokio::process::Command::new("git")
-        .args(["diff", base_ref])
+        .args(["diff", "--src-prefix=a/", "--dst-prefix=b/", base_ref])
         .current_dir(repo_root)
         .output()
         .await

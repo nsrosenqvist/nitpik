@@ -67,9 +67,14 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        read_file(&self.repo_root, &args.path)
-            .await
-            .map_err(ReadFileError)
+        let start = crate::tools::start_tool_call();
+        let result = read_file(&self.repo_root, &args.path).await;
+        let summary = match &result {
+            Ok(content) => format_byte_size(content.len()),
+            Err(e) => format!("error: {e}"),
+        };
+        crate::tools::finish_tool_call(start, "read_file", &args.path, summary);
+        result.map_err(ReadFileError)
     }
 }
 
@@ -106,6 +111,17 @@ pub async fn read_file(repo_root: &Path, relative_path: &str) -> Result<String, 
     tokio::fs::read_to_string(&canonical)
         .await
         .map_err(|e| format!("cannot read file: {e}"))
+}
+
+/// Format a byte count as a human-readable size string.
+fn format_byte_size(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes}B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
+    }
 }
 
 /// Sanitize a relative path to prevent directory traversal.

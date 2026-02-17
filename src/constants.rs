@@ -80,3 +80,23 @@ pub const ENV_BASE_URL: &str = "NITPIK_BASE_URL";
 pub const ENV_LICENSE_KEY: &str = "NITPIK_LICENSE_KEY";
 pub const ENV_TELEMETRY: &str = "NITPIK_TELEMETRY";
 pub const ENV_DEBUG: &str = "NITPIK_DEBUG";
+
+/// Environment variables stripped from custom command subprocesses.
+///
+/// These contain LLM API keys and nitpik secrets that spawned commands
+/// should never see. Profile authors can explicitly pass through other
+/// env vars via the `environment` frontmatter field.
+pub const SENSITIVE_ENV_VARS: &[&str] = &[
+    // nitpik's own secrets
+    ENV_API_KEY,
+    ENV_LICENSE_KEY,
+    // Provider-specific API keys
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "COHERE_API_KEY",
+    "GEMINI_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "XAI_API_KEY",
+    "GROQ_API_KEY",
+];
