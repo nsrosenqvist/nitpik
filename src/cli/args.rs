@@ -145,9 +145,13 @@ pub struct ReviewArgs {
     #[arg(long, default_value = "terminal")]
     pub format: OutputFormat,
 
-    /// Exit non-zero if findings meet this severity threshold.
+    /// Exit non-zero if findings meet this severity threshold (default: error).
     #[arg(long)]
     pub fail_on: Option<Severity>,
+
+    /// Never exit non-zero on findings, even when --fail-on or config is set.
+    #[arg(long, default_value_t = false, conflicts_with = "fail_on")]
+    pub no_fail: bool,
 
     // --- Agentic ---
     /// Enable agentic context gathering (tools for LLM).
@@ -302,6 +306,7 @@ mod tests {
             tag: vec![],
             format: OutputFormat::Terminal,
             fail_on: None,
+            no_fail: false,
             agent: false,
             max_turns: 10,
             max_tool_calls: 10,

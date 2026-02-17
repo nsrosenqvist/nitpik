@@ -173,10 +173,11 @@ nitpik profiles --profile-dir ./agents
 | Bitbucket Code Insights | `--format bitbucket` | Bitbucket Pipelines (requires `BITBUCKET_TOKEN`) |
 | Forgejo/Gitea PR review | `--format forgejo` | Woodpecker CI / Forgejo / Gitea (requires `FORGEJO_TOKEN`) |
 
-Fail a CI build on findings above a threshold:
+nitpik exits non-zero on `error`-severity findings by default — just like standard test runners and linters. Adjust the threshold or disable it:
 
 ```bash
-nitpik review --diff-base main --format github --fail-on warning
+nitpik review --diff-base main --format github --fail-on warning  # also fail on warnings
+nitpik review --diff-base main --no-fail                          # always exit 0
 ```
 
 Run `nitpik help review` for the full list of flags.

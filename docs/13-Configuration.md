@@ -66,7 +66,7 @@ The project config overrides the global config, so teams can set project-level s
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `default_profiles` | array | `["backend"]` | Profiles used when `--profile` is not specified on the CLI. |
-| `fail_on` | string | *(none)* | Default fail-on severity. One of: `error`, `warning`, `info`. When set, nitpik exits non-zero if any finding meets this threshold. |
+| `fail_on` | string | `"error"` | Fail-on severity threshold. One of: `error`, `warning`, `info`. nitpik exits non-zero if any finding meets this threshold. Use `--no-fail` on the CLI to disable. |
 
 ### `[review.agentic]`
 

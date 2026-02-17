@@ -348,15 +348,14 @@ async fn cache_prevents_duplicate_calls() {
         findings: findings.clone(),
     });
     let config = Config::default();
-    let cache = CacheEngine::new(true);
+    let cache_dir = tempfile::tempdir().expect("failed to create temp cache dir");
+    let cache = CacheEngine::new_with_dir(cache_dir.path().to_path_buf());
     let provider_trait: Arc<dyn ReviewProvider> = Arc::clone(&provider) as Arc<dyn ReviewProvider>;
     let progress = Arc::new(ProgressTracker::new(&["src/main.rs".to_string()], &["cache-agent".to_string()], false));
     let orchestrator = ReviewOrchestrator::new(provider_trait, &config, cache, progress, false, None, String::new());
 
-    // Use unique content to avoid collisions with previously cached results
-    let unique_content = format!("let unique_{} = true;", std::process::id());
     let context = ReviewContext {
-        diffs: vec![test_diff("src/main.rs", &unique_content)],
+        diffs: vec![test_diff("src/main.rs", "let x = 1;")],
         baseline: BaselineContext::default(),
         repo_root: "/tmp/test-repo".to_string(),
         is_path_scan: false,
@@ -515,35 +514,10 @@ async fn prior_findings_injected_on_cache_invalidation() {
     };
 
     // We need an orchestrator that uses the same cache directory.
-    // Since CacheEngine::new() doesn't let us pass a custom dir, we'll
-    // build a CacheEngine from a store that uses our temp dir via a
-    // workaround: set up environment so dirs::config_dir points here.
-    // Instead, let's just verify the prompt capturing works with the
-    // orchestrator by using CacheEngine(enabled=false) for the provider call
-    // and manually checking that `get_previous` returns the right data.
+    // Now that CacheEngine::new_with_dir exists, we can use an isolated temp dir.
 
-    // Actually, the simplest approach: create a new orchestrator that has
-    // cache disabled but verify the prompt manually.
-
-    // Better approach: verify the sidecar store directly, then test the
-    // orchestrator prompt injection by checking captured prompts.
-
-    // The orchestrator uses its own internal cache. For this test, let's
-    // verify the two halves independently:
-    //
-    // Half 1 (already verified above): FileStore sidecar read/write works.
-    //
-    // Half 2: Verify the orchestrator actually injects prior findings.
-    // We'll do this by running the orchestrator with cache enabled but
-    // using a brand-new CacheEngine (empty cache), and manually pre-seeding
-    // the cache directory.
-
-    // Get the actual cache directory from a real CacheEngine
-    let real_cache = CacheEngine::new(true);
-    let cache_path = real_cache.path().expect("cache path should exist").clone();
-
-    // Pre-seed the cache: write findings + sidecar under the real cache dir
-    let seeded_store = nitpik::cache::store::FileStore::new_with_dir(cache_path.clone());
+    // Pre-seed the cache: write findings + sidecar under our temp dir
+    let seeded_store = nitpik::cache::store::FileStore::new_with_dir(cache_dir.path().to_path_buf());
     seeded_store.put(&cache_key1, &initial_findings);
     seeded_store.put_sidecar(
         "src/app.rs",
@@ -553,8 +527,8 @@ async fn prior_findings_injected_on_cache_invalidation() {
         "",
     );
 
-    // Now create an orchestrator with cache enabled — it will use the same dir
-    let cache2 = CacheEngine::new(true);
+    // Create an orchestrator with cache pointing to our temp dir
+    let cache2 = CacheEngine::new_with_dir(cache_dir.path().to_path_buf());
     let progress = Arc::new(ProgressTracker::new(
         &["src/app.rs".to_string()],
         &["prior-agent".to_string()],

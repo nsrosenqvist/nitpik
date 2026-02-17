@@ -73,7 +73,9 @@ See [CI/CD Integration — Woodpecker/Forgejo](14-CI-Integration#woodpecker-ci-f
 
 ## Failing on Findings
 
-Use `--fail-on` to exit with a non-zero status code when findings meet a severity threshold:
+By default, nitpik exits with a non-zero status code when any finding has severity `error` — matching the behavior of standard testing and linting tools like PHPUnit, Vitest, and ESLint.
+
+Override the threshold with `--fail-on`:
 
 ```bash
 nitpik review --diff-base main --format github --fail-on warning
@@ -81,11 +83,15 @@ nitpik review --diff-base main --format github --fail-on warning
 
 | `--fail-on` value | Exits non-zero when |
 |---|---|
-| `error` | Any finding has severity `error` |
+| `error` (default) | Any finding has severity `error` |
 | `warning` | Any finding has severity `warning` or `error` |
 | `info` | Any finding exists (any severity) |
 
-When not set, nitpik always exits `0` regardless of findings. In CI, combine `--fail-on` with your platform's failure handling to block merges on review findings.
+To disable failure entirely (always exit `0`), use `--no-fail`:
+
+```bash
+nitpik review --diff-base main --no-fail
+```
 
 ## Related Pages
 

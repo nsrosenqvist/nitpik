@@ -222,10 +222,12 @@ Enable `--scan-secrets` in CI pipelines. This catches accidentally committed sec
 
 ### Fail-On Threshold
 
-Use `--fail-on` to gate merges:
-- `--fail-on error` — block only on confirmed bugs (least noisy)
+By default, nitpik exits non-zero when any finding has severity `error`. Use `--fail-on` to adjust the threshold:
+- `--fail-on error` — block only on confirmed bugs (default)
 - `--fail-on warning` — block on likely issues (recommended for most teams)
 - `--fail-on info` — block on any finding (strictest)
+
+To disable failure entirely, pass `--no-fail`.
 
 ### Quiet Mode
 

@@ -535,8 +535,12 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     // Finish progress display
     progress.finish();
 
-    // Resolve fail-on threshold (CLI flag takes priority over config)
-    let fail_on_severity: Option<Severity> = args.fail_on.or(config.review.fail_on);
+    // Resolve fail-on threshold (CLI flag takes priority over config, default: error)
+    let fail_on_severity: Option<Severity> = if args.no_fail {
+        None
+    } else {
+        args.fail_on.or(config.review.fail_on).or(Some(Severity::Error))
+    };
 
     // Render and print output
     render_and_output(&args.format, &findings, fail_on_severity).await;

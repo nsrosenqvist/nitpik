@@ -37,6 +37,14 @@ impl CacheEngine {
         }
     }
 
+    /// Create a cache engine with a specific cache directory (useful for testing).
+    pub fn new_with_dir(cache_dir: std::path::PathBuf) -> Self {
+        Self {
+            enabled: true,
+            store: store::FileStore::new_with_dir(cache_dir),
+        }
+    }
+
     /// Look up cached findings.
     pub fn get(&self, key: &str) -> Option<Vec<Finding>> {
         if !self.enabled {
