@@ -9,8 +9,8 @@
 //! `CI_COMMIT_PULL_REQUEST`, `CI_COMMIT_SHA`) are provided automatically.
 //! The user only needs to supply `FORGEJO_TOKEN`.
 
-use crate::models::finding::{Finding, Severity};
 use crate::env::Env;
+use crate::models::finding::{Finding, Severity};
 use crate::output::OutputRenderer;
 use thiserror::Error;
 
@@ -55,7 +55,11 @@ impl OutputRenderer for ForgejoRenderer {
             "**{}** found {} {} ({} error{}, {} warning{}, {} info)\n\n_{}_",
             crate::constants::APP_NAME,
             summary.total,
-            if summary.total == 1 { "finding" } else { "findings" },
+            if summary.total == 1 {
+                "finding"
+            } else {
+                "findings"
+            },
             summary.errors,
             if summary.errors == 1 { "" } else { "s" },
             summary.warnings,
@@ -95,7 +99,8 @@ fn format_comment_body(f: &Finding) -> String {
 
 /// Read a required environment variable or return a [`ForgejoError`].
 fn require_env(env: &Env, name: &str) -> Result<String, ForgejoError> {
-    env.var(name).map_err(|_| ForgejoError::MissingEnvVar(name.into()))
+    env.var(name)
+        .map_err(|_| ForgejoError::MissingEnvVar(name.into()))
 }
 
 /// Post findings to the Forgejo/Gitea Pull Request Review API.
@@ -144,7 +149,11 @@ pub async fn post_to_forgejo(findings: &[Finding], env: &Env) -> Result<(), Forg
         "**{}** found {} {} ({} error{}, {} warning{}, {} info)\n\n_{}_",
         crate::constants::APP_NAME,
         summary.total,
-        if summary.total == 1 { "finding" } else { "findings" },
+        if summary.total == 1 {
+            "finding"
+        } else {
+            "findings"
+        },
         summary.errors,
         if summary.errors == 1 { "" } else { "s" },
         summary.warnings,
@@ -195,8 +204,8 @@ pub async fn post_to_forgejo(findings: &[Finding], env: &Env) -> Result<(), Forg
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::finding::{Finding, Severity};
     use crate::env::Env;
+    use crate::models::finding::{Finding, Severity};
 
     fn sample_findings() -> Vec<Finding> {
         vec![
@@ -366,7 +375,10 @@ mod tests {
         let result = post_to_forgejo(&sample_findings(), &env).await;
         assert!(result.is_err());
         assert!(
-            result.unwrap_err().to_string().contains("CI_COMMIT_PULL_REQUEST"),
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("CI_COMMIT_PULL_REQUEST"),
             "expected CI_COMMIT_PULL_REQUEST error"
         );
 

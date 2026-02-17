@@ -215,7 +215,14 @@ mod tests {
         std::fs::write(dir.path().join("test.rs"), "fn main() {}").unwrap();
 
         let tool = ReadFileTool::new(dir.path().to_path_buf());
-        let result = Tool::call(&tool, ReadFileArgs { path: "test.rs".to_string() }).await.unwrap();
+        let result = Tool::call(
+            &tool,
+            ReadFileArgs {
+                path: "test.rs".to_string(),
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(result, "fn main() {}");
     }
 

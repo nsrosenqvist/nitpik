@@ -45,7 +45,6 @@ pub const AI_DISCLOSURE: &str =
 /// Telemetry heartbeat endpoint.
 pub const TELEMETRY_URL: &str = "https://nitpik.dev/v1/heartbeat";
 
-
 // ── GitHub releases (self-update) ───────────────────────────────────
 
 /// GitHub owner/repo for release downloads.

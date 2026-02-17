@@ -144,7 +144,9 @@ mod tests {
             .output()
             .await
             .unwrap();
-        tokio::fs::write(p.join("file.txt"), "hello\n").await.unwrap();
+        tokio::fs::write(p.join("file.txt"), "hello\n")
+            .await
+            .unwrap();
         tokio::process::Command::new("git")
             .args(["add", "."])
             .current_dir(p)
@@ -159,7 +161,9 @@ mod tests {
             .unwrap();
 
         // Now modify a file for a non-empty diff
-        tokio::fs::write(p.join("file.txt"), "hello\nworld\n").await.unwrap();
+        tokio::fs::write(p.join("file.txt"), "hello\nworld\n")
+            .await
+            .unwrap();
 
         let result = git_diff(p, "HEAD").await;
         assert!(result.is_ok(), "git diff failed: {:?}", result.unwrap_err());
@@ -197,7 +201,9 @@ mod tests {
             .output()
             .await
             .unwrap();
-        tokio::fs::write(p.join("file.txt"), "hello\n").await.unwrap();
+        tokio::fs::write(p.join("file.txt"), "hello\n")
+            .await
+            .unwrap();
         tokio::process::Command::new("git")
             .args(["add", "."])
             .current_dir(p)
@@ -219,7 +225,10 @@ mod tests {
     async fn detect_branch_returns_empty_for_non_git_dir() {
         let dir = tempfile::tempdir().unwrap();
         let branch = detect_branch(dir.path(), &Env::real()).await;
-        assert!(branch.is_empty(), "non-git dir should return empty, got: {branch}");
+        assert!(
+            branch.is_empty(),
+            "non-git dir should return empty, got: {branch}"
+        );
     }
 
     #[tokio::test]
@@ -245,7 +254,9 @@ mod tests {
             .output()
             .await
             .unwrap();
-        tokio::fs::write(p.join("file.txt"), "hello\n").await.unwrap();
+        tokio::fs::write(p.join("file.txt"), "hello\n")
+            .await
+            .unwrap();
         tokio::process::Command::new("git")
             .args(["add", "."])
             .current_dir(p)

@@ -131,27 +131,60 @@ mod tests {
         assert_eq!(ProviderName::DeepSeek.to_string(), "deepseek");
         assert_eq!(ProviderName::XAI.to_string(), "xai");
         assert_eq!(ProviderName::Groq.to_string(), "groq");
-        assert_eq!(ProviderName::OpenAICompatible.to_string(), "openai-compatible");
+        assert_eq!(
+            ProviderName::OpenAICompatible.to_string(),
+            "openai-compatible"
+        );
     }
 
     #[test]
     fn provider_name_from_str_all_variants() {
-        assert_eq!("anthropic".parse::<ProviderName>().unwrap(), ProviderName::Anthropic);
-        assert_eq!("openai".parse::<ProviderName>().unwrap(), ProviderName::OpenAI);
-        assert_eq!("cohere".parse::<ProviderName>().unwrap(), ProviderName::Cohere);
-        assert_eq!("gemini".parse::<ProviderName>().unwrap(), ProviderName::Gemini);
-        assert_eq!("perplexity".parse::<ProviderName>().unwrap(), ProviderName::Perplexity);
-        assert_eq!("deepseek".parse::<ProviderName>().unwrap(), ProviderName::DeepSeek);
+        assert_eq!(
+            "anthropic".parse::<ProviderName>().unwrap(),
+            ProviderName::Anthropic
+        );
+        assert_eq!(
+            "openai".parse::<ProviderName>().unwrap(),
+            ProviderName::OpenAI
+        );
+        assert_eq!(
+            "cohere".parse::<ProviderName>().unwrap(),
+            ProviderName::Cohere
+        );
+        assert_eq!(
+            "gemini".parse::<ProviderName>().unwrap(),
+            ProviderName::Gemini
+        );
+        assert_eq!(
+            "perplexity".parse::<ProviderName>().unwrap(),
+            ProviderName::Perplexity
+        );
+        assert_eq!(
+            "deepseek".parse::<ProviderName>().unwrap(),
+            ProviderName::DeepSeek
+        );
         assert_eq!("xai".parse::<ProviderName>().unwrap(), ProviderName::XAI);
         assert_eq!("groq".parse::<ProviderName>().unwrap(), ProviderName::Groq);
-        assert_eq!("openai-compatible".parse::<ProviderName>().unwrap(), ProviderName::OpenAICompatible);
+        assert_eq!(
+            "openai-compatible".parse::<ProviderName>().unwrap(),
+            ProviderName::OpenAICompatible
+        );
     }
 
     #[test]
     fn provider_name_from_str_case_insensitive() {
-        assert_eq!("ANTHROPIC".parse::<ProviderName>().unwrap(), ProviderName::Anthropic);
-        assert_eq!("OpenAI".parse::<ProviderName>().unwrap(), ProviderName::OpenAI);
-        assert_eq!("Gemini".parse::<ProviderName>().unwrap(), ProviderName::Gemini);
+        assert_eq!(
+            "ANTHROPIC".parse::<ProviderName>().unwrap(),
+            ProviderName::Anthropic
+        );
+        assert_eq!(
+            "OpenAI".parse::<ProviderName>().unwrap(),
+            ProviderName::OpenAI
+        );
+        assert_eq!(
+            "Gemini".parse::<ProviderName>().unwrap(),
+            ProviderName::Gemini
+        );
     }
 
     #[test]
@@ -165,15 +198,24 @@ mod tests {
 
     #[test]
     fn provider_name_api_key_env_var() {
-        assert_eq!(ProviderName::Anthropic.api_key_env_var(), "ANTHROPIC_API_KEY");
+        assert_eq!(
+            ProviderName::Anthropic.api_key_env_var(),
+            "ANTHROPIC_API_KEY"
+        );
         assert_eq!(ProviderName::OpenAI.api_key_env_var(), "OPENAI_API_KEY");
         assert_eq!(ProviderName::Cohere.api_key_env_var(), "COHERE_API_KEY");
         assert_eq!(ProviderName::Gemini.api_key_env_var(), "GEMINI_API_KEY");
-        assert_eq!(ProviderName::Perplexity.api_key_env_var(), "PERPLEXITY_API_KEY");
+        assert_eq!(
+            ProviderName::Perplexity.api_key_env_var(),
+            "PERPLEXITY_API_KEY"
+        );
         assert_eq!(ProviderName::DeepSeek.api_key_env_var(), "DEEPSEEK_API_KEY");
         assert_eq!(ProviderName::XAI.api_key_env_var(), "XAI_API_KEY");
         assert_eq!(ProviderName::Groq.api_key_env_var(), "GROQ_API_KEY");
-        assert_eq!(ProviderName::OpenAICompatible.api_key_env_var(), "OPENAI_API_KEY");
+        assert_eq!(
+            ProviderName::OpenAICompatible.api_key_env_var(),
+            "OPENAI_API_KEY"
+        );
     }
 
     #[test]

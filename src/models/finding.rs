@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Severity level of a finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, ValueEnum, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, ValueEnum, JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     /// Informational suggestion.
@@ -29,12 +31,11 @@ impl<'de> Deserialize<'de> for Severity {
     {
         let s = String::deserialize(deserializer)?;
         match s.to_lowercase().as_str() {
-            "info" | "note" | "suggestion" | "low" | "minor" | "trivial" | "style"
-                => Ok(Severity::Info),
-            "warning" | "warn" | "medium" | "moderate" | "major"
-                => Ok(Severity::Warning),
-            "error" | "critical" | "high" | "severe" | "blocker" | "fatal"
-                => Ok(Severity::Error),
+            "info" | "note" | "suggestion" | "low" | "minor" | "trivial" | "style" => {
+                Ok(Severity::Info)
+            }
+            "warning" | "warn" | "medium" | "moderate" | "major" => Ok(Severity::Warning),
+            "error" | "critical" | "high" | "severe" | "blocker" | "fatal" => Ok(Severity::Error),
             _ => {
                 // Fall back to warning for unrecognized severities rather than failing
                 Ok(Severity::Warning)

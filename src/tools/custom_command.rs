@@ -80,7 +80,11 @@ impl CustomCommandTool {
     /// `env_passthrough` lists additional variable names (or prefix globs
     /// like `AWS_*`) that the subprocess is allowed to inherit beyond the
     /// default safe set.
-    pub fn new(def: &CustomToolDefinition, repo_root: PathBuf, env_passthrough: Vec<String>) -> Self {
+    pub fn new(
+        def: &CustomToolDefinition,
+        repo_root: PathBuf,
+        env_passthrough: Vec<String>,
+    ) -> Self {
         // Build JSON Schema properties from the parameter definitions
         let mut properties = serde_json::Map::new();
         let mut required = Vec::new();
@@ -296,15 +300,14 @@ impl Tool for CustomCommandTool {
         if !unknown_params.is_empty() {
             audit_result.push_str(&format!(
                 ", ignored unknown params: {}",
-                unknown_params.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                unknown_params
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
-        crate::tools::finish_tool_call(
-            start,
-            &self.tool_name,
-            &full_command,
-            audit_result,
-        );
+        crate::tools::finish_tool_call(start, &self.tool_name, &full_command, audit_result);
 
         Ok(result)
     }
@@ -434,10 +437,7 @@ mod tests {
         let def = tool.definition(String::new()).await;
         assert_eq!(def.name, "run_tests");
         assert_eq!(def.description, "Run the test suite");
-        assert_eq!(
-            def.parameters["properties"]["filter"]["type"],
-            "string"
-        );
+        assert_eq!(def.parameters["properties"]["filter"]["type"], "string");
     }
 
     #[tokio::test]
@@ -508,10 +508,22 @@ mod tests {
         let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let env = tool.build_sanitized_env();
 
-        assert!(!env.contains_key("SOME_SECRET_TOKEN"), "non-safe vars should be stripped");
-        assert!(!env.contains_key("ANTHROPIC_API_KEY"), "API keys should be stripped");
-        assert!(env.contains_key("PATH"), "PATH should be preserved (safe list)");
-        assert!(env.contains_key("HOME"), "HOME should be preserved (safe list)");
+        assert!(
+            !env.contains_key("SOME_SECRET_TOKEN"),
+            "non-safe vars should be stripped"
+        );
+        assert!(
+            !env.contains_key("ANTHROPIC_API_KEY"),
+            "API keys should be stripped"
+        );
+        assert!(
+            env.contains_key("PATH"),
+            "PATH should be preserved (safe list)"
+        );
+        assert!(
+            env.contains_key("HOME"),
+            "HOME should be preserved (safe list)"
+        );
 
         // Cleanup
         unsafe { std::env::remove_var("SOME_SECRET_TOKEN") };
@@ -545,7 +557,10 @@ mod tests {
         // Without passthrough, AWS_ vars should NOT appear
         let tool_no_pass = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let env_no_pass = tool_no_pass.build_sanitized_env();
-        assert!(!env_no_pass.contains_key("AWS_REGION"), "AWS_REGION should not appear without passthrough");
+        assert!(
+            !env_no_pass.contains_key("AWS_REGION"),
+            "AWS_REGION should not appear without passthrough"
+        );
 
         // With passthrough, they should
         let tool = CustomCommandTool::new(
@@ -703,8 +718,14 @@ mod tests {
         };
         let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"), vec![]);
         let mut params = serde_json::Map::new();
-        params.insert("rogue_param".to_string(), serde_json::Value::String("evil".to_string()));
-        params.insert("another_unknown".to_string(), serde_json::Value::String("ignored".to_string()));
+        params.insert(
+            "rogue_param".to_string(),
+            serde_json::Value::String("evil".to_string()),
+        );
+        params.insert(
+            "another_unknown".to_string(),
+            serde_json::Value::String("ignored".to_string()),
+        );
         let args = CustomCommandArgs { params };
         // Should succeed — unknown params are ignored, not rejected
         let result = tool.call(args).await.unwrap();

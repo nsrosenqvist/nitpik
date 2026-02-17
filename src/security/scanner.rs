@@ -25,19 +25,16 @@ pub fn scan_content(content: &str, rules: &[SecretRule]) -> Vec<SecretMatch> {
         for (line_idx, line) in content.lines().enumerate() {
             // Keyword prefilter: skip lines that don't contain any keywords
             if !rule.keywords.is_empty()
-                && !rule.keywords.iter().any(|kw| {
-                    line.to_lowercase().contains(&kw.to_lowercase())
-                })
+                && !rule
+                    .keywords
+                    .iter()
+                    .any(|kw| line.to_lowercase().contains(&kw.to_lowercase()))
             {
                 continue;
             }
 
             // Check allowlist
-            if rule
-                .allowlist_regexes
-                .iter()
-                .any(|re| re.is_match(line))
-            {
+            if rule.allowlist_regexes.iter().any(|re| re.is_match(line)) {
                 continue;
             }
 
@@ -84,7 +81,11 @@ mod tests {
             description: "Test API key".to_string(),
             compiled_regex: regex::Regex::new(pattern).unwrap(),
             regex: pattern.to_string(),
-            keywords: vec!["api_key".to_string(), "api-key".to_string(), "apikey".to_string()],
+            keywords: vec![
+                "api_key".to_string(),
+                "api-key".to_string(),
+                "apikey".to_string(),
+            ],
             entropy_threshold: 0.0,
             allowlist_regexes: vec![regex::Regex::new("example").unwrap()],
         }

@@ -33,10 +33,10 @@ use clap::Parser;
 use cli::args::{CacheAction, Cli, Command, LicenseAction, OutputFormat, UpdateArgs};
 use config::Config;
 use env::Env;
-use models::{Severity, DEFAULT_PROFILE};
+use models::{DEFAULT_PROFILE, Severity};
 use progress::ProgressTracker;
-use providers::rig::RigProvider;
 use providers::ReviewProvider;
+use providers::rig::RigProvider;
 
 #[tokio::main]
 async fn main() {
@@ -67,11 +67,7 @@ async fn run() -> Result<()> {
 fn run_version() -> Result<()> {
     use colored::Colorize;
 
-    println!(
-        "{} {}",
-        "nitpik".bold(),
-        constants::VERSION.green().bold()
-    );
+    println!("{} {}", "nitpik".bold(), constants::VERSION.green().bold());
     println!("{}     {}", "commit:".dimmed(), constants::GIT_SHA);
     println!("{}      {}", "built:".dimmed(), constants::BUILD_DATE);
     println!("{}     {}", "target:".dimmed(), constants::TARGET);
@@ -93,11 +89,7 @@ async fn run_profiles(args: cli::args::ProfilesArgs) -> Result<()> {
 
     for agent in &agents {
         let p = &agent.profile;
-        println!(
-            "  {}  {}",
-            p.name.bold(),
-            p.description.dimmed(),
-        );
+        println!("  {}  {}", p.name.bold(), p.description.dimmed(),);
 
         if !p.tags.is_empty() {
             println!("         {}  {}", "tags:".cyan(), p.tags.join(", "));
@@ -142,12 +134,20 @@ async fn run_validate(args: cli::args::ValidateArgs) -> Result<()> {
                 let tool_names: Vec<_> = p.tools.iter().map(|t| t.name.as_str()).collect();
                 println!("         {}  {}", "tools:".cyan(), tool_names.join(", "));
             }
-            println!("         {}  {} chars", "prompt:".cyan(), agent.system_prompt.len());
+            println!(
+                "         {}  {} chars",
+                "prompt:".cyan(),
+                agent.system_prompt.len()
+            );
             Ok(())
         }
         Err(e) => {
             use colored::Colorize;
-            bail!("{} {}", "✖".red().bold(), format!("Invalid profile: {e}").red());
+            bail!(
+                "{} {}",
+                "✖".red().bold(),
+                format!("Invalid profile: {e}").red()
+            );
         }
     }
 }
@@ -170,12 +170,10 @@ async fn run_cache(action: CacheAction) -> Result<()> {
             println!("Cache entries: {}", stats.entries);
             println!("Cache size:    {}", stats.human_size());
         }
-        CacheAction::Path => {
-            match engine.path() {
-                Some(p) => println!("{}", p.display()),
-                None => bail!("cache directory could not be determined"),
-            }
-        }
+        CacheAction::Path => match engine.path() {
+            Some(p) => println!("{}", p.display()),
+            None => bail!("cache directory could not be determined"),
+        },
     }
 
     Ok(())
@@ -195,10 +193,9 @@ async fn run_license(action: LicenseAction) -> Result<()> {
     match action {
         LicenseAction::Activate { key } => {
             // Verify the key first
-            let claims = license::verify_license_key(&key)
-                .context("invalid license key")?;
-            let expiry = license::check_expiry(&claims)
-                .context("failed to check license expiry")?;
+            let claims = license::verify_license_key(&key).context("invalid license key")?;
+            let expiry =
+                license::check_expiry(&claims).context("failed to check license expiry")?;
 
             if expiry == license::ExpiryStatus::Expired {
                 bail!("this license key has expired ({})", claims.expires_at);
@@ -240,43 +237,42 @@ async fn run_license(action: LicenseAction) -> Result<()> {
             );
         }
         LicenseAction::Status => {
-            let config = Config::load(None, &Env::real()).context("failed to load configuration")?;
+            let config =
+                Config::load(None, &Env::real()).context("failed to load configuration")?;
 
             match config.license.key {
-                Some(ref key) => {
-                    match license::verify_license_key(key) {
-                        Ok(claims) => {
-                            let expiry = license::check_expiry(&claims)
-                                .context("failed to check expiry")?;
-                            println!("  {}  {}", "Customer:".cyan(), claims.customer_name);
-                            println!("  {}       {}", "ID:".cyan(), claims.customer_id);
-                            println!("  {}  {}", "Issued at:".cyan(), claims.issued_at);
-                            println!("  {} {}", "Expires at:".cyan(), claims.expires_at);
-                            match expiry {
-                                license::ExpiryStatus::Valid => {
-                                    println!("  {}    {}", "Status:".cyan(), "valid".green());
-                                }
-                                license::ExpiryStatus::ExpiringSoon { days } => {
-                                    println!(
-                                        "  {}    {}",
-                                        "Status:".cyan(),
-                                        format!("expires in {days} day(s)").yellow(),
-                                    );
-                                }
-                                license::ExpiryStatus::Expired => {
-                                    println!("  {}    {}", "Status:".cyan(), "expired".red());
-                                }
+                Some(ref key) => match license::verify_license_key(key) {
+                    Ok(claims) => {
+                        let expiry =
+                            license::check_expiry(&claims).context("failed to check expiry")?;
+                        println!("  {}  {}", "Customer:".cyan(), claims.customer_name);
+                        println!("  {}       {}", "ID:".cyan(), claims.customer_id);
+                        println!("  {}  {}", "Issued at:".cyan(), claims.issued_at);
+                        println!("  {} {}", "Expires at:".cyan(), claims.expires_at);
+                        match expiry {
+                            license::ExpiryStatus::Valid => {
+                                println!("  {}    {}", "Status:".cyan(), "valid".green());
+                            }
+                            license::ExpiryStatus::ExpiringSoon { days } => {
+                                println!(
+                                    "  {}    {}",
+                                    "Status:".cyan(),
+                                    format!("expires in {days} day(s)").yellow(),
+                                );
+                            }
+                            license::ExpiryStatus::Expired => {
+                                println!("  {}    {}", "Status:".cyan(), "expired".red());
                             }
                         }
-                        Err(e) => {
-                            println!(
-                                "  {} {}",
-                                "✖".red().bold(),
-                                format!("Invalid license key: {e}").red(),
-                            );
-                        }
                     }
-                }
+                    Err(e) => {
+                        println!(
+                            "  {} {}",
+                            "✖".red().bold(),
+                            format!("Invalid license key: {e}").red(),
+                        );
+                    }
+                },
                 None => {
                     println!("  No license key configured.");
                     println!("  Use `nitpik license activate <KEY>` to add one.");
@@ -302,10 +298,7 @@ async fn run_license(action: LicenseAction) -> Result<()> {
                 }
             }
 
-            println!(
-                "  {} License key removed.",
-                "✔".green().bold(),
-            );
+            println!("  {} License key removed.", "✔".green().bold(),);
         }
     }
 
@@ -313,9 +306,7 @@ async fn run_license(action: LicenseAction) -> Result<()> {
 }
 async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<()> {
     // Validate input mode
-    let input_mode = args
-        .validate_input()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let input_mode = args.validate_input().map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Resolve repo / working directory from --path (default: cwd)
     let base_dir = std::fs::canonicalize(&args.path)
@@ -327,34 +318,30 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     let repo_root_path = Path::new(&repo_root);
 
     // Load config with layering
-    let config = Config::load(Some(repo_root_path), &Env::real())
-        .context("failed to load configuration")?;
+    let config =
+        Config::load(Some(repo_root_path), &Env::real()).context("failed to load configuration")?;
 
     // Verify license key (if present)
     let license_claims = if let Some(ref key) = config.license.key {
         match license::verify_license_key(key) {
-            Ok(claims) => {
-                match license::check_expiry(&claims) {
-                    Ok(license::ExpiryStatus::Expired) => {
-                        use colored::Colorize;
-                        eprintln!(
-                            "\n  {} {}\n  {}\n",
-                            "✖".red().bold(),
-                            "Your nitpik license has expired.".red(),
-                            "Renew at https://nitpik.dev or contact support.".dimmed(),
-                        );
-                        std::process::exit(1);
-                    }
-                    Ok(license::ExpiryStatus::ExpiringSoon { days }) => {
-                        Some((claims, Some(days)))
-                    }
-                    Ok(license::ExpiryStatus::Valid) => Some((claims, None)),
-                    Err(e) => {
-                        eprintln!("Warning: could not check license expiry: {e}");
-                        Some((claims, None))
-                    }
+            Ok(claims) => match license::check_expiry(&claims) {
+                Ok(license::ExpiryStatus::Expired) => {
+                    use colored::Colorize;
+                    eprintln!(
+                        "\n  {} {}\n  {}\n",
+                        "✖".red().bold(),
+                        "Your nitpik license has expired.".red(),
+                        "Renew at https://nitpik.dev or contact support.".dimmed(),
+                    );
+                    std::process::exit(1);
                 }
-            }
+                Ok(license::ExpiryStatus::ExpiringSoon { days }) => Some((claims, Some(days))),
+                Ok(license::ExpiryStatus::Valid) => Some((claims, None)),
+                Err(e) => {
+                    eprintln!("Warning: could not check license expiry: {e}");
+                    Some((claims, None))
+                }
+            },
             Err(e) => {
                 eprintln!("Warning: invalid license key: {e}");
                 None
@@ -418,15 +405,18 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     // Determine output verbosity
     // --quiet suppresses all non-essential stderr output (banner, info, progress)
     // Progress is also auto-disabled for non-terminal formats and non-TTY stderr
-    let is_interactive = args.format == OutputFormat::Terminal
-        && std::io::stderr().is_terminal();
+    let is_interactive = args.format == OutputFormat::Terminal && std::io::stderr().is_terminal();
     let show_info = !args.quiet && is_interactive;
     let show_progress = !args.quiet && is_interactive;
 
     // Build progress tracker
     let file_names: Vec<String> = diffs.iter().map(|d| d.path().to_string()).collect();
     let agent_names: Vec<String> = agent_defs.iter().map(|a| a.profile.name.clone()).collect();
-    let progress = std::sync::Arc::new(ProgressTracker::new(&file_names, &agent_names, show_progress));
+    let progress = std::sync::Arc::new(ProgressTracker::new(
+        &file_names,
+        &agent_names,
+        show_progress,
+    ));
     if show_info {
         let claims_ref = license_claims.as_ref().map(|(c, _)| c);
         cli::print_banner(claims_ref);
@@ -442,7 +432,8 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
                     handle,
                     "  {} {}",
                     "⚠".yellow().bold(),
-                    format!("License expires in {days} day(s) — renew at https://nitpik.dev").yellow(),
+                    format!("License expires in {days} day(s) — renew at https://nitpik.dev")
+                        .yellow(),
                 );
             } else {
                 let _ = writeln!(
@@ -478,7 +469,13 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     // Secret scanning and context construction
     let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
     let (review_context, secret_findings) = build_review_context(
-        &args, &config, &diffs, baseline, &repo_root, scan_secrets, is_path_scan,
+        &args,
+        &config,
+        &diffs,
+        baseline,
+        &repo_root,
+        scan_secrets,
+        is_path_scan,
     )?;
 
     // Set up provider
@@ -540,7 +537,9 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     let fail_on_severity: Option<Severity> = if args.no_fail {
         None
     } else {
-        args.fail_on.or(config.review.fail_on).or(Some(Severity::Error))
+        args.fail_on
+            .or(config.review.fail_on)
+            .or(Some(Severity::Error))
     };
 
     // Render and print output
@@ -548,7 +547,10 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     // Exit with non-zero code if findings exceed fail_on threshold
     if let Some(threshold) = fail_on_severity {
-        let failing: Vec<_> = findings.iter().filter(|f| f.severity >= threshold).collect();
+        let failing: Vec<_> = findings
+            .iter()
+            .filter(|f| f.severity >= threshold)
+            .collect();
         if !failing.is_empty() {
             let summary = models::finding::Summary::from_findings(&findings);
             eprintln!(
@@ -564,9 +566,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     // Fail if any review tasks could not complete
     if failed_tasks > 0 {
-        bail!(
-            "{failed_tasks} review task(s) failed after retries — results are incomplete",
-        );
+        bail!("{failed_tasks} review task(s) failed after retries — results are incomplete",);
     }
 
     Ok(())

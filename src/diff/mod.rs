@@ -9,8 +9,8 @@ pub mod scanner;
 use std::path::Path;
 use thiserror::Error;
 
-use crate::models::InputMode;
 use crate::models::FileDiff;
+use crate::models::InputMode;
 
 /// Errors from the diff engine.
 #[derive(Error, Debug)]

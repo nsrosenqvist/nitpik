@@ -73,21 +73,29 @@ impl OutputRenderer for TerminalRenderer {
 
         // Summary line
         let summary = Summary::from_findings(findings);
-        output.push_str(&format!("{}\n", "───────────────────────────────────".dimmed()));
+        output.push_str(&format!(
+            "{}\n",
+            "───────────────────────────────────".dimmed()
+        ));
         output.push_str(&format!(
             " {} findings: {} {}, {} {}, {} {}\n",
             summary.total.to_string().bold(),
             summary.errors.to_string().red().bold(),
-            if summary.errors == 1 { "error" } else { "errors" },
+            if summary.errors == 1 {
+                "error"
+            } else {
+                "errors"
+            },
             summary.warnings.to_string().yellow().bold(),
-            if summary.warnings == 1 { "warning" } else { "warnings" },
+            if summary.warnings == 1 {
+                "warning"
+            } else {
+                "warnings"
+            },
             summary.info.to_string().blue().bold(),
             if summary.info == 1 { "info" } else { "infos" },
         ));
-        output.push_str(&format!(
-            " {}\n",
-            crate::constants::AI_DISCLOSURE.dimmed()
-        ));
+        output.push_str(&format!(" {}\n", crate::constants::AI_DISCLOSURE.dimmed()));
 
         output
     }

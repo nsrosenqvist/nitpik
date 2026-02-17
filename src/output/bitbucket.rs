@@ -2,8 +2,8 @@
 //!
 //! Creates reports and annotations via the Bitbucket API using reqwest.
 
-use crate::models::finding::{Finding, Severity, Summary};
 use crate::env::Env;
+use crate::models::finding::{Finding, Severity, Summary};
 use crate::output::OutputRenderer;
 use thiserror::Error;
 
@@ -68,14 +68,18 @@ pub async fn post_to_bitbucket(
     fail_on: Option<Severity>,
     env: &Env,
 ) -> Result<(), BitbucketError> {
-    let workspace =
-        env.var("BITBUCKET_WORKSPACE").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_WORKSPACE".into()))?;
-    let repo_slug =
-        env.var("BITBUCKET_REPO_SLUG").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_REPO_SLUG".into()))?;
-    let commit =
-        env.var("BITBUCKET_COMMIT").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_COMMIT".into()))?;
-    let token =
-        env.var("BITBUCKET_TOKEN").map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_TOKEN".into()))?;
+    let workspace = env
+        .var("BITBUCKET_WORKSPACE")
+        .map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_WORKSPACE".into()))?;
+    let repo_slug = env
+        .var("BITBUCKET_REPO_SLUG")
+        .map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_REPO_SLUG".into()))?;
+    let commit = env
+        .var("BITBUCKET_COMMIT")
+        .map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_COMMIT".into()))?;
+    let token = env
+        .var("BITBUCKET_TOKEN")
+        .map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_TOKEN".into()))?;
 
     let client = reqwest::Client::new();
     let base_url = format!(
@@ -172,8 +176,8 @@ pub async fn post_to_bitbucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::finding::{Finding, Severity};
     use crate::env::Env;
+    use crate::models::finding::{Finding, Severity};
 
     fn sample_findings() -> Vec<Finding> {
         vec![
@@ -280,7 +284,10 @@ mod tests {
         let result = post_to_bitbucket(&sample_findings(), None, &env).await;
         assert!(result.is_err());
         assert!(
-            result.unwrap_err().to_string().contains("BITBUCKET_WORKSPACE"),
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("BITBUCKET_WORKSPACE"),
             "expected BITBUCKET_WORKSPACE error"
         );
 
@@ -289,7 +296,10 @@ mod tests {
         let result = post_to_bitbucket(&sample_findings(), None, &env).await;
         assert!(result.is_err());
         assert!(
-            result.unwrap_err().to_string().contains("BITBUCKET_REPO_SLUG"),
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("BITBUCKET_REPO_SLUG"),
             "expected BITBUCKET_REPO_SLUG error"
         );
 

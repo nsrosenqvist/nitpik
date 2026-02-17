@@ -199,7 +199,12 @@ agentic_instructions: |
 You are a security reviewer."#;
         let agent = parse_agent_definition(content).unwrap();
         assert_eq!(
-            agent.profile.agentic_instructions.as_deref().unwrap().trim(),
+            agent
+                .profile
+                .agentic_instructions
+                .as_deref()
+                .unwrap()
+                .trim(),
             "Use search_text to trace data flow from user input to sinks.\nUse read_file to inspect sanitization helpers."
         );
         // agentic_instructions should NOT leak into the system prompt body

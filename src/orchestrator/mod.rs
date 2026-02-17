@@ -11,13 +11,13 @@ use tokio::task::JoinSet;
 use crate::cache::{self, CacheEngine};
 use crate::config::Config;
 use crate::diff::chunker;
+use crate::models::AgentDefinition;
 use crate::models::context::ReviewContext;
 use crate::models::diff::FileDiff;
 use crate::models::finding::Finding;
-use crate::models::AgentDefinition;
 use crate::progress::{ProgressTracker, TaskStatus};
-use crate::providers::rig::{classify_error, is_retryable, retry_backoff, MAX_RETRIES};
 use crate::providers::ReviewProvider;
+use crate::providers::rig::{MAX_RETRIES, classify_error, is_retryable, retry_backoff};
 
 /// Errors from the orchestrator.
 #[derive(Error, Debug)]
@@ -137,7 +137,13 @@ impl ReviewOrchestrator {
                         if let Some(cached) = cache.get(&cache_key) {
                             // Sidecar stays current — write it in case
                             // this is the first run with sidecar support.
-                            cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key, &review_scope);
+                            cache.put_sidecar(
+                                &file_path,
+                                &agent.profile.name,
+                                &model,
+                                &cache_key,
+                                &review_scope,
+                            );
                             progress.update(&file_path, TaskStatus::Done);
                             return (cached, false);
                         }
@@ -173,18 +179,26 @@ impl ReviewOrchestrator {
                         let mut last_err = None;
 
                         for attempt in 0..=MAX_RETRIES {
-                            match provider.review(&agent, &prompt, agentic, max_turns, max_tool_calls).await {
+                            match provider
+                                .review(&agent, &prompt, agentic, max_turns, max_tool_calls)
+                                .await
+                            {
                                 Ok(findings) => {
                                     cache.put(&cache_key, &findings);
-                                    cache.put_sidecar(&file_path, &agent.profile.name, &model, &cache_key, &review_scope);
+                                    cache.put_sidecar(
+                                        &file_path,
+                                        &agent.profile.name,
+                                        &model,
+                                        &cache_key,
+                                        &review_scope,
+                                    );
                                     progress.update(&file_path, TaskStatus::Done);
                                     return (findings, false);
                                 }
                                 Err(ref e) if is_retryable(e) && attempt < MAX_RETRIES => {
                                     let backoff = retry_backoff(attempt);
-                                    let reason = classify_error(e)
-                                        .unwrap_or("Transient error")
-                                        .to_string();
+                                    let reason =
+                                        classify_error(e).unwrap_or("Transient error").to_string();
                                     progress.update(
                                         &file_path,
                                         TaskStatus::Retrying {
@@ -203,10 +217,7 @@ impl ReviewOrchestrator {
                                     let short = classify_error(&e)
                                         .map(|s| s.to_string())
                                         .unwrap_or_else(|| format!("{e}"));
-                                    progress.update(
-                                        &file_path,
-                                        TaskStatus::Failed(short),
-                                    );
+                                    progress.update(&file_path, TaskStatus::Failed(short));
                                     return (Vec::new(), true);
                                 }
                             }
@@ -433,9 +444,7 @@ fn build_agentic_context(
     // without needing to make a speculative list_directory tool call.
     if let Ok(entries) = list_repo_root(&context.repo_root) {
         section.push_str("## Repository Structure\n\n");
-        section.push_str(
-            "The following files and directories are at the repository root:\n\n",
-        );
+        section.push_str("The following files and directories are at the repository root:\n\n");
         section.push_str("```\n");
         for entry in &entries {
             section.push_str(entry);
@@ -603,7 +612,10 @@ fn finding_in_diff_scope(finding: &Finding, diffs: &[FileDiff]) -> bool {
     // Check if the finding overlaps with any hunk's new-file range
     diff.hunks.iter().any(|hunk| {
         let hunk_start = hunk.new_start;
-        let hunk_end = hunk.new_start.saturating_add(hunk.new_count).saturating_sub(1);
+        let hunk_end = hunk
+            .new_start
+            .saturating_add(hunk.new_count)
+            .saturating_sub(1);
         // Overlap check: finding_start <= hunk_end && hunk_start <= finding_end
         finding_start <= hunk_end && hunk_start <= finding_end
     })
@@ -693,7 +705,14 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], Some(&prior), false);
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            &[agent.clone()],
+            Some(&prior),
+            false,
+        );
         assert!(prompt.contains("Previous Review Findings"));
         assert!(prompt.contains("Old issue"));
         assert!(prompt.contains("Re-raise"));

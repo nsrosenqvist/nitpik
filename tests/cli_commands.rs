@@ -109,7 +109,10 @@ fn validate_unterminated_frontmatter() {
     let result = parser::parse_agent_definition(content);
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("unterminated") || err.contains("closing"), "got: {err}");
+    assert!(
+        err.contains("unterminated") || err.contains("closing"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -218,13 +221,22 @@ fn cache_clear_idempotent() {
 fn cache_stats_human_size() {
     use nitpik::cache::store::CacheStats;
 
-    let small = CacheStats { entries: 1, total_bytes: 42 };
+    let small = CacheStats {
+        entries: 1,
+        total_bytes: 42,
+    };
     assert_eq!(small.human_size(), "42 B");
 
-    let kib = CacheStats { entries: 5, total_bytes: 4096 };
+    let kib = CacheStats {
+        entries: 5,
+        total_bytes: 4096,
+    };
     assert_eq!(kib.human_size(), "4.0 KiB");
 
-    let mib = CacheStats { entries: 100, total_bytes: 3 * 1024 * 1024 };
+    let mib = CacheStats {
+        entries: 100,
+        total_bytes: 3 * 1024 * 1024,
+    };
     assert_eq!(mib.human_size(), "3.0 MiB");
 }
 
@@ -235,15 +247,16 @@ fn cache_stats_human_size() {
 #[tokio::test]
 async fn tag_selects_matching_builtin_profiles() {
     // "api" is a tag on backend; "accessibility" is on frontend
-    let agents = agents::resolve_profiles_by_tags(
-        &["api".to_string(), "accessibility".to_string()],
-        None,
-    )
-    .await
-    .unwrap();
+    let agents =
+        agents::resolve_profiles_by_tags(&["api".to_string(), "accessibility".to_string()], None)
+            .await
+            .unwrap();
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
     assert!(names.contains(&"backend"), "api → backend; got: {names:?}");
-    assert!(names.contains(&"frontend"), "accessibility → frontend; got: {names:?}");
+    assert!(
+        names.contains(&"frontend"),
+        "accessibility → frontend; got: {names:?}"
+    );
 }
 
 #[tokio::test]
@@ -276,7 +289,10 @@ async fn tag_is_case_insensitive() {
         .await
         .unwrap();
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-    assert!(names.contains(&"frontend"), "case-insensitive; got: {names:?}");
+    assert!(
+        names.contains(&"frontend"),
+        "case-insensitive; got: {names:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -292,8 +308,7 @@ async fn no_project_docs_skips_all_docs() {
 
     let config = nitpik::config::Config::default();
     let diffs = vec![];
-    let ctx =
-        nitpik::context::build_baseline_context(dir.path(), &diffs, &config, true, &[]).await;
+    let ctx = nitpik::context::build_baseline_context(dir.path(), &diffs, &config, true, &[]).await;
     assert!(
         ctx.project_docs.is_empty(),
         "expected no docs with --no-project-docs"

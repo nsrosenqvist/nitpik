@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::env::Env;
 use crate::models::finding::Severity;
-use crate::models::{ProviderName, DEFAULT_PROFILE};
+use crate::models::{DEFAULT_PROFILE, ProviderName};
 
 /// Errors during config loading.
 #[derive(Error, Debug)]
@@ -305,7 +305,10 @@ impl Config {
             if let Ok(name) = val.parse::<ProviderName>() {
                 self.provider.name = name;
             } else {
-                eprintln!("Warning: ignoring invalid {} value: {val}", crate::constants::ENV_PROVIDER);
+                eprintln!(
+                    "Warning: ignoring invalid {} value: {val}",
+                    crate::constants::ENV_PROVIDER
+                );
             }
         }
         if let Ok(val) = env.var(crate::constants::ENV_MODEL) {
@@ -316,7 +319,8 @@ impl Config {
         }
 
         // Provider-specific API key resolution
-        let api_key = env.var(crate::constants::ENV_API_KEY)
+        let api_key = env
+            .var(crate::constants::ENV_API_KEY)
             .or_else(|_| env.var(self.provider.name.api_key_env_var()))
             .ok();
         if api_key.is_some() {
@@ -333,7 +337,10 @@ impl Config {
             match val.to_lowercase().as_str() {
                 "false" | "0" | "no" | "off" => self.telemetry.enabled = false,
                 "true" | "1" | "yes" | "on" => self.telemetry.enabled = true,
-                _ => eprintln!("Warning: ignoring invalid {} value: {val}", crate::constants::ENV_TELEMETRY),
+                _ => eprintln!(
+                    "Warning: ignoring invalid {} value: {val}",
+                    crate::constants::ENV_TELEMETRY
+                ),
             }
         }
     }
@@ -374,10 +381,7 @@ enabled = true
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.provider.name, ProviderName::OpenAI);
         assert_eq!(config.provider.model, "gpt-4o");
-        assert_eq!(
-            config.review.default_profiles,
-            vec!["security", "backend"]
-        );
+        assert_eq!(config.review.default_profiles, vec!["security", "backend"]);
         assert!(config.review.agentic.enabled);
         assert_eq!(config.review.agentic.max_turns, 5);
         assert!(config.secrets.enabled);
@@ -412,10 +416,16 @@ enabled = true
         assert_eq!(base.review.agentic.max_tool_calls, 3);
         assert_eq!(base.review.context.max_file_lines, 500);
         assert_eq!(base.review.context.surrounding_lines, 50);
-        assert_eq!(base.provider.base_url, Some("https://custom.api".to_string()));
+        assert_eq!(
+            base.provider.base_url,
+            Some("https://custom.api".to_string())
+        );
         assert_eq!(base.provider.api_key, Some("sk-test".to_string()));
         assert!(base.secrets.enabled);
-        assert_eq!(base.secrets.additional_rules, Some("rules.toml".to_string()));
+        assert_eq!(
+            base.secrets.additional_rules,
+            Some("rules.toml".to_string())
+        );
         assert_eq!(base.review.default_profiles, vec!["security"]);
     }
 

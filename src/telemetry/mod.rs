@@ -75,7 +75,7 @@ pub fn detect_ci() -> bool {
         "BITBUCKET_BUILD_NUMBER",
         "JENKINS_URL",
         "CIRCLECI",
-        "TF_BUILD",        // Azure Pipelines
+        "TF_BUILD", // Azure Pipelines
         "BUILDKITE",
         "TRAVIS",
         "CODEBUILD_BUILD_ID", // AWS CodeBuild
@@ -117,11 +117,7 @@ async fn post_heartbeat(payload: &HeartbeatPayload) -> Result<(), Box<dyn std::e
         .connect_timeout(CONNECT_TIMEOUT)
         .build()?;
 
-    client
-        .post(HEARTBEAT_URL)
-        .json(payload)
-        .send()
-        .await?;
+    client.post(HEARTBEAT_URL).json(payload).send().await?;
 
     Ok(())
 }

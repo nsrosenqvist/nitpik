@@ -3,7 +3,7 @@
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
-use nitpik::models::{Severity, DEFAULT_PROFILE};
+use nitpik::models::{DEFAULT_PROFILE, Severity};
 
 /// AI-powered code review CLI.
 #[derive(Parser, Debug)]
@@ -231,7 +231,9 @@ impl OutputFormat {
             OutputFormat::Json => nitpik::output::json::JsonRenderer.render(findings),
             OutputFormat::Github => nitpik::output::github::GithubRenderer.render(findings),
             OutputFormat::Gitlab => nitpik::output::gitlab::GitlabRenderer.render(findings),
-            OutputFormat::Bitbucket => nitpik::output::bitbucket::BitbucketRenderer.render(findings),
+            OutputFormat::Bitbucket => {
+                nitpik::output::bitbucket::BitbucketRenderer.render(findings)
+            }
             OutputFormat::Forgejo => nitpik::output::forgejo::ForgejoRenderer.render(findings),
         }
     }
@@ -250,12 +252,14 @@ impl ReviewArgs {
 
         if count == 0 {
             return Err(
-                "one input source is required: --diff-file, --diff-stdin, --diff-base, or --scan".to_string(),
+                "one input source is required: --diff-file, --diff-stdin, --diff-base, or --scan"
+                    .to_string(),
             );
         }
         if count > 1 {
             return Err(
-                "only one input source allowed: --diff-file, --diff-stdin, --diff-base, or --scan".to_string(),
+                "only one input source allowed: --diff-file, --diff-stdin, --diff-base, or --scan"
+                    .to_string(),
             );
         }
 
@@ -335,7 +339,11 @@ mod tests {
         let args = make_args(Some("diff.patch"), Some("main"), None);
         let result = args.validate_input();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("only one input source allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("only one input source allowed")
+        );
     }
 
     #[test]
@@ -371,7 +379,11 @@ mod tests {
         let args = make_args_full(Some("diff.patch"), true, None, None);
         let result = args.validate_input();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("only one input source allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("only one input source allowed")
+        );
     }
 
     #[test]
@@ -379,7 +391,11 @@ mod tests {
         let args = make_args_full(None, true, Some("main"), None);
         let result = args.validate_input();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("only one input source allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("only one input source allowed")
+        );
     }
 
     fn sample_finding() -> nitpik::models::finding::Finding {
@@ -467,10 +483,8 @@ mod tests {
 
     #[test]
     fn quiet_flag_parsed_long() {
-        let cli = Cli::try_parse_from([
-            "nitpik", "review", "--diff-base", "main", "--quiet",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["nitpik", "review", "--diff-base", "main", "--quiet"]).unwrap();
         match cli.command {
             Command::Review(args) => assert!(args.quiet),
             _ => panic!("expected Review command"),
@@ -479,10 +493,7 @@ mod tests {
 
     #[test]
     fn quiet_flag_parsed_short() {
-        let cli = Cli::try_parse_from([
-            "nitpik", "review", "--diff-base", "main", "-q",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["nitpik", "review", "--diff-base", "main", "-q"]).unwrap();
         match cli.command {
             Command::Review(args) => assert!(args.quiet),
             _ => panic!("expected Review command"),
@@ -491,10 +502,7 @@ mod tests {
 
     #[test]
     fn quiet_flag_absent_by_default() {
-        let cli = Cli::try_parse_from([
-            "nitpik", "review", "--diff-base", "main",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["nitpik", "review", "--diff-base", "main"]).unwrap();
         match cli.command {
             Command::Review(args) => assert!(!args.quiet),
             _ => panic!("expected Review command"),

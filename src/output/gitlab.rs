@@ -98,10 +98,12 @@ mod tests {
         assert_eq!(entry["location"]["path"], "src/auth.rs");
         assert_eq!(entry["location"]["lines"]["begin"], 42);
         assert_eq!(entry["location"]["lines"]["end"], 45);
-        assert!(entry["description"]
-            .as_str()
-            .unwrap()
-            .contains("Suggestion: Use parameterized queries."));
+        assert!(
+            entry["description"]
+                .as_str()
+                .unwrap()
+                .contains("Suggestion: Use parameterized queries.")
+        );
         assert!(!entry["fingerprint"].as_str().unwrap().is_empty());
     }
 

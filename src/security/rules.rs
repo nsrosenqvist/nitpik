@@ -330,7 +330,10 @@ keywords = ["something"]
         std::fs::write(&path, toml_content).unwrap();
 
         let rules = load_rules_from_file(&path).unwrap();
-        assert!(rules.is_empty(), "path-only rules (no regex) should be skipped");
+        assert!(
+            rules.is_empty(),
+            "path-only rules (no regex) should be skipped"
+        );
     }
 
     #[test]
@@ -347,7 +350,10 @@ keywords = ["bad"]
         std::fs::write(&path, toml_content).unwrap();
 
         let rules = load_rules_from_file(&path).unwrap();
-        assert!(rules.is_empty(), "rules with invalid regex should be skipped");
+        assert!(
+            rules.is_empty(),
+            "rules with invalid regex should be skipped"
+        );
     }
 
     #[test]

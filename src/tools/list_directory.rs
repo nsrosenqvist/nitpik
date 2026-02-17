@@ -203,14 +203,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = list_directory(dir.path(), "../../../etc").await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("traversal"), "should block path traversal");
+        assert!(
+            result.unwrap_err().contains("traversal"),
+            "should block path traversal"
+        );
     }
 
     #[tokio::test]
     async fn call_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
         let tool = ListDirectoryTool::new(dir.path().to_path_buf());
-        let result = Tool::call(&tool, ListDirectoryArgs { path: ".".to_string() }).await.unwrap();
+        let result = Tool::call(
+            &tool,
+            ListDirectoryArgs {
+                path: ".".to_string(),
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(result, "Directory is empty.");
     }
 
@@ -221,7 +231,14 @@ mod tests {
         std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
 
         let tool = ListDirectoryTool::new(dir.path().to_path_buf());
-        let result = Tool::call(&tool, ListDirectoryArgs { path: ".".to_string() }).await.unwrap();
+        let result = Tool::call(
+            &tool,
+            ListDirectoryArgs {
+                path: ".".to_string(),
+            },
+        )
+        .await
+        .unwrap();
         assert!(result.contains("src/"));
         assert!(result.contains("main.rs"));
         assert!(result.contains("bytes"));

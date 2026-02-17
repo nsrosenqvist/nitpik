@@ -25,17 +25,18 @@ impl Env {
     #[cfg(test)]
     pub fn mock(vars: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>) -> Self {
         Self {
-            overrides: Some(vars.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+            overrides: Some(
+                vars.into_iter()
+                    .map(|(k, v)| (k.into(), v.into()))
+                    .collect(),
+            ),
         }
     }
 
     /// Look up an environment variable by name.
     pub fn var(&self, name: &str) -> Result<String, std::env::VarError> {
         match &self.overrides {
-            Some(map) => map
-                .get(name)
-                .cloned()
-                .ok_or(std::env::VarError::NotPresent),
+            Some(map) => map.get(name).cloned().ok_or(std::env::VarError::NotPresent),
             None => std::env::var(name),
         }
     }

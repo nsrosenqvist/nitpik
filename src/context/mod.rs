@@ -28,12 +28,8 @@ pub async fn build_baseline_context(
     skip_project_docs: bool,
     exclude_docs: &[String],
 ) -> BaselineContext {
-    let file_contents = files::load_file_contents(
-        repo_root,
-        diffs,
-        config.review.context.max_file_lines,
-    )
-    .await;
+    let file_contents =
+        files::load_file_contents(repo_root, diffs, config.review.context.max_file_lines).await;
 
     let project_docs = if skip_project_docs {
         IndexMap::new()

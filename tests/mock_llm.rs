@@ -131,8 +131,20 @@ async fn orchestrator_returns_findings_from_mock_provider() {
     let provider = Arc::new(MockProvider::new(findings.clone()));
     let config = Config::default();
     let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(&["src/main.rs".to_string()], &["test-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/main.rs", "let x = 42;")],
@@ -160,8 +172,20 @@ async fn orchestrator_returns_empty_for_no_issues() {
     let provider = Arc::new(MockProvider::empty());
     let config = Config::default();
     let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(&["src/lib.rs".to_string()], &["clean-reviewer".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/lib.rs".to_string()],
+        &["clean-reviewer".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/lib.rs", "fn hello() {}")],
@@ -186,7 +210,15 @@ async fn orchestrator_errors_on_empty_diffs() {
     let config = Config::default();
     let cache = CacheEngine::new(false);
     let progress = Arc::new(ProgressTracker::new(&[], &["any-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let context = ReviewContext {
         diffs: vec![],
@@ -209,8 +241,20 @@ async fn orchestrator_skips_binary_files() {
     let provider = Arc::new(MockProvider::new(findings));
     let config = Config::default();
     let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(&["image.png".to_string()], &["test-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
+    let progress = Arc::new(ProgressTracker::new(
+        &["image.png".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let mut binary_diff = test_diff("image.png", "");
     binary_diff.is_binary = true;
@@ -247,8 +291,20 @@ async fn orchestrator_handles_multiple_agents_and_files() {
     let provider = Arc::new(MockProvider::new(findings_a));
     let config = Config::default();
     let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(&["a.rs".to_string(), "b.rs".to_string()], &["agent-a".to_string(), "agent-b".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
+    let progress = Arc::new(ProgressTracker::new(
+        &["a.rs".to_string(), "b.rs".to_string()],
+        &["agent-a".to_string(), "agent-b".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let context = ReviewContext {
         diffs: vec![
@@ -272,7 +328,12 @@ async fn orchestrator_handles_multiple_agents_and_files() {
     // But deduplication will collapse identical findings, so we get at most 4
     assert!(!result.findings.is_empty());
     // All findings should be errors from the mock
-    assert!(result.findings.iter().all(|f| f.severity == Severity::Error));
+    assert!(
+        result
+            .findings
+            .iter()
+            .all(|f| f.severity == Severity::Error)
+    );
 }
 
 /// Mock provider that always returns an error.
@@ -297,8 +358,20 @@ async fn orchestrator_handles_provider_errors_gracefully() {
     let provider = Arc::new(FailingProvider);
     let config = Config::default();
     let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(&["src/main.rs".to_string()], &["failing-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider, &config, cache, progress, false, None, String::new());
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["failing-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/main.rs", "let x = 1;")],
@@ -351,8 +424,20 @@ async fn cache_prevents_duplicate_calls() {
     let cache_dir = tempfile::tempdir().expect("failed to create temp cache dir");
     let cache = CacheEngine::new_with_dir(cache_dir.path().to_path_buf());
     let provider_trait: Arc<dyn ReviewProvider> = Arc::clone(&provider) as Arc<dyn ReviewProvider>;
-    let progress = Arc::new(ProgressTracker::new(&["src/main.rs".to_string()], &["cache-agent".to_string()], false));
-    let orchestrator = ReviewOrchestrator::new(provider_trait, &config, cache, progress, false, None, String::new());
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["cache-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider_trait,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/main.rs", "let x = 1;")],
@@ -388,7 +473,10 @@ async fn cache_prevents_duplicate_calls() {
 ///    into the prompt, which the mock provider captures and reflects back.
 #[tokio::test]
 async fn prior_findings_injected_on_cache_invalidation() {
-    use std::sync::{atomic::{AtomicUsize, Ordering}, Mutex};
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     /// A provider that records every prompt it receives and returns
     /// different findings depending on whether prior findings were
@@ -495,11 +583,26 @@ async fn prior_findings_injected_on_cache_invalidation() {
 
     // Store findings + sidecar for run 1
     store.put(&cache_key1, &initial_findings);
-    store.put_sidecar("src/app.rs", "prior-agent", &config.provider.model, &cache_key1, "");
+    store.put_sidecar(
+        "src/app.rs",
+        "prior-agent",
+        &config.provider.model,
+        &cache_key1,
+        "",
+    );
 
     // Verify the sidecar was written
-    let prior = store.get_previous("src/app.rs", "prior-agent", &config.provider.model, "different-key", "");
-    assert!(prior.is_some(), "sidecar should return prior findings for a different key");
+    let prior = store.get_previous(
+        "src/app.rs",
+        "prior-agent",
+        &config.provider.model,
+        "different-key",
+        "",
+    );
+    assert!(
+        prior.is_some(),
+        "sidecar should return prior findings for a different key"
+    );
     assert_eq!(prior.unwrap().len(), 1);
 
     // --- Run 2: changed diff → cache miss → prior findings injected ---
@@ -517,7 +620,8 @@ async fn prior_findings_injected_on_cache_invalidation() {
     // Now that CacheEngine::new_with_dir exists, we can use an isolated temp dir.
 
     // Pre-seed the cache: write findings + sidecar under our temp dir
-    let seeded_store = nitpik::cache::store::FileStore::new_with_dir(cache_dir.path().to_path_buf());
+    let seeded_store =
+        nitpik::cache::store::FileStore::new_with_dir(cache_dir.path().to_path_buf());
     seeded_store.put(&cache_key1, &initial_findings);
     seeded_store.put_sidecar(
         "src/app.rs",
@@ -571,7 +675,10 @@ async fn prior_findings_injected_on_cache_invalidation() {
 
     // The result should contain the follow-up findings (from the mock)
     assert_eq!(result2.findings.len(), 1);
-    assert_eq!(result2.findings[0].title, "Prior issue resolved, new style nit");
+    assert_eq!(
+        result2.findings[0].title,
+        "Prior issue resolved, new style nit"
+    );
 
     // Clean up the seeded entries from the real cache dir
     let _ = seeded_store.clear();
@@ -580,7 +687,10 @@ async fn prior_findings_injected_on_cache_invalidation() {
 /// Verifies that `--no-prior-context` suppresses prior findings injection.
 #[tokio::test]
 async fn no_prior_context_flag_suppresses_injection() {
-    use std::sync::{atomic::{AtomicUsize, Ordering}, Mutex};
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     struct PromptRecordingProvider {
         call_count: AtomicUsize,
@@ -628,7 +738,13 @@ async fn no_prior_context_flag_suppresses_injection() {
     let seed_prompt = format!("seed-prompt-{seed_content}");
     let seed_key = nitpik::cache::cache_key(&seed_prompt, "sec-agent", &config.provider.model);
     seeded_store.put(&seed_key, &initial_findings);
-    seeded_store.put_sidecar("src/lib.rs", "sec-agent", &config.provider.model, &seed_key, "");
+    seeded_store.put_sidecar(
+        "src/lib.rs",
+        "sec-agent",
+        &config.provider.model,
+        &seed_key,
+        "",
+    );
 
     // Run orchestrator with no_prior_context = true
     let provider = Arc::new(PromptRecordingProvider {
@@ -687,7 +803,10 @@ async fn no_prior_context_flag_suppresses_injection() {
 // ---------------------------------------------------------------------------
 
 /// Helper: build a test agent definition with custom tools.
-fn test_agent_with_tools(name: &str, tools: Vec<nitpik::models::agent::CustomToolDefinition>) -> AgentDefinition {
+fn test_agent_with_tools(
+    name: &str,
+    tools: Vec<nitpik::models::agent::CustomToolDefinition>,
+) -> AgentDefinition {
     AgentDefinition {
         profile: AgentProfile {
             name: name.to_string(),
@@ -706,8 +825,8 @@ fn test_agent_with_tools(name: &str, tools: Vec<nitpik::models::agent::CustomToo
 /// user prompt's agentic exploration section when agentic mode is enabled.
 #[tokio::test]
 async fn custom_tools_appear_in_agentic_prompt() {
-    use std::sync::Mutex;
     use nitpik::models::agent::{CustomToolDefinition, ToolParameter};
+    use std::sync::Mutex;
 
     struct PromptCapture {
         prompts: Mutex<Vec<String>>,
@@ -769,7 +888,13 @@ async fn custom_tools_appear_in_agentic_prompt() {
     ));
     let provider_trait: Arc<dyn ReviewProvider> = Arc::clone(&provider) as Arc<dyn ReviewProvider>;
     let orchestrator = ReviewOrchestrator::new(
-        provider_trait, &config, cache, progress, false, None, String::new(),
+        provider_trait,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
     );
 
     let context = ReviewContext {
@@ -814,8 +939,8 @@ async fn custom_tools_appear_in_agentic_prompt() {
 /// agentic mode is disabled (non-agentic review).
 #[tokio::test]
 async fn custom_tools_absent_in_non_agentic_prompt() {
-    use std::sync::Mutex;
     use nitpik::models::agent::{CustomToolDefinition, ToolParameter};
+    use std::sync::Mutex;
 
     struct PromptCapture {
         prompts: Mutex<Vec<String>>,
@@ -869,7 +994,13 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
     ));
     let provider_trait: Arc<dyn ReviewProvider> = Arc::clone(&provider) as Arc<dyn ReviewProvider>;
     let orchestrator = ReviewOrchestrator::new(
-        provider_trait, &config, cache, progress, false, None, String::new(),
+        provider_trait,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
     );
 
     let context = ReviewContext {

@@ -62,36 +62,35 @@ pub async fn list_all_profiles(
     // Custom profiles from agent_dir
     if let Some(dir) = agent_dir {
         if dir.is_dir() {
-            let mut entries = tokio::fs::read_dir(dir)
-                .await
-                .map_err(|e| AgentError::ReadError {
-                    path: dir.display().to_string(),
-                    source: e,
-                })?;
+            let mut entries =
+                tokio::fs::read_dir(dir)
+                    .await
+                    .map_err(|e| AgentError::ReadError {
+                        path: dir.display().to_string(),
+                        source: e,
+                    })?;
 
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|e| AgentError::ReadError {
-                    path: dir.display().to_string(),
-                    source: e,
-                })?
+            while let Some(entry) =
+                entries
+                    .next_entry()
+                    .await
+                    .map_err(|e| AgentError::ReadError {
+                        path: dir.display().to_string(),
+                        source: e,
+                    })?
             {
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "md") {
-                    let content = tokio::fs::read_to_string(&path)
-                        .await
-                        .map_err(|e| AgentError::ReadError {
+                    let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
+                        AgentError::ReadError {
                             path: path.display().to_string(),
                             source: e,
-                        })?;
+                        }
+                    })?;
                     match parser::parse_agent_definition(&content) {
                         Ok(agent) => agents.push(agent),
                         Err(e) => {
-                            eprintln!(
-                                "Warning: skipping {}: {e}",
-                                path.display()
-                            );
+                            eprintln!("Warning: skipping {}: {e}", path.display());
                         }
                     }
                 }
@@ -142,12 +141,13 @@ async fn resolve_single_profile(
     if let Some(dir) = agent_dir {
         let path = dir.join(format!("{profile}.md"));
         if path.exists() {
-            let content = tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|e| AgentError::ReadError {
-                    path: path.display().to_string(),
-                    source: e,
-                })?;
+            let content =
+                tokio::fs::read_to_string(&path)
+                    .await
+                    .map_err(|e| AgentError::ReadError {
+                        path: path.display().to_string(),
+                        source: e,
+                    })?;
             return parser::parse_agent_definition(&content)
                 .map_err(|e| AgentError::ParseError(e.to_string()));
         }
@@ -157,18 +157,17 @@ async fn resolve_single_profile(
     if profile.contains('/') || profile.ends_with(".md") {
         let path = Path::new(profile);
         if path.exists() {
-            let content = tokio::fs::read_to_string(path)
-                .await
-                .map_err(|e| AgentError::ReadError {
-                    path: profile.to_string(),
-                    source: e,
-                })?;
+            let content =
+                tokio::fs::read_to_string(path)
+                    .await
+                    .map_err(|e| AgentError::ReadError {
+                        path: profile.to_string(),
+                        source: e,
+                    })?;
             return parser::parse_agent_definition(&content)
                 .map_err(|e| AgentError::ParseError(e.to_string()));
         }
-        return Err(AgentError::NotFound(format!(
-            "file not found: {profile}"
-        )));
+        return Err(AgentError::NotFound(format!("file not found: {profile}")));
     }
 
     // 4. Error with suggestions
@@ -185,7 +184,9 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_builtin_profile() {
-        let agents = resolve_profiles(&["backend".to_string()], None).await.unwrap();
+        let agents = resolve_profiles(&["backend".to_string()], None)
+            .await
+            .unwrap();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].profile.name, "backend");
     }
@@ -205,7 +206,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("unknown profile"), "got: {err}");
-        assert!(err.contains("backend"), "should suggest built-ins, got: {err}");
+        assert!(
+            err.contains("backend"),
+            "should suggest built-ins, got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -218,7 +222,9 @@ mod tests {
         )
         .unwrap();
 
-        let agents = resolve_profiles(&["custom".to_string()], Some(dir.path())).await.unwrap();
+        let agents = resolve_profiles(&["custom".to_string()], Some(dir.path()))
+            .await
+            .unwrap();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].profile.name, "custom");
     }
@@ -298,8 +304,8 @@ mod tests {
 
     #[tokio::test]
     async fn list_all_nonexistent_agent_dir() {
-        let result = list_all_profiles(Some(std::path::Path::new("/tmp/nitpik_no_such_dir_xyz")))
-            .await;
+        let result =
+            list_all_profiles(Some(std::path::Path::new("/tmp/nitpik_no_such_dir_xyz"))).await;
         // Non-existent dir is not an error — it's just not a directory, so skip
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 4); // just built-ins
@@ -322,15 +328,19 @@ mod tests {
     #[tokio::test]
     async fn resolve_by_tag_matches_multiple_profiles() {
         // "security" is a tag on the security profile; "performance" is on backend
-        let agents = resolve_profiles_by_tags(
-            &["security".to_string(), "performance".to_string()],
-            None,
-        )
-        .await
-        .unwrap();
+        let agents =
+            resolve_profiles_by_tags(&["security".to_string(), "performance".to_string()], None)
+                .await
+                .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(names.contains(&"backend"), "performance tag → backend; got: {names:?}");
-        assert!(names.contains(&"security"), "security tag → security; got: {names:?}");
+        assert!(
+            names.contains(&"backend"),
+            "performance tag → backend; got: {names:?}"
+        );
+        assert!(
+            names.contains(&"security"),
+            "security tag → security; got: {names:?}"
+        );
     }
 
     #[tokio::test]
@@ -339,7 +349,10 @@ mod tests {
             .await
             .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(names.contains(&"backend"), "case-insensitive match; got: {names:?}");
+        assert!(
+            names.contains(&"backend"),
+            "case-insensitive match; got: {names:?}"
+        );
     }
 
     #[tokio::test]
@@ -363,7 +376,11 @@ mod tests {
             .await
             .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert_eq!(names, vec!["custom"], "only custom has my-tag; got: {names:?}");
+        assert_eq!(
+            names,
+            vec!["custom"],
+            "only custom has my-tag; got: {names:?}"
+        );
     }
 
     #[tokio::test]
@@ -380,7 +397,13 @@ mod tests {
             .await
             .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(names.contains(&"frontend"), "frontend has css tag; got: {names:?}");
-        assert!(names.contains(&"design-system"), "custom has css tag; got: {names:?}");
+        assert!(
+            names.contains(&"frontend"),
+            "frontend has css tag; got: {names:?}"
+        );
+        assert!(
+            names.contains(&"design-system"),
+            "custom has css tag; got: {names:?}"
+        );
     }
 }

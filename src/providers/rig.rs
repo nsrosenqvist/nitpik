@@ -103,8 +103,9 @@ macro_rules! prompt_agentic {
 /// Create a rig-core client using the `Client::new(api_key)` convention.
 macro_rules! new_client {
     ($provider_mod:path, $api_key:expr, $label:expr) => {{
-        <$provider_mod>::new($api_key)
-            .map_err(|e| ProviderError::ApiError(format!("failed to create {} client: {e}", $label)))
+        <$provider_mod>::new($api_key).map_err(|e| {
+            ProviderError::ApiError(format!("failed to create {} client: {e}", $label))
+        })
     }};
 }
 
@@ -123,14 +124,18 @@ impl RigProvider {
         if config.api_key.is_none() {
             return Err(ProviderError::NotConfigured(format!(
                 "no API key found for provider '{}'. Set {} or the provider-specific env var.",
-                config.name, crate::constants::ENV_API_KEY
+                config.name,
+                crate::constants::ENV_API_KEY
             )));
         }
         Ok(Self { config, repo_root })
     }
 
     /// Build an OpenAI-style client, optionally with a custom base URL.
-    fn build_openai_client(&self, api_key: &str) -> Result<providers::openai::CompletionsClient, ProviderError> {
+    fn build_openai_client(
+        &self,
+        api_key: &str,
+    ) -> Result<providers::openai::CompletionsClient, ProviderError> {
         let mut builder = providers::openai::CompletionsClient::builder().api_key(api_key);
         if let Some(ref base_url) = self.config.base_url {
             builder = builder.base_url(base_url);
@@ -172,7 +177,9 @@ impl RigProvider {
                 let client: providers::anthropic::Client = providers::anthropic::Client::builder()
                     .api_key(api_key)
                     .build()
-                    .map_err(|e| ProviderError::ApiError(format!("failed to create Anthropic client: {e}")))?;
+                    .map_err(|e| {
+                        ProviderError::ApiError(format!("failed to create Anthropic client: {e}"))
+                    })?;
                 prompt_simple!(client, model, system_prompt, user_prompt, "Anthropic")
             }
             ProviderName::OpenAI => {
@@ -205,12 +212,23 @@ impl RigProvider {
             }
             ProviderName::OpenAICompatible => {
                 let base_url = self.require_base_url()?;
-                let client: providers::openai::CompletionsClient = providers::openai::CompletionsClient::builder()
-                    .api_key(api_key)
-                    .base_url(base_url)
-                    .build()
-                    .map_err(|e| ProviderError::ApiError(format!("failed to create OpenAI-compatible client: {e}")))?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "OpenAI-compatible")
+                let client: providers::openai::CompletionsClient =
+                    providers::openai::CompletionsClient::builder()
+                        .api_key(api_key)
+                        .base_url(base_url)
+                        .build()
+                        .map_err(|e| {
+                            ProviderError::ApiError(format!(
+                                "failed to create OpenAI-compatible client: {e}"
+                            ))
+                        })?;
+                prompt_simple!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "OpenAI-compatible"
+                )
             }
         }
     }
@@ -241,36 +259,110 @@ impl RigProvider {
                 let client: providers::anthropic::Client = providers::anthropic::Client::builder()
                     .api_key(api_key)
                     .build()
-                    .map_err(|e| ProviderError::ApiError(format!("failed to create Anthropic client: {e}")))?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "Anthropic", self.repo_root, max_turns, custom_tools)
+                    .map_err(|e| {
+                        ProviderError::ApiError(format!("failed to create Anthropic client: {e}"))
+                    })?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Anthropic",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
             ProviderName::OpenAI | ProviderName::OpenAICompatible => {
                 let client = self.build_openai_client(api_key)?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "OpenAI", self.repo_root, max_turns, custom_tools)
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "OpenAI",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
             ProviderName::Cohere => {
                 let client = new_client!(providers::cohere::Client, api_key, "Cohere")?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "Cohere", self.repo_root, max_turns, custom_tools)
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Cohere",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
             ProviderName::Gemini => {
                 let client = new_client!(providers::gemini::Client, api_key, "Gemini")?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "Gemini", self.repo_root, max_turns, custom_tools)
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Gemini",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
             ProviderName::Perplexity => {
                 let client = new_client!(providers::perplexity::Client, api_key, "Perplexity")?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "Perplexity", self.repo_root, max_turns, custom_tools)
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Perplexity",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
             ProviderName::DeepSeek => {
                 let client = new_client!(providers::deepseek::Client, api_key, "DeepSeek")?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "DeepSeek", self.repo_root, max_turns, custom_tools)
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "DeepSeek",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
             ProviderName::XAI => {
                 let client = new_client!(providers::xai::Client, api_key, "xAI")?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "xAI", self.repo_root, max_turns, custom_tools)
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "xAI",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
             ProviderName::Groq => {
                 let client = new_client!(providers::groq::Client, api_key, "Groq")?;
-                prompt_agentic!(client, model, system_prompt, user_prompt, "Groq", self.repo_root, max_turns, custom_tools)
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Groq",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
             }
         }
     }
@@ -286,11 +378,7 @@ impl ReviewProvider for RigProvider {
         max_turns: usize,
         _max_tool_calls: usize,
     ) -> Result<Vec<Finding>, ProviderError> {
-        let model = agent
-            .profile
-            .model
-            .as_deref()
-            .unwrap_or(&self.config.model);
+        let model = agent.profile.model.as_deref().unwrap_or(&self.config.model);
 
         let result = if agentic {
             // Build custom command tools from the agent profile
@@ -298,7 +386,13 @@ impl ReviewProvider for RigProvider {
                 .profile
                 .tools
                 .iter()
-                .map(|def| CustomCommandTool::new(def, self.repo_root.clone(), agent.profile.environment.clone()))
+                .map(|def| {
+                    CustomCommandTool::new(
+                        def,
+                        self.repo_root.clone(),
+                        agent.profile.environment.clone(),
+                    )
+                })
                 .collect();
 
             // Enhance the system prompt with tool-usage guidance so the
@@ -309,7 +403,14 @@ impl ReviewProvider for RigProvider {
                 agent.profile.agentic_instructions.as_deref(),
             );
 
-            self.call_rig_agentic(model, &agentic_system_prompt, prompt, max_turns, custom_tools).await
+            self.call_rig_agentic(
+                model,
+                &agentic_system_prompt,
+                prompt,
+                max_turns,
+                custom_tools,
+            )
+            .await
         } else {
             self.call_rig(model, &agent.system_prompt, prompt).await
         };
@@ -372,7 +473,7 @@ fn build_agentic_system_prompt(
          ### Example tool calls\n\n\
          - List the repo root: `list_directory` with `{{\"path\": \".\"}}`\n\
          - Read a file: `read_file` with `{{\"path\": \"src/handler.rs\"}}`\n\
-         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n"
+         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n",
     );
 
     // Append custom tool examples
@@ -398,7 +499,7 @@ fn build_agentic_system_prompt(
     prompt.push_str(
         "\n\
          After exploring, return your findings as a JSON array as described in the \
-         instructions."
+         instructions.",
     );
 
     prompt
@@ -426,9 +527,15 @@ pub fn classify_error(err: &ProviderError) -> Option<&'static str> {
     match err {
         ProviderError::ApiError(msg) => {
             let msg_lower = msg.to_lowercase();
-            if msg_lower.contains("429") || msg_lower.contains("rate limit") || msg_lower.contains("too many requests") {
+            if msg_lower.contains("429")
+                || msg_lower.contains("rate limit")
+                || msg_lower.contains("too many requests")
+            {
                 Some("Rate limited by API")
-            } else if msg_lower.contains("503") || msg_lower.contains("service unavailable") || msg_lower.contains("high demand") {
+            } else if msg_lower.contains("503")
+                || msg_lower.contains("service unavailable")
+                || msg_lower.contains("high demand")
+            {
                 Some("High model load")
             } else if msg_lower.contains("529") || msg_lower.contains("overloaded") {
                 Some("API overloaded")
@@ -661,17 +768,14 @@ mod tests {
 
     #[test]
     fn retryable_overloaded_message() {
-        let err = ProviderError::ApiError(
-            "Anthropic API error: overloaded — try again later".into(),
-        );
+        let err =
+            ProviderError::ApiError("Anthropic API error: overloaded — try again later".into());
         assert!(is_retryable(&err));
     }
 
     #[test]
     fn not_retryable_auth_error() {
-        let err = ProviderError::ApiError(
-            "Invalid API key: 401 Unauthorized".into(),
-        );
+        let err = ProviderError::ApiError("Invalid API key: 401 Unauthorized".into());
         assert!(!is_retryable(&err));
     }
 
@@ -747,15 +851,30 @@ mod tests {
         let enhanced = build_agentic_system_prompt("Base prompt.", &tools, None);
 
         // Custom tools appear in the numbered guidance list
-        assert!(enhanced.contains("Use `run_tests`"), "numbered list should include run_tests");
-        assert!(enhanced.contains("Use `lint`"), "numbered list should include lint");
+        assert!(
+            enhanced.contains("Use `run_tests`"),
+            "numbered list should include run_tests"
+        );
+        assert!(
+            enhanced.contains("Use `lint`"),
+            "numbered list should include lint"
+        );
 
         // Custom tools appear in the example calls section
-        assert!(enhanced.contains("`run_tests` with"), "examples should include run_tests");
-        assert!(enhanced.contains("`lint` with"), "examples should include lint");
+        assert!(
+            enhanced.contains("`run_tests` with"),
+            "examples should include run_tests"
+        );
+        assert!(
+            enhanced.contains("`lint` with"),
+            "examples should include lint"
+        );
 
         // Tool with params shows param name in example
-        assert!(enhanced.contains("\"filter\""), "run_tests example should reference filter param");
+        assert!(
+            enhanced.contains("\"filter\""),
+            "run_tests example should reference filter param"
+        );
     }
 
     #[test]
@@ -857,10 +976,13 @@ That's all."#;
         let response = "```json\n[\n  {\n    \"file\": \"db.rs\",\n    \"line\": 10,\n    \"severity\": \"error\",\n    \"title\": \"SQL Injection\",\n    \"message\": \"Vulnerable.\",\n    \"suggestion\": \"Use parameterized queries:\\n```\\nrust\\nquery(?)\\n```\",\n    \"agent\": \"backend\"\n  }\n]\n```";
         let candidates = extract_json_candidates(response);
         // At least one candidate should parse as valid JSON
-        let parsed = candidates.iter().any(|c| {
-            serde_json::from_str::<Vec<Finding>>(c).is_ok()
-        });
-        assert!(parsed, "should find a parseable candidate despite nested fences");
+        let parsed = candidates
+            .iter()
+            .any(|c| serde_json::from_str::<Vec<Finding>>(c).is_ok());
+        assert!(
+            parsed,
+            "should find a parseable candidate despite nested fences"
+        );
     }
 
     #[test]

@@ -12,7 +12,7 @@ use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::constants::{self, TARGET, VERSION as CURRENT_VERSION, USER_AGENT};
+use crate::constants::{self, TARGET, USER_AGENT, VERSION as CURRENT_VERSION};
 
 /// Errors that can occur during self-update.
 #[derive(Debug, Error)]
@@ -81,20 +81,16 @@ pub async fn run_update(force: bool) -> Result<(), UpdateError> {
     let release = fetch_latest_release().await?;
 
     if !force && !is_newer(&release.version) {
-        eprintln!(
-            "  Already on the latest version ({CURRENT_VERSION}).",
-        );
+        eprintln!("  Already on the latest version ({CURRENT_VERSION}).",);
         return Ok(());
     }
 
-    eprintln!(
-        "  Updating {CURRENT_VERSION} → {} ...",
-        release.version
-    );
+    eprintln!("  Updating {CURRENT_VERSION} → {} ...", release.version);
 
     // Determine the current executable path
-    let current_exe = std::env::current_exe()
-        .map_err(|e| UpdateError::ReplaceError(format!("could not determine current executable path: {e}")))?;
+    let current_exe = std::env::current_exe().map_err(|e| {
+        UpdateError::ReplaceError(format!("could not determine current executable path: {e}"))
+    })?;
     let current_exe = current_exe.canonicalize().unwrap_or(current_exe);
 
     // Check write permissions early
@@ -219,11 +215,7 @@ async fn download_text(url: &str) -> Result<String, UpdateError> {
 ///
 /// The checksums file is expected to have lines like:
 /// `<hex-hash>  <filename>`
-fn verify_checksum(
-    data: &[u8],
-    asset_name: &str,
-    checksums_text: &str,
-) -> Result<(), UpdateError> {
+fn verify_checksum(data: &[u8], asset_name: &str, checksums_text: &str) -> Result<(), UpdateError> {
     let expected = checksums_text
         .lines()
         .find_map(|line| {
@@ -274,9 +266,9 @@ fn extract_binary(archive_bytes: &[u8]) -> Result<Vec<u8>, UpdateError> {
         }
 
         let mut buf = Vec::new();
-        entry
-            .read_to_end(&mut buf)
-            .map_err(|e| UpdateError::ExtractError(format!("failed to read binary from archive: {e}")))?;
+        entry.read_to_end(&mut buf).map_err(|e| {
+            UpdateError::ExtractError(format!("failed to read binary from archive: {e}"))
+        })?;
 
         if buf.is_empty() {
             return Err(UpdateError::ExtractError(
@@ -297,9 +289,9 @@ fn extract_binary(archive_bytes: &[u8]) -> Result<Vec<u8>, UpdateError> {
 /// Writes to a temporary file next to the target, sets executable
 /// permissions, and renames (which is atomic on the same filesystem).
 fn atomic_replace(target_path: &Path, new_binary: &[u8]) -> Result<(), UpdateError> {
-    let parent = target_path
-        .parent()
-        .ok_or_else(|| UpdateError::ReplaceError("cannot determine parent directory".to_string()))?;
+    let parent = target_path.parent().ok_or_else(|| {
+        UpdateError::ReplaceError("cannot determine parent directory".to_string())
+    })?;
 
     let tmp_path = parent.join(".nitpik-update.tmp");
 
@@ -328,9 +320,8 @@ fn atomic_replace(target_path: &Path, new_binary: &[u8]) -> Result<(), UpdateErr
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = fs::Permissions::from_mode(0o755);
-        fs::set_permissions(&tmp_path, perms).map_err(|e| {
-            UpdateError::ReplaceError(format!("failed to set permissions: {e}"))
-        })?;
+        fs::set_permissions(&tmp_path, perms)
+            .map_err(|e| UpdateError::ReplaceError(format!("failed to set permissions: {e}")))?;
     }
 
     // Atomic rename
@@ -350,9 +341,9 @@ fn atomic_replace(target_path: &Path, new_binary: &[u8]) -> Result<(), UpdateErr
 
 /// Check whether we can write to the directory containing the target binary.
 fn check_write_permission(exe_path: &Path) -> Result<(), UpdateError> {
-    let parent = exe_path
-        .parent()
-        .ok_or_else(|| UpdateError::ReplaceError("cannot determine parent directory".to_string()))?;
+    let parent = exe_path.parent().ok_or_else(|| {
+        UpdateError::ReplaceError("cannot determine parent directory".to_string())
+    })?;
 
     let probe_path = parent.join(".nitpik-write-probe");
     match fs::File::create(&probe_path) {
@@ -438,8 +429,8 @@ fn detect_ci_environment() -> bool {
         "JENKINS_URL",
         "BUILDKITE",
         "BITBUCKET_BUILD_NUMBER",
-        "TF_BUILD",       // Azure Pipelines
-        "CODEBUILD_CI",   // AWS CodeBuild
+        "TF_BUILD",     // Azure Pipelines
+        "CODEBUILD_CI", // AWS CodeBuild
         "DRONE",
         "WOODPECKER_CI",
     ];
@@ -488,7 +479,9 @@ mod tests {
         let data = b"hello world";
         let hash = hex::encode(Sha256::digest(data));
         let checksums = format!("{hash}  nitpik-x86_64-unknown-linux-gnu.tar.gz\n");
-        assert!(verify_checksum(data, "nitpik-x86_64-unknown-linux-gnu.tar.gz", &checksums).is_ok());
+        assert!(
+            verify_checksum(data, "nitpik-x86_64-unknown-linux-gnu.tar.gz", &checksums).is_ok()
+        );
     }
 
     #[test]
@@ -522,7 +515,9 @@ mod tests {
         header.set_size(content.len() as u64);
         header.set_mode(0o755);
         header.set_cksum();
-        builder.append_data(&mut header, "nitpik", &content[..]).unwrap();
+        builder
+            .append_data(&mut header, "nitpik", &content[..])
+            .unwrap();
         let tar_bytes = builder.into_inner().unwrap();
 
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
@@ -542,7 +537,9 @@ mod tests {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "some-other-file", &content[..]).unwrap();
+        builder
+            .append_data(&mut header, "some-other-file", &content[..])
+            .unwrap();
         let tar_bytes = builder.into_inner().unwrap();
 
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());

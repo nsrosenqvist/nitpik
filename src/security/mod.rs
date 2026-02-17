@@ -12,7 +12,11 @@ use crate::models::finding::{Finding, Severity};
 /// Scan content for secrets, redact them, and produce findings.
 ///
 /// Returns (redacted_content, findings).
-pub fn scan_and_redact(content: &str, file_path: &str, rules: &[rules::SecretRule]) -> (String, Vec<Finding>) {
+pub fn scan_and_redact(
+    content: &str,
+    file_path: &str,
+    rules: &[rules::SecretRule],
+) -> (String, Vec<Finding>) {
     let matches = scanner::scan_content(content, rules);
     let mut findings = Vec::new();
     let mut redacted = content.to_string();
@@ -62,7 +66,11 @@ mod tests {
 
     #[test]
     fn no_secrets_returns_original() {
-        let rules = vec![make_test_rule("api-key", r"API_KEY_[A-Z0-9]{10}", &["API_KEY"])];
+        let rules = vec![make_test_rule(
+            "api-key",
+            r"API_KEY_[A-Z0-9]{10}",
+            &["API_KEY"],
+        )];
         let (redacted, findings) = scan_and_redact("fn main() {}", "test.rs", &rules);
         assert_eq!(redacted, "fn main() {}");
         assert!(findings.is_empty());
@@ -70,7 +78,11 @@ mod tests {
 
     #[test]
     fn single_secret_redacted() {
-        let rules = vec![make_test_rule("api-key", r"SECRETKEY[A-Z0-9]{5}", &["SECRETKEY"])];
+        let rules = vec![make_test_rule(
+            "api-key",
+            r"SECRETKEY[A-Z0-9]{5}",
+            &["SECRETKEY"],
+        )];
         let content = "let key = \"SECRETKEYAB12X\";";
         let (redacted, findings) = scan_and_redact(content, "config.rs", &rules);
 

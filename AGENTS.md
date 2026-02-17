@@ -71,6 +71,13 @@ Use **American English** throughout: code comments, doc comments, agent profile 
 
 Prefer enums and constants over raw string literals. Variant names, format identifiers, provider names, severity levels, and similar fixed sets should be modeled as enums with `Display`/`FromStr` impls (or `strum` derives) rather than compared as ad-hoc strings. For application-wide names, paths, and env vars, use the constants defined in `constants.rs`.
 
+### Formatting & Linting
+
+- **`cargo fmt --all`** — format the entire workspace with `rustfmt`. All code must be formatted before committing.
+- **`cargo clippy -- -D warnings`** — run Clippy with warnings-as-errors. Fix all diagnostics; do not `#[allow]` them without justification.
+- Editors should be configured to format on save (Rust Analyzer does this by default in VS Code).
+- No custom `rustfmt.toml` — we use the default `rustfmt` style.
+
 ### Dependencies
 
 Keep the dependency tree lean — binary size and compile time matter for a CLI tool. Justify any new crate before adding it. Prefer stdlib when reasonable.
@@ -249,6 +256,7 @@ Follow these practices when working on this codebase as an AI coding agent.
 
 ### Before You're Done
 
+- Run `cargo fmt --all` and `cargo clippy -- -D warnings`. Fix any issues.
 - Run the full test suite (`cargo nextest run`) and confirm all tests pass.
 - If you added new functionality, add tests for it.
 - If you changed a public API, update callers and tests accordingly.

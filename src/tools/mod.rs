@@ -51,8 +51,7 @@ pub struct ToolCallLog {
 }
 
 /// Global tool call log instance.
-static TOOL_CALL_LOG: std::sync::LazyLock<ToolCallLog> =
-    std::sync::LazyLock::new(ToolCallLog::new);
+static TOOL_CALL_LOG: std::sync::LazyLock<ToolCallLog> = std::sync::LazyLock::new(ToolCallLog::new);
 
 impl ToolCallLog {
     /// Create a new empty log.

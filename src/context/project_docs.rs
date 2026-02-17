@@ -39,10 +39,7 @@ const MAX_DOC_SIZE: u64 = 256 * 1024;
 ///
 /// Pass `exclude` to skip specific filenames (e.g. `["AGENTS.md"]`).
 /// The names are matched exactly against the filename lists.
-pub async fn detect_project_docs(
-    repo_root: &Path,
-    exclude: &[String],
-) -> IndexMap<String, String> {
+pub async fn detect_project_docs(repo_root: &Path, exclude: &[String]) -> IndexMap<String, String> {
     // First pass: check for priority review context files.
     let priority = load_doc_list(repo_root, PRIORITY_DOC_FILES, exclude).await;
     if !priority.is_empty() {

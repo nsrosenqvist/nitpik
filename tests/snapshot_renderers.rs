@@ -4,12 +4,12 @@
 //! and compares the output against expected fixture files.
 
 use nitpik::models::finding::{Finding, Severity};
+use nitpik::output::OutputRenderer;
 use nitpik::output::bitbucket::BitbucketRenderer;
 use nitpik::output::forgejo::ForgejoRenderer;
 use nitpik::output::github::GithubRenderer;
 use nitpik::output::gitlab::GitlabRenderer;
 use nitpik::output::json::JsonRenderer;
-use nitpik::output::OutputRenderer;
 
 /// Standard test findings used across all snapshot tests.
 fn test_findings() -> Vec<Finding> {
@@ -53,8 +53,7 @@ fn snapshot_json_renderer() {
     let output = renderer.render(&test_findings());
 
     let actual: serde_json::Value = serde_json::from_str(&output).unwrap();
-    let expected_str =
-        std::fs::read_to_string("tests/fixtures/expected_json_output.json").unwrap();
+    let expected_str = std::fs::read_to_string("tests/fixtures/expected_json_output.json").unwrap();
     let expected: serde_json::Value = serde_json::from_str(&expected_str).unwrap();
 
     assert_eq!(

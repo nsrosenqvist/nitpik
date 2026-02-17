@@ -8,8 +8,8 @@ pub mod rig;
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::models::finding::Finding;
 use crate::models::AgentDefinition;
+use crate::models::finding::Finding;
 
 /// Errors from the review provider.
 #[derive(Error, Debug)]

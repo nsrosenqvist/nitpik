@@ -19,7 +19,8 @@ pub struct FileStore {
 impl FileStore {
     /// Create a new file store using the default cache directory.
     pub fn new() -> Self {
-        let cache_dir = dirs::config_dir().map(|d| d.join(crate::constants::CONFIG_DIR).join("cache"));
+        let cache_dir =
+            dirs::config_dir().map(|d| d.join(crate::constants::CONFIG_DIR).join("cache"));
         Self { cache_dir }
     }
 
@@ -168,7 +169,9 @@ impl FileStore {
 
     /// Get the file path for a cache key.
     fn key_path(&self, key: &str) -> Option<PathBuf> {
-        self.cache_dir.as_ref().map(|dir| dir.join(format!("{key}.json")))
+        self.cache_dir
+            .as_ref()
+            .map(|dir| dir.join(format!("{key}.json")))
     }
 
     /// Compute the sidecar `.meta` path for a file×agent×model×scope tuple.
@@ -210,8 +213,12 @@ impl FileStore {
             if path.extension().and_then(|e| e.to_str()) != Some("meta") {
                 continue;
             }
-            let Ok(metadata) = entry.metadata() else { continue };
-            let Ok(modified) = metadata.modified() else { continue };
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let Ok(modified) = metadata.modified() else {
+                continue;
+            };
             if let Ok(age) = now.duration_since(modified) {
                 if age > max_age {
                     if std::fs::remove_file(&path).is_ok() {
@@ -377,19 +384,28 @@ mod tests {
 
     #[test]
     fn human_size_bytes() {
-        let stats = CacheStats { entries: 1, total_bytes: 500 };
+        let stats = CacheStats {
+            entries: 1,
+            total_bytes: 500,
+        };
         assert_eq!(stats.human_size(), "500 B");
     }
 
     #[test]
     fn human_size_kib() {
-        let stats = CacheStats { entries: 1, total_bytes: 2048 };
+        let stats = CacheStats {
+            entries: 1,
+            total_bytes: 2048,
+        };
         assert_eq!(stats.human_size(), "2.0 KiB");
     }
 
     #[test]
     fn human_size_mib() {
-        let stats = CacheStats { entries: 1, total_bytes: 2 * 1024 * 1024 };
+        let stats = CacheStats {
+            entries: 1,
+            total_bytes: 2 * 1024 * 1024,
+        };
         assert_eq!(stats.human_size(), "2.0 MiB");
     }
 
@@ -399,7 +415,11 @@ mod tests {
     fn get_previous_returns_none_on_first_run() {
         let dir = tempfile::tempdir().unwrap();
         let store = make_store(dir.path());
-        assert!(store.get_previous("file.rs", "backend", "model-v1", "key-abc", "main").is_none());
+        assert!(
+            store
+                .get_previous("file.rs", "backend", "model-v1", "key-abc", "main")
+                .is_none()
+        );
     }
 
     #[test]
@@ -410,7 +430,11 @@ mod tests {
         store.put_sidecar("file.rs", "backend", "model-v1", "key-abc", "main");
 
         // Same cache key → cache hit, no prior needed
-        assert!(store.get_previous("file.rs", "backend", "model-v1", "key-abc", "main").is_none());
+        assert!(
+            store
+                .get_previous("file.rs", "backend", "model-v1", "key-abc", "main")
+                .is_none()
+        );
     }
 
     #[test]
@@ -557,14 +581,13 @@ mod tests {
 
         // Create a sidecar and backdate it
         store.put_sidecar("old.rs", "backend", "model", "key-old", "stale-branch");
-        let meta_path = store.sidecar_path("old.rs", "backend", "model", "stale-branch").unwrap();
-        let old_time = std::time::SystemTime::now()
-            - std::time::Duration::from_secs(31 * 24 * 60 * 60);
-        filetime::set_file_mtime(
-            &meta_path,
-            filetime::FileTime::from_system_time(old_time),
-        )
-        .unwrap();
+        let meta_path = store
+            .sidecar_path("old.rs", "backend", "model", "stale-branch")
+            .unwrap();
+        let old_time =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 60 * 60);
+        filetime::set_file_mtime(&meta_path, filetime::FileTime::from_system_time(old_time))
+            .unwrap();
 
         // Create a fresh sidecar
         store.put_sidecar("new.rs", "backend", "model", "key-new", "active-branch");
@@ -572,12 +595,15 @@ mod tests {
         // Also create a .json cache entry (should not be removed)
         store.put("key-new", &sample_findings());
 
-        let removed = store.cleanup_stale_sidecars(std::time::Duration::from_secs(30 * 24 * 60 * 60));
+        let removed =
+            store.cleanup_stale_sidecars(std::time::Duration::from_secs(30 * 24 * 60 * 60));
         assert_eq!(removed, 1);
         assert!(!meta_path.exists());
 
         // Fresh sidecar and .json still exist
-        let fresh_meta = store.sidecar_path("new.rs", "backend", "model", "active-branch").unwrap();
+        let fresh_meta = store
+            .sidecar_path("new.rs", "backend", "model", "active-branch")
+            .unwrap();
         assert!(fresh_meta.exists());
         assert!(store.get("key-new").is_some());
     }
@@ -589,6 +615,9 @@ mod tests {
         let store = FileStore {
             cache_dir: Some(cache_dir),
         };
-        assert_eq!(store.cleanup_stale_sidecars(std::time::Duration::from_secs(1)), 0);
+        assert_eq!(
+            store.cleanup_stale_sidecars(std::time::Duration::from_secs(1)),
+            0
+        );
     }
 }

@@ -7,9 +7,7 @@ use super::DiffError;
 /// Read a unified diff from a file path.
 pub async fn read_diff_file(path: &Path) -> Result<String, DiffError> {
     if !path.exists() {
-        return Err(DiffError::PathNotFound(
-            path.display().to_string(),
-        ));
+        return Err(DiffError::PathNotFound(path.display().to_string()));
     }
 
     tokio::fs::read_to_string(path)

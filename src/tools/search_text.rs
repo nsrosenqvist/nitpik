@@ -89,12 +89,16 @@ impl Tool for SearchTextTool {
         let result_summary = if results.is_empty() {
             "no matches".to_string()
         } else {
-            format!("{} result{}", results.len(), if results.len() == 1 { "" } else { "s" })
+            format!(
+                "{} result{}",
+                results.len(),
+                if results.len() == 1 { "" } else { "s" }
+            )
         };
         let args_summary = if args.pattern.len() > 40 {
-            format!("\"{}...\"" , &args.pattern[..37])
+            format!("\"{}...\"", &args.pattern[..37])
         } else {
-            format!("\"{}\"" , &args.pattern)
+            format!("\"{}\"", &args.pattern)
         };
         crate::tools::finish_tool_call(start, "search_text", args_summary, result_summary);
 
@@ -192,7 +196,11 @@ mod tests {
     #[tokio::test]
     async fn search_literal() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("test.txt"), "hello world\nfoo bar\nhello again").unwrap();
+        std::fs::write(
+            dir.path().join("test.txt"),
+            "hello world\nfoo bar\nhello again",
+        )
+        .unwrap();
 
         let results = search_text(dir.path(), "hello", false).await.unwrap();
         assert_eq!(results.len(), 2);
@@ -203,8 +211,11 @@ mod tests {
     #[tokio::test]
     async fn search_regex() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("test.txt"), "fn main() {}\nfn hello() {}\nlet x = 1;")
-            .unwrap();
+        std::fs::write(
+            dir.path().join("test.txt"),
+            "fn main() {}\nfn hello() {}\nlet x = 1;",
+        )
+        .unwrap();
 
         let results = search_text(dir.path(), r"fn \w+\(\)", true).await.unwrap();
         assert_eq!(results.len(), 2);
@@ -235,10 +246,13 @@ mod tests {
         std::fs::write(dir.path().join("code.rs"), "fn hello() {}\nfn world() {}").unwrap();
 
         let tool = SearchTextTool::new(dir.path().to_path_buf());
-        let result = Tool::call(&tool, SearchTextArgs {
-            pattern: "fn".to_string(),
-            is_regex: false,
-        })
+        let result = Tool::call(
+            &tool,
+            SearchTextArgs {
+                pattern: "fn".to_string(),
+                is_regex: false,
+            },
+        )
         .await
         .unwrap();
         assert!(result.contains("fn hello"));
@@ -251,10 +265,13 @@ mod tests {
         std::fs::write(dir.path().join("test.txt"), "nothing").unwrap();
 
         let tool = SearchTextTool::new(dir.path().to_path_buf());
-        let result = Tool::call(&tool, SearchTextArgs {
-            pattern: "nonexistent".to_string(),
-            is_regex: false,
-        })
+        let result = Tool::call(
+            &tool,
+            SearchTextArgs {
+                pattern: "nonexistent".to_string(),
+                is_regex: false,
+            },
+        )
         .await
         .unwrap();
         assert_eq!(result, "No matches found.");

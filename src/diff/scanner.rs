@@ -24,10 +24,7 @@ pub async fn scan_path(path: &Path) -> Result<Vec<FileDiff>, DiffError> {
             diffs.push(diff);
         }
     } else if path.is_dir() {
-        let walker = WalkBuilder::new(path)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
+        let walker = WalkBuilder::new(path).hidden(true).git_ignore(true).build();
 
         for entry in walker.flatten() {
             if entry.file_type().map_or(true, |ft| !ft.is_file()) {

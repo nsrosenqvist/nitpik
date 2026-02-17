@@ -22,7 +22,12 @@ pub enum TaskStatus {
     /// Failed after retries.
     Failed(String),
     /// Retrying after transient error.
-    Retrying { attempt: u32, max: u32, reason: String, backoff_secs: u64 },
+    Retrying {
+        attempt: u32,
+        max: u32,
+        reason: String,
+        backoff_secs: u64,
+    },
 }
 
 /// Tracks and renders live progress for file reviews.
@@ -120,7 +125,12 @@ impl ProgressTracker {
                 handle,
                 "  {} {}",
                 "▸".cyan().bold(),
-                format!("{} tool call{}", tool_calls.len(), if tool_calls.len() == 1 { "" } else { "s" }).dimmed(),
+                format!(
+                    "{} tool call{}",
+                    tool_calls.len(),
+                    if tool_calls.len() == 1 { "" } else { "s" }
+                )
+                .dimmed(),
             );
             for tc in &tool_calls {
                 let duration = if tc.duration.as_millis() < 1000 {
@@ -173,28 +183,32 @@ impl ProgressTracker {
         // File list
         for (file, status) in &state.files {
             let (icon, status_text) = match status {
-                TaskStatus::Pending => (
-                    "○".dimmed().to_string(),
-                    "waiting".dimmed().to_string(),
-                ),
+                TaskStatus::Pending => ("○".dimmed().to_string(), "waiting".dimmed().to_string()),
                 TaskStatus::InProgress => (
                     "◌".cyan().bold().to_string(),
                     "reviewing…".cyan().to_string(),
                 ),
-                TaskStatus::Done => (
-                    "✔".green().bold().to_string(),
-                    "done".green().to_string(),
-                ),
-                TaskStatus::Failed(reason) => (
-                    "✖".red().bold().to_string(),
-                    reason.red().to_string(),
-                ),
-                TaskStatus::Retrying { attempt, max, reason, backoff_secs } => (
+                TaskStatus::Done => ("✔".green().bold().to_string(), "done".green().to_string()),
+                TaskStatus::Failed(reason) => {
+                    ("✖".red().bold().to_string(), reason.red().to_string())
+                }
+                TaskStatus::Retrying {
+                    attempt,
+                    max,
+                    reason,
+                    backoff_secs,
+                } => (
                     "⟳".yellow().bold().to_string(),
-                    format!("{reason}, retrying in {backoff_secs}s ({attempt}/{max})").yellow().to_string(),
+                    format!("{reason}, retrying in {backoff_secs}s ({attempt}/{max})")
+                        .yellow()
+                        .to_string(),
                 ),
             };
-            let _ = writeln!(handle, "    {icon} {file} {status_text}", file = file.dimmed());
+            let _ = writeln!(
+                handle,
+                "    {icon} {file} {status_text}",
+                file = file.dimmed()
+            );
             lines += 1;
         }
 
@@ -223,11 +237,8 @@ mod tests {
 
     #[test]
     fn tracker_disabled_no_panic() {
-        let tracker = ProgressTracker::new(
-            &["file.rs".to_string()],
-            &["backend".to_string()],
-            false,
-        );
+        let tracker =
+            ProgressTracker::new(&["file.rs".to_string()], &["backend".to_string()], false);
         tracker.start();
         tracker.update("file.rs", TaskStatus::InProgress);
         tracker.update("file.rs", TaskStatus::Done);
@@ -252,11 +263,8 @@ mod tests {
 
     #[test]
     fn tracker_retrying_status() {
-        let tracker = ProgressTracker::new(
-            &["retry.rs".to_string()],
-            &["backend".to_string()],
-            false,
-        );
+        let tracker =
+            ProgressTracker::new(&["retry.rs".to_string()], &["backend".to_string()], false);
         tracker.update(
             "retry.rs",
             TaskStatus::Retrying {
@@ -269,7 +277,12 @@ mod tests {
 
         let state = tracker.inner.lock().unwrap();
         match &state.files["retry.rs"] {
-            TaskStatus::Retrying { attempt, max, reason, backoff_secs } => {
+            TaskStatus::Retrying {
+                attempt,
+                max,
+                reason,
+                backoff_secs,
+            } => {
                 assert_eq!(*attempt, 1);
                 assert_eq!(*max, 3);
                 assert_eq!(reason, "rate limited");
@@ -288,11 +301,7 @@ mod tests {
 
     #[test]
     fn tracker_finish_with_findings_no_panic() {
-        let tracker = ProgressTracker::new(
-            &["a.rs".to_string()],
-            &["backend".to_string()],
-            false,
-        );
+        let tracker = ProgressTracker::new(&["a.rs".to_string()], &["backend".to_string()], false);
         tracker.update("a.rs", TaskStatus::Done);
         // Finish with nonzero findings should not print "No issues found."
         tracker.finish();
@@ -313,11 +322,7 @@ mod tests {
 
     #[test]
     fn tracker_update_unknown_file_adds_it() {
-        let tracker = ProgressTracker::new(
-            &["a.rs".to_string()],
-            &["backend".to_string()],
-            false,
-        );
+        let tracker = ProgressTracker::new(&["a.rs".to_string()], &["backend".to_string()], false);
         // Updating a file not in the initial list should insert it.
         tracker.update("unknown.rs", TaskStatus::Done);
         let state = tracker.inner.lock().unwrap();

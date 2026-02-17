@@ -52,10 +52,7 @@ fn titles_similar(a: &str, b: &str) -> bool {
         return false;
     }
 
-    let common = a_words
-        .iter()
-        .filter(|w| b_words.contains(w))
-        .count();
+    let common = a_words.iter().filter(|w| b_words.contains(w)).count();
 
     let max_len = a_words.len().max(b_words.len());
     let similarity = common as f64 / max_len as f64;

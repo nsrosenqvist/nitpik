@@ -14,10 +14,7 @@ fn main() {
     let verifying_key = signing_key.verifying_key();
 
     eprintln!("=== PRIVATE KEY (store securely, NEVER commit) ===");
-    println!(
-        "PRIVATE_KEY_HEX={}",
-        hex::encode(signing_key.to_bytes())
-    );
+    println!("PRIVATE_KEY_HEX={}", hex::encode(signing_key.to_bytes()));
 
     eprintln!("\n=== PUBLIC KEY (paste into src/license/mod.rs) ===");
     let bytes = verifying_key.to_bytes();

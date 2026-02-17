@@ -36,7 +36,9 @@ pub fn parse_unified_diff(input: &str) -> Vec<FileDiff> {
             } else if next.starts_with("rename from") || next.starts_with("rename to") {
                 is_rename = true;
                 lines.next();
-            } else if next.starts_with("similarity index") || next.starts_with("dissimilarity index") {
+            } else if next.starts_with("similarity index")
+                || next.starts_with("dissimilarity index")
+            {
                 lines.next();
             } else if next.starts_with("index ") {
                 lines.next();
@@ -117,7 +119,10 @@ fn find_second_prefix(s: &str) -> Option<usize> {
     for i in 1..bytes.len().saturating_sub(1) {
         if bytes[i] == b' '
             && bytes.get(i + 2) == Some(&b'/')
-            && matches!(bytes.get(i + 1), Some(b'a' | b'b' | b'c' | b'w' | b'i' | b'o'))
+            && matches!(
+                bytes.get(i + 1),
+                Some(b'a' | b'b' | b'c' | b'w' | b'i' | b'o')
+            )
         {
             return Some(i);
         }

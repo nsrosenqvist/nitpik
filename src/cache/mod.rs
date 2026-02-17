@@ -74,7 +74,8 @@ impl CacheEngine {
         if !self.enabled {
             return;
         }
-        self.store.put_sidecar(file_path, agent_name, model, cache_key, review_scope);
+        self.store
+            .put_sidecar(file_path, agent_name, model, cache_key, review_scope);
     }
 
     /// Retrieve findings from the *previous* review of a file×agent×model×scope
@@ -93,7 +94,13 @@ impl CacheEngine {
         if !self.enabled {
             return None;
         }
-        self.store.get_previous(file_path, agent_name, model, current_cache_key, review_scope)
+        self.store.get_previous(
+            file_path,
+            agent_name,
+            model,
+            current_cache_key,
+            review_scope,
+        )
     }
 
     /// Remove stale `.meta` sidecar files older than the given duration.
@@ -151,7 +158,11 @@ mod tests {
     fn get_previous_returns_none_when_disabled() {
         // CacheEngine with enabled=false should never return prior findings
         let engine = CacheEngine::new(false);
-        assert!(engine.get_previous("f.rs", "backend", "model", "key", "main").is_none());
+        assert!(
+            engine
+                .get_previous("f.rs", "backend", "model", "key", "main")
+                .is_none()
+        );
     }
 
     #[test]

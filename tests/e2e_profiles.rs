@@ -123,7 +123,10 @@ async fn run_git(repo_dir: &Path, args: &[&str]) {
 
 /// Recursively copy all files from `src` into `dst`, preserving relative paths.
 fn copy_tree(src: &Path, dst: &Path) {
-    for entry in walkdir::WalkDir::new(src).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(src)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let rel = entry.path().strip_prefix(src).unwrap();
         let target = dst.join(rel);
         if entry.file_type().is_dir() {
@@ -151,11 +154,7 @@ fn real_config() -> Config {
 /// Run the full review pipeline for a given repo and profile name(s).
 ///
 /// Returns the list of findings produced by the real LLM.
-async fn run_review(
-    repo_path: &Path,
-    profile_names: &[&str],
-    config: &Config,
-) -> Vec<Finding> {
+async fn run_review(repo_path: &Path, profile_names: &[&str], config: &Config) -> Vec<Finding> {
     // Get diffs (unstaged changes vs HEAD)
     let input = InputMode::GitBase("HEAD".to_string());
     let diffs = diff::get_diffs(&input, repo_path)
@@ -164,7 +163,8 @@ async fn run_review(
 
     assert!(
         !diffs.is_empty(),
-        "changeset should produce diffs in {}", repo_path.display()
+        "changeset should produce diffs in {}",
+        repo_path.display()
     );
 
     // Resolve agent profiles
@@ -213,7 +213,15 @@ async fn run_review(
     // Run the orchestrator (cache disabled for E2E)
     let cache = CacheEngine::new(false);
     let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), config, cache, progress, false, None, String::new());
+    let orchestrator = ReviewOrchestrator::new(
+        Arc::clone(&provider),
+        config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let result = orchestrator
         .run(&review_context, &agent_defs, 2, false, 10, 10)
@@ -239,7 +247,11 @@ fn assert_findings_valid(findings: &[Finding], expected_file_substring: &str) {
         assert!(!f.title.is_empty(), "finding title should not be empty");
         assert!(!f.message.is_empty(), "finding message should not be empty");
         assert!(!f.agent.is_empty(), "finding agent should not be empty");
-        assert!(f.line > 0, "finding line number should be > 0, got {}", f.line);
+        assert!(
+            f.line > 0,
+            "finding line number should be > 0, got {}",
+            f.line
+        );
 
         // Severity should be a valid variant (this is guaranteed by the enum,
         // but we check the display round-trip).
@@ -486,9 +498,7 @@ async fn e2e_custom_profile() {
     eprintln!("\n=== E2E: custom profile (perf-reviewer) ===");
 
     // The custom profile .md lives in the fixtures dir, not in builtins.
-    let custom_profile_path = fixtures_dir()
-        .join("custom_profile")
-        .join("reviewer.md");
+    let custom_profile_path = fixtures_dir().join("custom_profile").join("reviewer.md");
     assert!(
         custom_profile_path.exists(),
         "custom profile fixture should exist at {}",
@@ -525,13 +535,20 @@ async fn e2e_custom_profile() {
     };
 
     let provider: Arc<dyn ReviewProvider> = Arc::new(
-        RigProvider::new(config.provider.clone(), repo.clone())
-            .expect("failed to create provider"),
+        RigProvider::new(config.provider.clone(), repo.clone()).expect("failed to create provider"),
     );
 
     let cache = CacheEngine::new(false);
     let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-    let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None, String::new());
+    let orchestrator = ReviewOrchestrator::new(
+        Arc::clone(&provider),
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
 
     let result = orchestrator
         .run(&review_context, &agent_defs, 2, false, 10, 10)
@@ -549,10 +566,7 @@ async fn e2e_custom_profile() {
         findings.iter().map(|f| &f.agent).collect::<Vec<_>>()
     );
 
-    eprintln!(
-        "  ✓ custom profile produced {} finding(s)",
-        findings.len()
-    );
+    eprintln!("  ✓ custom profile produced {} finding(s)", findings.len());
 }
 
 /// E2E test that uses a custom profile with a tool definition and runs in
@@ -569,9 +583,7 @@ async fn e2e_custom_tool_agentic() {
     eprintln!("\n=== E2E: custom tool agentic (tool-reviewer) ===");
 
     // The custom-tool profile lives in fixtures/e2e/custom_tool/
-    let custom_profile_path = fixtures_dir()
-        .join("custom_tool")
-        .join("reviewer.md");
+    let custom_profile_path = fixtures_dir().join("custom_tool").join("reviewer.md");
     assert!(
         custom_profile_path.exists(),
         "custom tool profile fixture should exist at {}",
@@ -643,16 +655,14 @@ async fn e2e_custom_tool_agentic() {
     };
 
     let provider: Arc<dyn ReviewProvider> = Arc::new(
-        RigProvider::new(config.provider.clone(), repo.clone())
-            .expect("failed to create provider"),
+        RigProvider::new(config.provider.clone(), repo.clone()).expect("failed to create provider"),
     );
 
     // Retry loop for rate-limiting resilience
     let mut findings = Vec::new();
     for attempt in 0..3u32 {
         let cache = CacheEngine::new(false);
-        let progress =
-            std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
+        let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
         let orchestrator = ReviewOrchestrator::new(
             Arc::clone(&provider),
             &config,
@@ -697,9 +707,7 @@ async fn e2e_custom_tool_agentic() {
     // --- Check for tool-call events ---
     let captured = tool_spans.lock().unwrap();
     if captured.is_empty() {
-        eprintln!(
-            "  ⚠ no tool calls captured — model reviewed without invoking custom tools"
-        );
+        eprintln!("  ⚠ no tool calls captured — model reviewed without invoking custom tools");
     } else {
         eprintln!(
             "  captured {} tool-call event(s): {:?}",
@@ -728,8 +736,8 @@ mod tool_call_layer {
     use std::sync::{Arc, Mutex};
 
     use tracing::Subscriber;
-    use tracing_subscriber::layer::Context;
     use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::Context;
 
     /// Shared log of tool-call span names observed during the test.
     #[derive(Clone, Default)]
@@ -747,18 +755,11 @@ mod tool_call_layer {
             let name = attrs.metadata().name();
             // rig-core creates an `execute_tool` span for every tool call
             if name == "execute_tool" {
-                self.tool_spans
-                    .lock()
-                    .unwrap()
-                    .push(name.to_string());
+                self.tool_spans.lock().unwrap().push(name.to_string());
             }
         }
 
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _ctx: Context<'_, S>,
-        ) {
+        fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
             // rig-core logs: info!("executed tool {tool_name} with args ...")
             let meta = event.metadata();
             if *meta.level() == tracing::Level::INFO {
@@ -774,11 +775,7 @@ mod tool_call_layer {
                             self.0 = format!("{value:?}");
                         }
                     }
-                    fn record_str(
-                        &mut self,
-                        field: &tracing::field::Field,
-                        value: &str,
-                    ) {
+                    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
                         if field.name() == "message" {
                             self.0 = value.to_string();
                         }
@@ -787,10 +784,7 @@ mod tool_call_layer {
                 let mut visitor = MsgVisitor(String::new());
                 event.record(&mut visitor);
                 if visitor.0.contains("executed tool") {
-                    self.tool_spans
-                        .lock()
-                        .unwrap()
-                        .push(visitor.0);
+                    self.tool_spans.lock().unwrap().push(visitor.0);
                 }
             }
         }
@@ -856,9 +850,8 @@ async fn e2e_cache_prior_findings() {
         .prefix("nitpik-e2e-cache-")
         .tempdir_in("/tmp")
         .expect("failed to create cache tempdir");
-    let _cache_store = nitpik::cache::store::FileStore::new_with_dir(
-        cache_dir.path().to_path_buf(),
-    );
+    let _cache_store =
+        nitpik::cache::store::FileStore::new_with_dir(cache_dir.path().to_path_buf());
 
     // --- Stage 1: Review changeset v1 ---
     eprintln!("  stage 1: reviewing changeset v1 (division by zero + unwrap)...");
@@ -883,8 +876,7 @@ async fn e2e_cache_prior_findings() {
     };
 
     let provider: Arc<dyn ReviewProvider> = Arc::new(
-        RigProvider::new(config.provider.clone(), repo.clone())
-            .expect("failed to create provider"),
+        RigProvider::new(config.provider.clone(), repo.clone()).expect("failed to create provider"),
     );
 
     // Run review 1 with cache enabled — this populates the cache + sidecar
@@ -894,7 +886,13 @@ async fn e2e_cache_prior_findings() {
     let cache1 = CacheEngine::new(false);
     let progress1 = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
     let orch1 = ReviewOrchestrator::new(
-        Arc::clone(&provider), &config, cache1, progress1, false, None, String::new(),
+        Arc::clone(&provider),
+        &config,
+        cache1,
+        progress1,
+        false,
+        None,
+        String::new(),
     );
 
     let result_v1 = orch1
@@ -952,7 +950,10 @@ async fn e2e_cache_prior_findings() {
     let cache2 = CacheEngine::new(true);
     let progress2 = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
     let orch2 = ReviewOrchestrator::new(
-        Arc::clone(&provider), &config, cache2, progress2,
+        Arc::clone(&provider),
+        &config,
+        cache2,
+        progress2,
         false, // no_prior_context = false → inject prior findings
         None,  // unlimited
         String::new(),
@@ -1023,9 +1024,7 @@ async fn e2e_agentic_mode() {
                 .with_target(false)
                 .with_writer(std::io::stderr),
         )
-        .with(
-            tracing_subscriber::filter::EnvFilter::new("info"),
-        );
+        .with(tracing_subscriber::filter::EnvFilter::new("info"));
 
     // Use `set_default` so it only applies to this thread/task, not globally.
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -1051,8 +1050,7 @@ async fn e2e_agentic_mode() {
     };
 
     let provider: Arc<dyn ReviewProvider> = Arc::new(
-        RigProvider::new(config.provider.clone(), repo.clone())
-            .expect("failed to create provider"),
+        RigProvider::new(config.provider.clone(), repo.clone()).expect("failed to create provider"),
     );
 
     // Retry loop: agentic requests are more expensive and prone to rate-limiting
@@ -1061,7 +1059,15 @@ async fn e2e_agentic_mode() {
     for attempt in 0..3u32 {
         let cache = CacheEngine::new(false);
         let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
-        let orchestrator = ReviewOrchestrator::new(Arc::clone(&provider), &config, cache, progress, false, None, String::new());
+        let orchestrator = ReviewOrchestrator::new(
+            Arc::clone(&provider),
+            &config,
+            cache,
+            progress,
+            false,
+            None,
+            String::new(),
+        );
 
         // agentic=true, max_turns=5, max_tool_calls=10
         let result = orchestrator

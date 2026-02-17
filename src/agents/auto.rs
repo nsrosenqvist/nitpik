@@ -3,8 +3,8 @@
 //! When `--profile auto` is used, we analyze the changed file extensions
 //! and paths to select appropriate built-in profiles without an LLM call.
 
-use crate::models::diff::FileDiff;
 use crate::models::DEFAULT_PROFILE;
+use crate::models::diff::FileDiff;
 
 /// Select appropriate profiles based on changed files.
 ///
