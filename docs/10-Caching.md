@@ -97,6 +97,6 @@ Caching behavior is controlled entirely through CLI flags — there are no confi
 
 ## Related Pages
 
-- [How Reviews Work](How-Reviews-Work) — the full review pipeline
-- [Configuration](Configuration) — all CLI flags
-- [CLI Reference](CLI-Reference) — `cache` subcommand details
+- [How Reviews Work](09-How-Reviews-Work) — the full review pipeline
+- [Configuration](13-Configuration) — all CLI flags
+- [CLI Reference](15-CLI-Reference) — `cache` subcommand details

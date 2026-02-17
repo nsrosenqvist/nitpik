@@ -31,7 +31,7 @@ For larger files, nitpik extracts the relevant portions: the code surrounding ea
 
 nitpik automatically includes your team's conventions and guidelines. If a `REVIEW.md` or `NITPIK.md` exists in your repo root, those are used as focused review context. Otherwise, nitpik falls back to common documentation files like `AGENTS.md`, `CONVENTIONS.md`, and `CONTRIBUTING.md`.
 
-See [Project Documentation](Project-Docs) for details on controlling this.
+See [Project Documentation](12-Project-Docs) for details on controlling this.
 
 ### The Diff
 
@@ -57,7 +57,7 @@ When a file changes and the cached review is invalidated, nitpik doesn't start f
 
 This keeps reviews consistent across iterations — the LLM won't flip-flop on findings between runs, and it won't re-report issues you've already fixed.
 
-Prior findings are scoped per branch so parallel PRs don't contaminate each other. See [Caching & Prior Findings](Caching) for configuration.
+Prior findings are scoped per branch so parallel PRs don't contaminate each other. See [Caching & Prior Findings](10-Caching) for configuration.
 
 ## Post-Processing
 
@@ -79,7 +79,7 @@ LLMs sometimes use non-standard severity labels. nitpik normalizes them: "critic
 
 ## Related Pages
 
-- [Caching & Prior Findings](Caching) — content-hash caching and prior findings configuration
-- [Reviewer Profiles](Reviewer-Profiles) — choosing and combining profiles
-- [Agentic Mode](Agentic-Mode) — giving the LLM tools to explore your codebase
-- [Secret Scanning](Secret-Scanning) — how redaction works
+- [Caching & Prior Findings](10-Caching) — content-hash caching and prior findings configuration
+- [Reviewer Profiles](05-Reviewer-Profiles) — choosing and combining profiles
+- [Agentic Mode](07-Agentic-Mode) — giving the LLM tools to explore your codebase
+- [Secret Scanning](11-Secret-Scanning) — how redaction works

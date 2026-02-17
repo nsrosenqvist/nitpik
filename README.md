@@ -4,7 +4,7 @@
 
 AI-powered code reviews for your team. Bring your own model, bring your own API key. One flat platform fee — no per-seat charges, no usage caps.
 
-[Website](https://nitpik.dev) · [Documentation](docs/Home.md) · [Get a License](https://nitpik.dev) · `nitpik help`
+[Website](https://nitpik.dev) · [Documentation](https://github.com/nsrosenqvist/nitpik/wiki) · [Get a License](https://nitpik.dev) · `nitpik help`
 
 ---
 

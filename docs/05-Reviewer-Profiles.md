@@ -56,7 +56,7 @@ Run multiple profiles in parallel:
 nitpik review --diff-base main --profile backend,security
 ```
 
-When multiple profiles run together, each one is informed about the others and their focus areas. This coordination prevents duplicate findings and keeps each reviewer in its lane. See [How Reviews Work](How-Reviews-Work) for details.
+When multiple profiles run together, each one is informed about the others and their focus areas. This coordination prevents duplicate findings and keeps each reviewer in its lane. See [How Reviews Work](09-How-Reviews-Work) for details.
 
 ## Auto-Selection
 
@@ -107,7 +107,7 @@ This shows each profile's name, description, and tags.
 
 ## Related Pages
 
-- [Custom Profiles](Custom-Profiles) — create your own reviewers
-- [How Reviews Work](How-Reviews-Work) — multi-agent coordination
-- [Agentic Mode](Agentic-Mode) — give profiles access to tools
-- [CLI Reference](CLI-Reference) — all profile-related flags
+- [Custom Profiles](06-Custom-Profiles) — create your own reviewers
+- [How Reviews Work](09-How-Reviews-Work) — multi-agent coordination
+- [Agentic Mode](07-Agentic-Mode) — give profiles access to tools
+- [CLI Reference](15-CLI-Reference) — all profile-related flags

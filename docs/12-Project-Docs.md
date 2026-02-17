@@ -84,6 +84,6 @@ nitpik review --diff-base main --exclude-doc AGENTS.md,CONTRIBUTING.md
 
 ## Related Pages
 
-- [How Reviews Work](How-Reviews-Work) — where project docs fit in the prompt
-- [Custom Profiles](Custom-Profiles) — profile-level conventions
-- [Configuration](Configuration) — `--no-project-docs` and `--exclude-doc` flags
+- [How Reviews Work](09-How-Reviews-Work) — where project docs fit in the prompt
+- [Custom Profiles](06-Custom-Profiles) — profile-level conventions
+- [Configuration](13-Configuration) — `--no-project-docs` and `--exclude-doc` flags

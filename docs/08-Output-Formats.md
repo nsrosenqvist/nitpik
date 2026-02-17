@@ -39,7 +39,7 @@ nitpik review --diff-base main --format github
 
 Outputs findings as [GitHub Actions workflow commands](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions) (`::error::`, `::warning::`, `::notice::`). These appear as inline annotations on pull requests.
 
-See [CI/CD Integration — GitHub Actions](CI-Integration#github-actions) for full pipeline setup.
+See [CI/CD Integration — GitHub Actions](14-CI-Integration#github-actions) for full pipeline setup.
 
 ## GitLab Code Quality
 
@@ -49,7 +49,7 @@ nitpik review --diff-base main --format gitlab > gl-code-quality-report.json
 
 Outputs a [GitLab Code Quality report](https://docs.gitlab.com/ee/ci/testing/code_quality.html). Upload it as a CI artifact to see findings in the merge request Code Quality widget.
 
-See [CI/CD Integration — GitLab](CI-Integration#gitlab-cicd) for full pipeline setup.
+See [CI/CD Integration — GitLab](14-CI-Integration#gitlab-cicd) for full pipeline setup.
 
 ## Bitbucket Code Insights
 
@@ -59,7 +59,7 @@ nitpik review --diff-base main --format bitbucket
 
 Posts findings as [Code Insights annotations](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-reports/) via the Bitbucket API. Requires a `BITBUCKET_TOKEN` environment variable with `pullrequest` and `repository:write` scopes.
 
-See [CI/CD Integration — Bitbucket](CI-Integration#bitbucket-pipelines) for token setup and pipeline config.
+See [CI/CD Integration — Bitbucket](14-CI-Integration#bitbucket-pipelines) for token setup and pipeline config.
 
 ## Forgejo / Gitea
 
@@ -69,7 +69,7 @@ nitpik review --diff-base main --format forgejo
 
 Posts findings as inline PR review comments via the Forgejo/Gitea API. Requires a `FORGEJO_TOKEN` environment variable with `write:repository` scope.
 
-See [CI/CD Integration — Woodpecker/Forgejo](CI-Integration#woodpecker-ci-forgejo--gitea--codeberg) for token setup and pipeline config.
+See [CI/CD Integration — Woodpecker/Forgejo](14-CI-Integration#woodpecker-ci-forgejo--gitea--codeberg) for token setup and pipeline config.
 
 ## Failing on Findings
 
@@ -89,6 +89,6 @@ When not set, nitpik always exits `0` regardless of findings. In CI, combine `--
 
 ## Related Pages
 
-- [CI/CD Integration](CI-Integration) — full pipeline setup for each platform
-- [Configuration](Configuration) — `--format` and `--fail-on` in config
-- [CLI Reference](CLI-Reference) — all output flags
+- [CI/CD Integration](14-CI-Integration) — full pipeline setup for each platform
+- [Configuration](13-Configuration) — `--format` and `--fail-on` in config
+- [CLI Reference](15-CLI-Reference) — all output flags

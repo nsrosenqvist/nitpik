@@ -76,6 +76,6 @@ This sets the repository root for git operations, file reads, and project doc de
 
 ## Related Pages
 
-- [Quick Start](Quick-Start) — run your first review
-- [How Reviews Work](How-Reviews-Work) — how nitpik assembles context from your diff
-- [Configuration](Configuration) — all CLI flags
+- [Quick Start](02-Quick-Start) — run your first review
+- [How Reviews Work](09-How-Reviews-Work) — how nitpik assembles context from your diff
+- [Configuration](13-Configuration) — all CLI flags

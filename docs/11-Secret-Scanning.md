@@ -62,6 +62,6 @@ Normal reviews without `--scan-secrets` have no extra startup cost.
 
 ## Related Pages
 
-- [How Reviews Work](How-Reviews-Work) — where secret scanning fits in the pipeline
-- [Configuration](Configuration) — secrets config section
-- [CI/CD Integration](CI-Integration) — enabling secret scanning in pipelines
+- [How Reviews Work](09-How-Reviews-Work) — where secret scanning fits in the pipeline
+- [Configuration](13-Configuration) — secrets config section
+- [CI/CD Integration](14-CI-Integration) — enabling secret scanning in pipelines

@@ -104,7 +104,7 @@ nitpik automatically retries with exponential backoff (up to 5 retries) when rat
 
 ## Related Pages
 
-- [Installation](Installation) — install methods and requirements
-- [LLM Providers](Providers) — provider setup
-- [CI/CD Integration](CI-Integration) — platform-specific setup
-- [Caching](Caching) — cache management
+- [Installation](01-Installation) — install methods and requirements
+- [LLM Providers](03-Providers) — provider setup
+- [CI/CD Integration](14-CI-Integration) — platform-specific setup
+- [Caching](10-Caching) — cache management

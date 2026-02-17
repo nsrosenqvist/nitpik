@@ -13,7 +13,7 @@ Download the latest binary for your platform:
 curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
 ```
 
-See [Installation](Installation) for macOS, Docker, and other options.
+See [Installation](01-Installation) for macOS, Docker, and other options.
 
 ## 2. Connect an LLM Provider
 
@@ -24,7 +24,7 @@ export NITPIK_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-nitpik supports Anthropic, OpenAI, Gemini, Cohere, DeepSeek, xAI, Groq, Perplexity, and any OpenAI-compatible endpoint. See [LLM Providers](Providers) for the full list.
+nitpik supports Anthropic, OpenAI, Gemini, Cohere, DeepSeek, xAI, Groq, Perplexity, and any OpenAI-compatible endpoint. See [LLM Providers](03-Providers) for the full list.
 
 ## 3. Run a Review
 
@@ -69,14 +69,14 @@ Each finding includes:
 
 ## What's Next?
 
-- **Run multiple reviewers** — add `--profile backend,security` to get specialist perspectives. See [Reviewer Profiles](Reviewer-Profiles).
-- **Set up CI** — output findings as GitHub annotations, GitLab Code Quality, or Bitbucket Code Insights. See [CI/CD Integration](CI-Integration).
-- **Enable secret scanning** — add `--scan-secrets` to detect and redact secrets before they reach the LLM. See [Secret Scanning](Secret-Scanning).
-- **Explore agentic mode** — add `--agent` to let the LLM read files and search your codebase for deeper analysis. See [Agentic Mode](Agentic-Mode).
-- **Create team config** — drop a `.nitpik.toml` in your repo root. See [Configuration](Configuration).
+- **Run multiple reviewers** — add `--profile backend,security` to get specialist perspectives. See [Reviewer Profiles](05-Reviewer-Profiles).
+- **Set up CI** — output findings as GitHub annotations, GitLab Code Quality, or Bitbucket Code Insights. See [CI/CD Integration](14-CI-Integration).
+- **Enable secret scanning** — add `--scan-secrets` to detect and redact secrets before they reach the LLM. See [Secret Scanning](11-Secret-Scanning).
+- **Explore agentic mode** — add `--agent` to let the LLM read files and search your codebase for deeper analysis. See [Agentic Mode](07-Agentic-Mode).
+- **Create team config** — drop a `.nitpik.toml` in your repo root. See [Configuration](13-Configuration).
 
 ## Related Pages
 
-- [Installation](Installation) — all install methods
-- [LLM Providers](Providers) — provider setup details
-- [Diff Inputs](Diff-Inputs) — all the ways to feed code to nitpik
+- [Installation](01-Installation) — all install methods
+- [LLM Providers](03-Providers) — provider setup details
+- [Diff Inputs](04-Diff-Inputs) — all the ways to feed code to nitpik

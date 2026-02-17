@@ -49,7 +49,7 @@ Lists the contents of a directory. The LLM uses this to understand module struct
 
 ## Custom Tools
 
-Profiles can define additional CLI tools. See [Custom Profiles — Custom Agentic Tools](Custom-Profiles#custom-agentic-tools) for the full format.
+Profiles can define additional CLI tools. See [Custom Profiles — Custom Agentic Tools](06-Custom-Profiles#custom-agentic-tools) for the full format.
 
 ```bash
 nitpik review --diff-base main --profile ./test-aware-reviewer.md --agent
@@ -111,7 +111,7 @@ Profile-specific `agentic_instructions` from the frontmatter are also injected, 
 
 ## Related Pages
 
-- [Custom Profiles](Custom-Profiles) — define custom tools and agentic instructions
-- [Reviewer Profiles](Reviewer-Profiles) — choosing profiles
-- [How Reviews Work](How-Reviews-Work) — the full review pipeline
-- [Configuration](Configuration) — agentic config options
+- [Custom Profiles](06-Custom-Profiles) — define custom tools and agentic instructions
+- [Reviewer Profiles](05-Reviewer-Profiles) — choosing profiles
+- [How Reviews Work](09-How-Reviews-Work) — the full review pipeline
+- [Configuration](13-Configuration) — agentic config options

@@ -77,7 +77,7 @@ model: claude-sonnet-4-20250514
 ---
 ```
 
-See [Custom Profiles](Custom-Profiles) for the full profile format.
+See [Custom Profiles](06-Custom-Profiles) for the full profile format.
 
 ## Config File Setup
 
@@ -92,10 +92,10 @@ model = "claude-sonnet-4-20250514"
 
 Or in your global config at `~/.config/nitpik/config.toml` to set a default for all repositories.
 
-See [Configuration](Configuration) for the full layering order.
+See [Configuration](13-Configuration) for the full layering order.
 
 ## Related Pages
 
-- [Quick Start](Quick-Start) — run your first review
-- [Configuration](Configuration) — all config options
-- [Custom Profiles](Custom-Profiles) — per-profile model overrides
+- [Quick Start](02-Quick-Start) — run your first review
+- [Configuration](13-Configuration) — all config options
+- [Custom Profiles](06-Custom-Profiles) — per-profile model overrides
