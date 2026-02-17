@@ -451,6 +451,23 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             let _ = writeln!(handle);
             let _ = handle.flush();
         }
+
+        // Show which project documentation files are informing the review
+        if !baseline.project_docs.is_empty() {
+            use colored::Colorize;
+            use std::io::Write;
+            let stderr = std::io::stderr();
+            let mut handle = stderr.lock();
+            let doc_names: Vec<&str> = baseline.project_docs.keys().map(|s| s.as_str()).collect();
+            let _ = writeln!(
+                handle,
+                "  {} {}",
+                "project context:".dimmed(),
+                doc_names.join(", ").dimmed(),
+            );
+            let _ = writeln!(handle);
+            let _ = handle.flush();
+        }
     }
     progress.start();
 
