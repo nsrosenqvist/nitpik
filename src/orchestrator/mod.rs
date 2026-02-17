@@ -344,9 +344,12 @@ fn build_prompt(
         - \"end_line\": (optional) the last line of the affected range, for multi-line issues\n\
         - \"severity\": MUST be exactly one of: \"error\", \"warning\", \"info\"\n\
         - \"title\": a concise summary (10 words or fewer)\n\
-        - \"message\": detailed explanation of the issue and why it matters\n\
-        - \"suggestion\": (optional) the concrete fix — show corrected code when possible, don't just say \"consider fixing this\"\n\
+        - \"message\": 1–2 sentences on what is specifically wrong in this code. Be direct — name the symbol, state the consequence. Skip general background the reader already knows from the title.\n\
+        - \"suggestion\": (optional) the concrete fix — lead with corrected code or a specific action, not a general explanation. Don't just say \"consider fixing this\".\n\
         - \"agent\": \"{}\"\n\n\
+        Be concise. The title already states the issue category — the message should add *specific* \
+        detail (which symbol, what happens), not restate the title in longer form. \
+        Assume the reader is a competent developer who does not need general background explanations.\n\n\
         Severity definitions:\n\
         - \"error\": confirmed bug or vulnerability that will cause incorrect behavior or a security breach\n\
         - \"warning\": likely issue or significant code smell that should be addressed\n\
@@ -361,8 +364,8 @@ fn build_prompt(
           \"end_line\": 45,\n\
           \"severity\": \"error\",\n\
           \"title\": \"Unhandled error from file I/O\",\n\
-          \"message\": \"The `read_config` call uses `unwrap()` which will panic if the file is missing or unreadable. This crashes the process instead of returning a meaningful error to the caller.\",\n\
-          \"suggestion\": \"Replace `.unwrap()` with `.map_err(|e| AppError::ConfigLoad(e))?` to propagate the error.\",\n\
+          \"message\": \"`read_config` panics on missing/unreadable files instead of propagating the error.\",\n\
+          \"suggestion\": \"Replace `.unwrap()` with `.map_err(|e| AppError::ConfigLoad(e))?`\",\n\
           \"agent\": \"{}\"\n\
         }}\n\
         ```\n\n\
