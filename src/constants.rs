@@ -91,22 +91,35 @@ pub const ENV_LICENSE_KEY: &str = "NITPIK_LICENSE_KEY";
 pub const ENV_TELEMETRY: &str = "NITPIK_TELEMETRY";
 pub const ENV_DEBUG: &str = "NITPIK_DEBUG";
 
-/// Environment variables stripped from custom command subprocesses.
+/// Environment variables that custom command subprocesses inherit by default.
 ///
-/// These contain LLM API keys and nitpik secrets that spawned commands
-/// should never see. Profile authors can explicitly pass through other
-/// env vars via the `environment` frontmatter field.
-pub const SENSITIVE_ENV_VARS: &[&str] = &[
-    // nitpik's own secrets
-    ENV_API_KEY,
-    ENV_LICENSE_KEY,
-    // Provider-specific API keys
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "COHERE_API_KEY",
-    "GEMINI_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "XAI_API_KEY",
-    "GROQ_API_KEY",
+/// Only these system/shell variables are passed to spawned commands.
+/// Everything else — including API keys, tokens, and credentials — is
+/// stripped unless the profile explicitly lists it in the `environment`
+/// frontmatter field.
+pub const SAFE_ENV_VARS: &[&str] = &[
+    "HOME",
+    "HOSTNAME",
+    "LANG",
+    "LOGNAME",
+    "PATH",
+    "PWD",
+    "SHELL",
+    "SHLVL",
+    "TERM",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "USER",
+    "COLORTERM",
+    "TERM_PROGRAM",
+];
+
+/// Environment variable prefixes that are safe to inherit.
+///
+/// Any variable whose name starts with one of these prefixes is included
+/// in the subprocess environment alongside [`SAFE_ENV_VARS`].
+pub const SAFE_ENV_PREFIXES: &[&str] = &[
+    "LC_",  // locale categories (LC_ALL, LC_CTYPE, …)
+    "XDG_", // XDG base directory spec
 ];

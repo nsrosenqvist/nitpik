@@ -49,9 +49,10 @@ pub struct CustomCommandError(pub String);
 /// Constructed from a [`CustomToolDefinition`] parsed from agent profile
 /// frontmatter. The command runs in the repo root directory.
 ///
-/// By default, sensitive environment variables (LLM API keys, license
-/// keys) are stripped from the subprocess. The `env_passthrough` list
-/// allows profile authors to explicitly re-inject specific variables.
+/// Subprocesses receive only a minimal set of safe system variables
+/// ([`crate::constants::SAFE_ENV_VARS`] and [`crate::constants::SAFE_ENV_PREFIXES`]).
+/// Profile authors can pass additional variables via the `environment`
+/// frontmatter field, which populates `env_passthrough`.
 #[derive(Serialize, Deserialize)]
 pub struct CustomCommandTool {
     /// Tool name (matches `CustomToolDefinition::name`).
@@ -76,9 +77,9 @@ pub struct CustomCommandTool {
 impl CustomCommandTool {
     /// Create a new `CustomCommandTool` from a profile definition and repo root.
     ///
-    /// `env_passthrough` lists variable names (or prefix globs like `AWS_*`)
-    /// that the subprocess is allowed to inherit even if they appear on the
-    /// sensitive-variable strip list.
+    /// `env_passthrough` lists additional variable names (or prefix globs
+    /// like `AWS_*`) that the subprocess is allowed to inherit beyond the
+    /// default safe set.
     pub fn new(def: &CustomToolDefinition, repo_root: PathBuf, env_passthrough: Vec<String>) -> Self {
         // Build JSON Schema properties from the parameter definitions
         let mut properties = serde_json::Map::new();
@@ -150,25 +151,43 @@ impl CustomCommandTool {
 
     /// Build a sanitized copy of the current environment.
     ///
-    /// Starts with all inherited variables, then removes every key in
-    /// [`crate::constants::SENSITIVE_ENV_VARS`] *unless* the key matches
-    /// an entry in `env_passthrough`. Passthrough entries ending with `*`
-    /// are treated as prefix matches (e.g. `AWS_*` matches `AWS_REGION`).
+    /// Uses an **allowlist** model: only variables in
+    /// [`crate::constants::SAFE_ENV_VARS`] / [`crate::constants::SAFE_ENV_PREFIXES`]
+    /// plus those matching the profile's `env_passthrough` patterns are
+    /// included. Everything else is dropped so that API keys, tokens,
+    /// and credentials never leak to LLM-invoked commands by default.
     fn build_sanitized_env(&self) -> HashMap<String, String> {
-        let mut env: HashMap<String, String> = std::env::vars().collect();
+        let mut env = HashMap::new();
 
-        for &sensitive in crate::constants::SENSITIVE_ENV_VARS {
-            if self.is_passthrough(sensitive) {
-                continue;
+        for (key, value) in std::env::vars() {
+            if self.is_allowed(&key) {
+                env.insert(key, value);
             }
-            env.remove(sensitive);
         }
 
         env
     }
 
-    /// Returns `true` if `var_name` is explicitly allowed by the passthrough list.
-    fn is_passthrough(&self, var_name: &str) -> bool {
+    /// Returns `true` if `var_name` is allowed in the subprocess.
+    ///
+    /// A variable is allowed if it appears in the safe set
+    /// ([`crate::constants::SAFE_ENV_VARS`] or matches a
+    /// [`crate::constants::SAFE_ENV_PREFIXES`] entry) **or** matches the
+    /// profile's `env_passthrough` patterns.
+    fn is_allowed(&self, var_name: &str) -> bool {
+        // Check the static safe list
+        if crate::constants::SAFE_ENV_VARS.contains(&var_name) {
+            return true;
+        }
+
+        // Check safe prefixes
+        for &prefix in crate::constants::SAFE_ENV_PREFIXES {
+            if var_name.starts_with(prefix) {
+                return true;
+            }
+        }
+
+        // Check profile-declared passthrough patterns
         for pattern in &self.env_passthrough {
             if let Some(prefix) = pattern.strip_suffix('*') {
                 if var_name.starts_with(prefix) {
@@ -178,6 +197,7 @@ impl CustomCommandTool {
                 return true;
             }
         }
+
         false
     }
 }
@@ -479,90 +499,108 @@ mod tests {
     }
 
     #[test]
-    fn env_sanitization_strips_sensitive_vars() {
-        // Set a known sensitive var
-        unsafe { std::env::set_var("NITPIK_API_KEY", "secret-key-123") };
-        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-secret") };
+    fn env_sanitization_allowlist_only() {
+        // Set a var that is NOT on the safe list
+        unsafe { std::env::set_var("SOME_SECRET_TOKEN", "secret-123") };
+        // Set a var that IS on the safe list
+        // (PATH is always present, but let's verify)
 
         let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
         let env = tool.build_sanitized_env();
 
-        assert!(!env.contains_key("NITPIK_API_KEY"), "NITPIK_API_KEY should be stripped");
-        assert!(!env.contains_key("ANTHROPIC_API_KEY"), "ANTHROPIC_API_KEY should be stripped");
-
-        // PATH should still be present (not a sensitive var)
-        assert!(env.contains_key("PATH"), "PATH should be preserved");
+        assert!(!env.contains_key("SOME_SECRET_TOKEN"), "non-safe vars should be stripped");
+        assert!(!env.contains_key("ANTHROPIC_API_KEY"), "API keys should be stripped");
+        assert!(env.contains_key("PATH"), "PATH should be preserved (safe list)");
+        assert!(env.contains_key("HOME"), "HOME should be preserved (safe list)");
 
         // Cleanup
-        unsafe { std::env::remove_var("NITPIK_API_KEY") };
-        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { std::env::remove_var("SOME_SECRET_TOKEN") };
     }
 
     #[test]
     fn env_passthrough_exact_match() {
-        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-passthrough") };
+        unsafe { std::env::set_var("CUSTOM_DB_URL", "postgres://localhost/mydb") };
 
         let tool = CustomCommandTool::new(
             &test_def(),
             PathBuf::from("/tmp"),
-            vec!["ANTHROPIC_API_KEY".to_string()],
+            vec!["CUSTOM_DB_URL".to_string()],
         );
         let env = tool.build_sanitized_env();
 
         assert_eq!(
-            env.get("ANTHROPIC_API_KEY").map(|s| s.as_str()),
-            Some("sk-ant-passthrough"),
+            env.get("CUSTOM_DB_URL").map(|s| s.as_str()),
+            Some("postgres://localhost/mydb"),
             "explicitly passed-through var should be preserved"
         );
 
-        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { std::env::remove_var("CUSTOM_DB_URL") };
     }
 
     #[test]
     fn env_passthrough_prefix_glob() {
-        unsafe { std::env::set_var("NITPIK_API_KEY", "key-with-prefix-glob") };
-        unsafe { std::env::set_var("NITPIK_LICENSE_KEY", "license-with-prefix-glob") };
+        unsafe { std::env::set_var("AWS_REGION", "us-east-1") };
+        unsafe { std::env::set_var("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI") };
 
+        // Without passthrough, AWS_ vars should NOT appear
+        let tool_no_pass = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
+        let env_no_pass = tool_no_pass.build_sanitized_env();
+        assert!(!env_no_pass.contains_key("AWS_REGION"), "AWS_REGION should not appear without passthrough");
+
+        // With passthrough, they should
         let tool = CustomCommandTool::new(
             &test_def(),
             PathBuf::from("/tmp"),
-            vec!["NITPIK_*".to_string()],
+            vec!["AWS_*".to_string()],
         );
         let env = tool.build_sanitized_env();
 
         assert_eq!(
-            env.get("NITPIK_API_KEY").map(|s| s.as_str()),
-            Some("key-with-prefix-glob"),
-            "NITPIK_* glob should pass through NITPIK_API_KEY"
+            env.get("AWS_REGION").map(|s| s.as_str()),
+            Some("us-east-1"),
+            "AWS_* glob should pass through AWS_REGION"
         );
         assert_eq!(
-            env.get("NITPIK_LICENSE_KEY").map(|s| s.as_str()),
-            Some("license-with-prefix-glob"),
-            "NITPIK_* glob should pass through NITPIK_LICENSE_KEY"
+            env.get("AWS_SECRET_ACCESS_KEY").map(|s| s.as_str()),
+            Some("wJalrXUtnFEMI"),
+            "AWS_* glob should pass through AWS_SECRET_ACCESS_KEY"
         );
 
-        unsafe { std::env::remove_var("NITPIK_API_KEY") };
-        unsafe { std::env::remove_var("NITPIK_LICENSE_KEY") };
+        unsafe { std::env::remove_var("AWS_REGION") };
+        unsafe { std::env::remove_var("AWS_SECRET_ACCESS_KEY") };
     }
 
     #[test]
-    fn is_passthrough_logic() {
+    fn is_allowed_logic() {
         let tool = CustomCommandTool::new(
             &test_def(),
             PathBuf::from("/tmp"),
             vec!["JIRA_TOKEN".to_string(), "AWS_*".to_string()],
         );
 
-        assert!(tool.is_passthrough("JIRA_TOKEN"));
-        assert!(tool.is_passthrough("AWS_REGION"));
-        assert!(tool.is_passthrough("AWS_SECRET_ACCESS_KEY"));
-        assert!(!tool.is_passthrough("ANTHROPIC_API_KEY"));
-        assert!(!tool.is_passthrough("RANDOM_VAR"));
+        // Safe list vars
+        assert!(tool.is_allowed("PATH"));
+        assert!(tool.is_allowed("HOME"));
+        assert!(tool.is_allowed("LANG"));
+
+        // Safe prefix vars
+        assert!(tool.is_allowed("LC_ALL"));
+        assert!(tool.is_allowed("XDG_CONFIG_HOME"));
+
+        // Passthrough vars
+        assert!(tool.is_allowed("JIRA_TOKEN"));
+        assert!(tool.is_allowed("AWS_REGION"));
+        assert!(tool.is_allowed("AWS_SECRET_ACCESS_KEY"));
+
+        // Non-allowed vars
+        assert!(!tool.is_allowed("ANTHROPIC_API_KEY"));
+        assert!(!tool.is_allowed("GITHUB_TOKEN"));
+        assert!(!tool.is_allowed("DATABASE_URL"));
     }
 
     #[tokio::test]
     async fn execute_command_env_sanitized() {
-        // Verify that a sensitive env var is NOT visible to the subprocess
+        // Verify that a non-safe env var is NOT visible to the subprocess
         unsafe { std::env::set_var("GEMINI_API_KEY", "test-gemini-key-for-sanitization") };
 
         let def = CustomToolDefinition {
@@ -578,10 +616,33 @@ mod tests {
         let result = tool.call(args).await.unwrap();
         assert!(
             result.contains("MISSING"),
-            "GEMINI_API_KEY should not be visible in subprocess, got: {result}"
+            "GEMINI_API_KEY should not be visible in subprocess (allowlist model), got: {result}"
         );
 
         unsafe { std::env::remove_var("GEMINI_API_KEY") };
+    }
+
+    #[test]
+    fn safe_prefix_vars_are_included() {
+        unsafe { std::env::set_var("LC_ALL", "en_US.UTF-8") };
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", "/home/test/.config") };
+
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
+        let env = tool.build_sanitized_env();
+
+        assert_eq!(
+            env.get("LC_ALL").map(|s| s.as_str()),
+            Some("en_US.UTF-8"),
+            "LC_ prefix should be safe"
+        );
+        assert_eq!(
+            env.get("XDG_CONFIG_HOME").map(|s| s.as_str()),
+            Some("/home/test/.config"),
+            "XDG_ prefix should be safe"
+        );
+
+        unsafe { std::env::remove_var("LC_ALL") };
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     #[test]

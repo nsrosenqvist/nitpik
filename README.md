@@ -318,9 +318,9 @@ nitpik review --diff-base main --profile ./test-aware-reviewer.md --agent
 
 ### Environment Passthrough
 
-Custom command tools run in a sandboxed subprocess where all LLM API keys and nitpik secrets are automatically stripped from the environment. This prevents accidental key leakage to user-defined commands.
+Custom command tools run in a sandboxed subprocess that uses an **allowlist** model: only essential system variables (`PATH`, `HOME`, `SHELL`, `TERM`, `LANG`, `USER`, locale prefixes like `LC_*`, and XDG directories like `XDG_*`) are inherited. Everything else — API keys, tokens, database credentials, CI secrets — is stripped by default. This prevents accidental credential leakage to LLM-invoked commands.
 
-If your custom tools need access to specific environment variables (e.g. to authenticate against Jira, Docker, or AWS), declare them in the profile's `environment` frontmatter field:
+If your custom tools need additional environment variables (e.g. to authenticate against Jira, Docker, or AWS), declare them in the profile's `environment` frontmatter field:
 
 ```markdown
 ---
@@ -339,7 +339,7 @@ tools:
 You are an infrastructure reviewer...
 ```
 
-Exact names and prefix globs (ending with `*`) are supported. The stripped variables are: `NITPIK_API_KEY`, `NITPIK_LICENSE_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `COHERE_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, and `GROQ_API_KEY`. All other environment variables pass through unconditionally — you only need `environment` entries to re-allow variables that would otherwise be stripped.
+Exact names and prefix globs (ending with `*`) are supported. All env vars not in the default safe set are stripped unless explicitly listed in `environment`.
 
 ---
 

@@ -189,7 +189,7 @@ If the LLM passes parameter names that are not declared in the tool definition, 
 
 #### Environment Sanitization
 
-Custom command subprocesses inherit the parent environment **minus** all sensitive variables listed in `constants::SENSITIVE_ENV_VARS` (LLM API keys like `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc., plus `NITPIK_API_KEY` and `NITPIK_LICENSE_KEY`). This prevents accidental key leakage to user-defined commands.
+Custom command subprocesses use an **allowlist** model: only a minimal set of system variables (`PATH`, `HOME`, `LANG`, `SHELL`, `TERM`, `USER`, locale/XDG prefixes, etc. — defined in `constants::SAFE_ENV_VARS` and `constants::SAFE_ENV_PREFIXES`) are inherited. Everything else — including API keys, tokens, database credentials, and CI secrets — is stripped by default. This prevents accidental credential leakage to LLM-invoked commands.
 
 If a custom tool needs specific env vars (e.g. to authenticate with Jira, Docker, or AWS), declare them in the profile's `environment` frontmatter field:
 
@@ -204,7 +204,7 @@ tools:
     command: curl -sH "Authorization: Bearer $JIRA_TOKEN" https://jira.example.com/status
 ```
 
-Exact names and prefix globs (ending with `*`) are supported. Variables not in the sensitive list pass through unconditionally — you only need `environment` entries to re-allow variables that would otherwise be stripped.
+Exact names and prefix globs (ending with `*`) are supported. Only variables explicitly listed in `environment` (or in the built-in safe set) are passed to subprocesses.
 
 ### Tool-Call Audit Log
 

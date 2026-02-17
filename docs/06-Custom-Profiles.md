@@ -125,9 +125,9 @@ See [Agentic Mode](07-Agentic-Mode) for the full agentic review workflow.
 
 ## Environment Passthrough
 
-Custom command subprocesses inherit the parent environment **minus** all sensitive variables (LLM API keys and nitpik secrets). This prevents accidental key leakage.
+Custom command subprocesses use an **allowlist** model: only a minimal set of safe system variables is inherited by default (`PATH`, `HOME`, `LANG`, `SHELL`, `TERM`, `USER`, locale prefixes like `LC_*`, and XDG directories like `XDG_*`). Everything else — API keys, tokens, database credentials, CI secrets — is stripped.
 
-If your custom tools need specific env vars, declare them in the `environment` field:
+If your custom tools need additional env vars, declare them in the `environment` field:
 
 ```markdown
 ---
@@ -144,9 +144,9 @@ tools:
 ---
 ```
 
-**Stripped variables:** `NITPIK_API_KEY`, `NITPIK_LICENSE_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `COHERE_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`.
+**Default safe variables:** `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `HOSTNAME`, `PWD`, `TMPDIR`, `TEMP`, `TMP`, `SHLVL`, `COLORTERM`, `TERM_PROGRAM`, plus any variable starting with `LC_` or `XDG_`.
 
-All other env vars pass through unconditionally — you only need `environment` entries to re-allow variables from the stripped list.
+All other env vars are stripped unless explicitly listed in `environment`. Exact names and prefix globs (ending with `*`) are supported.
 
 ## Related Pages
 
