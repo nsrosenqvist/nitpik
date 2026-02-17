@@ -71,6 +71,16 @@ pub fn release_checksums_url(tag: &str) -> String {
     )
 }
 
+// ── Review context docs ─────────────────────────────────────────────
+
+/// Dedicated review context files that take precedence over generic project docs.
+///
+/// When any of these exist in the repo root (and are not excluded), only these
+/// are included — the generic doc list (`AGENTS.md`, `CONVENTIONS.md`, etc.) is
+/// skipped entirely. This lets maintainers provide focused review guidance
+/// without polluting the prompt with coding-agent instructions.
+pub const PRIORITY_DOC_FILES: &[&str] = &["REVIEW.md", "NITPIK.md"];
+
 // ── Environment variable names ──────────────────────────────────────
 
 pub const ENV_PROVIDER: &str = "NITPIK_PROVIDER";

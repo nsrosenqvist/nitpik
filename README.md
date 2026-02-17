@@ -547,7 +547,17 @@ nitpik review --diff-base main --scan-secrets --secrets-rules ./custom-rules.tom
 
 ## Project Documentation Context
 
-nitpik automatically detects well-known documentation files in your repository root and includes them in the review prompt so the LLM understands your team's conventions:
+nitpik automatically detects documentation files in your repository root and includes them in the review prompt so the LLM understands your team's conventions.
+
+### Priority review context (`REVIEW.md` / `NITPIK.md`)
+
+If a **`REVIEW.md`** or **`NITPIK.md`** file exists in the repo root, nitpik uses *only* those files as review context and skips the generic doc list entirely. This lets you provide focused review guidance without polluting the prompt with coding-agent instructions (like `AGENTS.md` or `.cursorrules`) that aren't relevant to a reviewer.
+
+Both files can coexist — if both are present, both are included.
+
+### Generic fallback docs
+
+When no priority file is found, nitpik falls back to scanning for these well-known files:
 
 `AGENTS.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`, `CODING_GUIDELINES.md`, `STYLE_GUIDE.md`, `DEVELOPMENT.md`
 
@@ -572,6 +582,8 @@ Exclude only specific files while keeping the rest:
 nitpik review --diff-base main --exclude-doc AGENTS.md
 nitpik review --diff-base main --exclude-doc AGENTS.md,CONTRIBUTING.md
 ```
+
+> **Note:** Excluding all priority files (e.g. `--exclude-doc REVIEW.md`) causes nitpik to fall back to the generic doc list.
 
 ---
 
