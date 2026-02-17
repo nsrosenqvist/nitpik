@@ -4,7 +4,7 @@
 
 AI-powered code reviews for your team. Bring your own model, bring your own API key. One flat platform fee — no per-seat charges, no usage caps.
 
-[Website](https://nitpik.dev) · [Get a License](https://nitpik.dev) · `nitpik help`
+[Website](https://nitpik.dev) · [Documentation](docs/Home.md) · [Get a License](https://nitpik.dev) · `nitpik help`
 
 ---
 
@@ -180,6 +180,15 @@ nitpik review --diff-base main --format github --fail-on warning
 ```
 
 Run `nitpik help review` for the full list of flags.
+
+### Intelligent Review Orchestration
+
+nitpik doesn't just pass your diff to an LLM and hope for the best. Every review is carefully assembled to maximize precision and minimize noise:
+
+- **Full-context awareness** — the LLM sees the complete file (or smart excerpts for large files), your project's conventions, and the focused diff — so it understands what changed and why it matters.
+- **Multi-agent coordination** — when multiple reviewer profiles run in parallel, each one knows what the others cover and stays in its lane, eliminating duplicate findings and ensuring nothing falls through the cracks.
+- **Iterative continuity** — when you push new changes, nitpik carries forward context from previous reviews so the LLM can distinguish resolved issues from persistent ones, keeping feedback consistent as your code evolves.
+- **Quality post-processing** — findings are deduplicated across agents, filtered to only the lines you actually changed, and severity-normalized before they reach you. The result: actionable findings, not LLM noise.
 
 ---
 

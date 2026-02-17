@@ -110,6 +110,7 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 - Public items get `///` doc comments.
 - Each `mod.rs` gets a `//!` module-level doc explaining its purpose.
 - Keep this file updated when adding modules or changing architecture.
+- **User-facing documentation** lives in `docs/` (GitHub wiki pages) and `README.md`. When writing or editing these, use the `/write-docs` skill (`.github/skills/write-docs/SKILL.md`) — it defines tone, structure, formatting, and terminology conventions for all user documentation.
 
 ### Version Management
 
