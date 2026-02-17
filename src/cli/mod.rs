@@ -9,7 +9,7 @@ use nitpik::license::LicenseClaims;
 /// License banner with ANSI styling for clap help output.
 /// Bold "nitpik", dimmed rest. (Static — used for --help only.)
 pub const LICENSE_BANNER_STYLED: &str =
-    "\x1b[1mnitpik\x1b[0m \x1b[2m· Free for personal & open-source use. Commercial use requires a license.\x1b[0m";
+    "\x1b[92m●\x1b[0m \x1b[1mnitpik\x1b[0m \x1b[2m· Free for personal & open-source use. Commercial use requires a license.\x1b[0m";
 
 /// Print the license/thank-you banner to stderr.
 ///
@@ -25,7 +25,8 @@ pub fn print_banner(claims: Option<&LicenseClaims>) {
         Some(c) => {
             let _ = writeln!(
                 handle,
-                "  {} {}",
+                "  {} {} {}",
+                "●".bright_green(),
                 "nitpik".bold(),
                 format!("· Licensed to {}. Thank you for supporting nitpik! ♥", c.customer_name)
                     .dimmed(),
@@ -34,7 +35,8 @@ pub fn print_banner(claims: Option<&LicenseClaims>) {
         None => {
             let _ = writeln!(
                 handle,
-                "  {} {}",
+                "  {} {} {}",
+                "●".bright_green(),
                 "nitpik".bold(),
                 "· Free for personal & open-source use. Commercial use requires a license."
                     .dimmed(),
