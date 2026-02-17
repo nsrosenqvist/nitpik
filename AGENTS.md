@@ -36,7 +36,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 | `cache/` | Content-hash cache, filesystem storage, branch-scoped sidecar metadata for prior findings |
 | `models/` | Shared types: `Finding`, `Severity`, `FileDiff`, `AgentDefinition`, `ReviewConfig`, `ReviewContext`, etc. |
 | `license/` | Offline Ed25519 license key verification, expiry checks |
-| `progress/` | Live terminal progress display — spinners, status tracking per file×agent task, suppressed with `--no-progress` |
+| `progress/` | Live terminal progress display — spinners, status tracking per file×agent task, suppressed with `--quiet` |
 | `telemetry/` | Anonymous fire-and-forget heartbeat POST per review run, disabled with `--no-telemetry` or `NITPIK_TELEMETRY=false` |
 
 ### Key Principles

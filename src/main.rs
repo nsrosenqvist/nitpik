@@ -413,17 +413,19 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         }
     }
 
-    // Determine whether to show progress
-    // Disable progress for non-terminal formats (CI output) or when explicitly disabled
-    let show_progress = !args.no_progress
-        && args.format == OutputFormat::Terminal
+    // Determine output verbosity
+    // --quiet suppresses all non-essential stderr output (banner, info, progress)
+    // Progress is also auto-disabled for non-terminal formats and non-TTY stderr
+    let is_interactive = args.format == OutputFormat::Terminal
         && atty::is(atty::Stream::Stderr);
+    let show_info = !args.quiet && is_interactive;
+    let show_progress = !args.quiet && is_interactive;
 
     // Build progress tracker
     let file_names: Vec<String> = diffs.iter().map(|d| d.path().to_string()).collect();
     let agent_names: Vec<String> = agent_defs.iter().map(|a| a.profile.name.clone()).collect();
     let progress = std::sync::Arc::new(ProgressTracker::new(&file_names, &agent_names, show_progress));
-    if show_progress {
+    if show_info {
         let claims_ref = license_claims.as_ref().map(|(c, _)| c);
         cli::print_banner(claims_ref);
 

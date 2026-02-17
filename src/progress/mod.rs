@@ -2,7 +2,7 @@
 //!
 //! Provides a live-updating file status display with colored checkmarks,
 //! spinners, and failure indicators. Designed for interactive terminals;
-//! silenced with `--no-progress`.
+//! silenced with `--quiet`.
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};

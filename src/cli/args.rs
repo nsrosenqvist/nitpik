@@ -191,9 +191,10 @@ pub struct ReviewArgs {
     #[arg(long)]
     pub max_prior_findings: Option<usize>,
 
-    /// Disable live progress output (useful for CI or piped output).
-    #[arg(long, default_value_t = false)]
-    pub no_progress: bool,
+    /// Suppress all non-essential output (banner, progress, informational messages).
+    /// Only findings and errors are shown.
+    #[arg(long, short = 'q', default_value_t = false)]
+    pub quiet: bool,
 
     // --- Context ---
     /// Skip auto-detected project documentation files (AGENTS.md, CONVENTIONS.md, etc.).
@@ -310,7 +311,7 @@ mod tests {
             no_cache: false,
             no_prior_context: false,
             max_prior_findings: None,
-            no_progress: false,
+            quiet: false,
             no_project_docs: false,
             exclude_doc: vec![],
         }
@@ -444,5 +445,54 @@ mod tests {
         let _ = OutputFormat::Github.render(&empty);
         let _ = OutputFormat::Bitbucket.render(&empty);
         let _ = OutputFormat::Forgejo.render(&empty);
+    }
+
+    #[test]
+    fn quiet_flag_defaults_to_false() {
+        let args = make_args(None, Some("main"), None);
+        assert!(!args.quiet);
+    }
+
+    #[test]
+    fn quiet_flag_can_be_set() {
+        let mut args = make_args(None, Some("main"), None);
+        args.quiet = true;
+        assert!(args.quiet);
+    }
+
+    #[test]
+    fn quiet_flag_parsed_long() {
+        let cli = Cli::try_parse_from([
+            "nitpik", "review", "--diff-base", "main", "--quiet",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Review(args) => assert!(args.quiet),
+            _ => panic!("expected Review command"),
+        }
+    }
+
+    #[test]
+    fn quiet_flag_parsed_short() {
+        let cli = Cli::try_parse_from([
+            "nitpik", "review", "--diff-base", "main", "-q",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Review(args) => assert!(args.quiet),
+            _ => panic!("expected Review command"),
+        }
+    }
+
+    #[test]
+    fn quiet_flag_absent_by_default() {
+        let cli = Cli::try_parse_from([
+            "nitpik", "review", "--diff-base", "main",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Review(args) => assert!(!args.quiet),
+            _ => panic!("expected Review command"),
+        }
     }
 }
