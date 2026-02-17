@@ -101,13 +101,9 @@ This shows what the LLM explored, helping you understand its reasoning and verif
 
 ## Agentic Context
 
-In agentic mode, the LLM receives additional context beyond the standard diff and file content:
+In agentic mode, the LLM receives additional context beyond the standard diff and file content — enough to orient itself in your repository and use tools effectively. This includes awareness of the repo structure and other files in the review.
 
-- **Repository structure** — a listing of the repo root so the LLM knows what files and directories exist.
-- **Sibling changed files** — a list of other files in the review, so the LLM can cross-reference related changes.
-- **Tool usage guidance** — instructions on how to use each available tool effectively.
-
-Profile-specific `agentic_instructions` from the frontmatter are also injected, giving each profile tailored guidance for tool usage. These instructions are *not* included in standard mode, so they won't confuse the LLM when tools aren't available.
+If your custom profile includes an `agentic_instructions` field in its frontmatter, those instructions are injected in agentic mode to give the profile tailored guidance for tool usage. They're omitted in standard reviews so the LLM isn't confused by references to tools it can't use.
 
 ## Related Pages
 

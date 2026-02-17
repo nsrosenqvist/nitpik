@@ -60,7 +60,7 @@ git diff --cached | nitpik review --diff-stdin
 
 ## How Large Diffs Are Handled
 
-When a single file's diff is large (more than 500 changed lines across all hunks), nitpik automatically splits it into smaller chunks. Each chunk is reviewed as a separate LLM call, and the findings are merged afterward. This keeps each prompt focused and within token limits.
+When a single file's diff is very large, nitpik automatically splits it into smaller chunks. Each chunk is reviewed as a separate LLM call, and the findings are merged afterward. This keeps each prompt focused and within token limits.
 
 You don't need to configure this — it happens automatically.
 

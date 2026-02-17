@@ -38,6 +38,7 @@ Follow these conventions when writing or editing any user-facing documentation (
 - **Keep security advice concrete.** Say "Pass API keys via `${{ secrets.* }}` — never hardcode them in workflow files" not "Be careful with secrets."
 - **Default values always mentioned.** When documenting a flag or config key, state the default. "Defaults to `terminal`."
 - **Flag and config correspondence.** When a CLI flag has a config-file and/or env-var equivalent, mention all three together so readers can find whichever they need.
+- **Protect implementation details.** User docs should explain *what* a feature does and how to configure it — not *how* it works internally. Don't expose pipeline step ordering, prompt construction strategies, specific thresholds the user can't configure, deduplication algorithms, or coordination mechanisms. These details belong in AGENTS.md. Ask: "Could someone use this paragraph to replicate the feature?" If yes, rewrite it to focus on the user-facing behavior instead.
 
 ## Page Template
 
