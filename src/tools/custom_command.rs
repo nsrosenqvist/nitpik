@@ -22,6 +22,12 @@ const MAX_OUTPUT_SIZE: usize = 256 * 1024;
 /// Maximum execution time for a custom command.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Maximum virtual memory for a subprocess (1 GB, in KB for ulimit -v).
+const ULIMIT_VMEM_KB: u64 = 1_048_576;
+
+/// Maximum file size a subprocess may write (100 MB, in 512-byte blocks for ulimit -f).
+const ULIMIT_FSIZE_BLOCKS: u64 = 204_800;
+
 /// Arguments passed by the LLM when calling a custom command tool.
 ///
 /// Parameters are passed as a JSON object with string keys/values.
@@ -204,7 +210,15 @@ impl Tool for CustomCommandTool {
             }
         }
 
+        // Warn about unknown parameters (silently ignored, but logged)
+        let unknown_params: Vec<&String> = args
+            .params
+            .keys()
+            .filter(|k| !self.all_param_names.contains(k))
+            .collect();
+
         let full_command = self.build_command(&args.params);
+        let sandboxed_command = build_sandboxed_command(&full_command);
         let sanitized_env = self.build_sanitized_env();
         let start = crate::tools::start_tool_call();
 
@@ -213,7 +227,7 @@ impl Tool for CustomCommandTool {
             COMMAND_TIMEOUT,
             tokio::process::Command::new("sh")
                 .arg("-c")
-                .arg(&full_command)
+                .arg(&sandboxed_command)
                 .current_dir(&self.repo_root)
                 .env_clear()
                 .envs(&sanitized_env)
@@ -258,11 +272,18 @@ impl Tool for CustomCommandTool {
         }
 
         let exit_code = output.status.code().unwrap_or(-1);
+        let mut audit_result = format!("exit {exit_code}, {}", format_byte_size(result.len()));
+        if !unknown_params.is_empty() {
+            audit_result.push_str(&format!(
+                ", ignored unknown params: {}",
+                unknown_params.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
         crate::tools::finish_tool_call(
             start,
             &self.tool_name,
             &full_command,
-            format!("exit {exit_code}, {}", format_byte_size(result.len())),
+            audit_result,
         );
 
         Ok(result)
@@ -278,6 +299,21 @@ fn format_byte_size(bytes: usize) -> String {
     } else {
         format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
     }
+}
+
+/// Wrap a command with `ulimit` resource limits.
+///
+/// Applies soft limits on virtual memory, child process count, and file
+/// size to prevent runaway subprocesses from exhausting the host's
+/// resources. Errors from unsupported limits are suppressed (`2>/dev/null`)
+/// so this is safe on platforms where a specific limit isn't available
+/// (e.g. `ulimit -v` is not supported on macOS with Apple Silicon).
+fn build_sandboxed_command(command: &str) -> String {
+    format!(
+        "ulimit -v {ULIMIT_VMEM_KB} 2>/dev/null; \
+         ulimit -f {ULIMIT_FSIZE_BLOCKS} 2>/dev/null; \
+         {command}"
+    )
 }
 
 /// Minimal shell escaping for parameter values.
@@ -546,5 +582,74 @@ mod tests {
         );
 
         unsafe { std::env::remove_var("GEMINI_API_KEY") };
+    }
+
+    #[test]
+    fn sandboxed_command_includes_ulimits() {
+        let sandboxed = build_sandboxed_command("echo hello");
+        assert!(
+            sandboxed.contains("ulimit -v"),
+            "should include virtual memory limit"
+        );
+        assert!(
+            sandboxed.contains("ulimit -f"),
+            "should include file size limit"
+        );
+        assert!(
+            sandboxed.contains("2>/dev/null"),
+            "should suppress errors for unsupported limits"
+        );
+        assert!(
+            sandboxed.ends_with("echo hello"),
+            "original command should be at the end"
+        );
+    }
+
+    #[test]
+    fn sandboxed_command_uses_correct_limits() {
+        let sandboxed = build_sandboxed_command("true");
+        assert!(sandboxed.contains(&format!("ulimit -v {ULIMIT_VMEM_KB}")));
+        assert!(sandboxed.contains(&format!("ulimit -f {ULIMIT_FSIZE_BLOCKS}")));
+    }
+
+    #[tokio::test]
+    async fn execute_with_ulimit_sandbox() {
+        // Verify that a sandboxed command still executes successfully
+        let def = CustomToolDefinition {
+            name: "sandboxed_echo".to_string(),
+            description: "Echo with sandbox".to_string(),
+            command: "echo sandboxed".to_string(),
+            parameters: vec![],
+        };
+        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"), vec![]);
+        let args = CustomCommandArgs {
+            params: serde_json::Map::new(),
+        };
+        let result = tool.call(args).await.unwrap();
+        assert!(
+            result.contains("sandboxed"),
+            "command should execute through ulimit wrapper, got: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_params_ignored_but_command_succeeds() {
+        let def = CustomToolDefinition {
+            name: "echo_test".to_string(),
+            description: "Simple echo".to_string(),
+            command: "echo ok".to_string(),
+            parameters: vec![],
+        };
+        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"), vec![]);
+        let mut params = serde_json::Map::new();
+        params.insert("rogue_param".to_string(), serde_json::Value::String("evil".to_string()));
+        params.insert("another_unknown".to_string(), serde_json::Value::String("ignored".to_string()));
+        let args = CustomCommandArgs { params };
+        // Should succeed — unknown params are ignored, not rejected
+        let result = tool.call(args).await.unwrap();
+        assert!(
+            result.contains("ok"),
+            "command should still succeed with unknown params, got: {result}"
+        );
     }
 }

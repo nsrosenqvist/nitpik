@@ -169,6 +169,23 @@ tools:
 
 At runtime each entry becomes a `CustomCommandTool` the LLM can invoke. Commands are sandboxed to the repo root with a 120 s timeout and 256 KB output cap.
 
+#### Resource Limits
+
+Every custom command subprocess runs behind `ulimit` guards that constrain resource consumption:
+
+| Limit | Value | `ulimit` flag |
+|---|---|---|
+| Virtual memory | 1 GB | `-v 1048576` |
+| File write size | 100 MB | `-f 204800` |
+
+These are applied as a shell preamble (`ulimit ... 2>/dev/null; <command>`) so unsupported limits on a given platform are silently ignored (e.g. `ulimit -v` on macOS Apple Silicon). Combined with the existing 120 s timeout and 256 KB output cap, this prevents runaway commands from exhausting host resources.
+
+> **Note:** `ulimit -u` (max user processes) is intentionally omitted — it caps the *per-user* process count, not a per-subprocess-tree count, so on busy systems or in parallel test runners the existing process count can already exceed the limit, preventing the subprocess from forking at all. Only cgroups can truly scope a process-tree limit, and those require root.
+
+#### Unknown Parameter Handling
+
+If the LLM passes parameter names that are not declared in the tool definition, they are silently ignored (they never reach the command string). Unknown parameter names are logged in the tool-call audit entry for observability — e.g. `exit 0, 537B, ignored unknown params: rogue_param`.
+
 #### Environment Sanitization
 
 Custom command subprocesses inherit the parent environment **minus** all sensitive variables listed in `constants::SENSITIVE_ENV_VARS` (LLM API keys like `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc., plus `NITPIK_API_KEY` and `NITPIK_LICENSE_KEY`). This prevents accidental key leakage to user-defined commands.
