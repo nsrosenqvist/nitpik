@@ -45,7 +45,6 @@ walkdir = "2"
 
 # Terminal output
 colored = "3"
-atty = "0.2"
 
 # Hashing (cache keys)
 sha2 = "0.10"
@@ -60,7 +59,7 @@ base64 = "0.22"
 indexmap = { version = "2", features = ["serde"] }
 
 # YAML parsing (agent profile frontmatter)
-serde_yml = "0.0.12"
+serde_yaml_ng = "0.10"
 
 # Archive extraction (self-update)
 flate2 = "1"

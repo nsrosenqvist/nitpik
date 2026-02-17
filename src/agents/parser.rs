@@ -1,6 +1,6 @@
 //! Markdown + YAML frontmatter parser for agent definitions.
 //!
-//! Uses `serde_yml` for proper YAML parsing, which supports the nested
+//! Uses `serde_yaml_ng` for proper YAML parsing, which supports the nested
 //! structures needed for custom tool definitions in agent profiles.
 
 use crate::models::agent::{AgentDefinition, AgentProfile};
@@ -28,7 +28,7 @@ use crate::models::agent::{AgentDefinition, AgentProfile};
 pub fn parse_agent_definition(content: &str) -> Result<AgentDefinition, String> {
     let (frontmatter, body) = split_frontmatter(content)?;
     let profile: AgentProfile =
-        serde_yml::from_str(&frontmatter).map_err(|e| format!("invalid frontmatter: {e}"))?;
+        serde_yaml_ng::from_str(&frontmatter).map_err(|e| format!("invalid frontmatter: {e}"))?;
 
     Ok(AgentDefinition {
         profile,

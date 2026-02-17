@@ -22,6 +22,7 @@ use nitpik::security;
 use nitpik::telemetry;
 use nitpik::update;
 
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process;
 use std::sync::Arc;
@@ -418,7 +419,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     // --quiet suppresses all non-essential stderr output (banner, info, progress)
     // Progress is also auto-disabled for non-terminal formats and non-TTY stderr
     let is_interactive = args.format == OutputFormat::Terminal
-        && atty::is(atty::Stream::Stderr);
+        && std::io::stderr().is_terminal();
     let show_info = !args.quiet && is_interactive;
     let show_progress = !args.quiet && is_interactive;
 
