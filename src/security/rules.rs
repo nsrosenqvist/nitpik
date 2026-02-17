@@ -2,6 +2,12 @@
 //!
 //! Loads rules from embedded defaults and optional user-provided TOML files.
 //! Rule format is compatible with gitleaks TOML format.
+//!
+//! **Performance:** Compiling the 200+ bundled gitleaks-compatible patterns
+//! takes roughly 20–30 seconds because many patterns contain large bounded
+//! repetitions (e.g. `[\w-]{50,1000}`) that produce sizable internal DFA
+//! states. This cost is paid once per process and only when secret scanning
+//! is enabled — the rules are never loaded on the normal review path.
 
 use regex::Regex;
 use serde::Deserialize;

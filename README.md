@@ -502,6 +502,8 @@ nitpik ships with 200+ gitleaks-compatible rules and Shannon entropy checks. Whe
 nitpik review --diff-base main --scan-secrets
 ```
 
+> **Performance note:** Compiling the built-in regex rules adds roughly 20–30 seconds of startup time. This cost is paid once per invocation and only when secret scanning is enabled — normal reviews without `--scan-secrets` are unaffected.
+
 Always-on in CI:
 
 ```toml
