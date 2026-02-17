@@ -4,28 +4,21 @@ nitpik assembles each review to give the LLM the best possible context for preci
 
 ---
 
-## The Review Pipeline
+## Overview
 
-When you run `nitpik review`, the following happens in order:
+When you run `nitpik review`, nitpik parses your diff, gathers relevant context for each changed file, runs your chosen reviewer profiles in parallel, and delivers deduplicated findings in your chosen output format.
 
-1. **Diff parsing** — your input (git diff, file scan, patch file, or stdin) is parsed into per-file diffs with hunk boundaries.
-2. **Secret scanning** — if `--scan-secrets` is enabled, secrets are detected and redacted before any code leaves your machine.
-3. **Context assembly** — for each changed file, nitpik gathers the full file content (or smart excerpts), your project documentation, and prior review findings.
-4. **Profile resolution** — your selected profiles are loaded (built-in, custom, auto-detected, or tag-matched).
-5. **Task creation** — each (file × profile) pair becomes a review task. Large diffs are split into smaller chunks automatically.
-6. **Parallel execution** — tasks are sent to the LLM in parallel (up to `--max-concurrent`, default 5), with exponential backoff on rate limits.
-7. **Post-processing** — findings are deduplicated across agents, filtered to diff scope, and severity-normalized.
-8. **Output** — formatted and delivered in your chosen format.
+If `--scan-secrets` is enabled, secrets are detected and redacted **before** any code is sent to the LLM. See [Secret Scanning](11-Secret-Scanning) for details.
 
-## Context Assembly
+## Context
 
-Each review task includes rich context so the LLM understands the code it's reviewing:
+nitpik doesn't just send raw diffs to the LLM — it includes surrounding file content and your project documentation so the reviewer understands what it's looking at.
 
-### Full File Content
+### File Content
 
-For files under 1,000 lines (configurable via `max_file_lines`), the LLM sees the entire file — not just the diff. This lets it understand the surrounding code, existing patterns, and the broader context of your change.
+For reasonably sized files, the LLM sees the full file alongside the diff. This lets it understand existing patterns, naming conventions, and the broader context of your change. For very large files, nitpik includes the relevant portions surrounding each change.
 
-For larger files, nitpik extracts the relevant portions: the code surrounding each diff hunk (configurable via `surrounding_lines`), with clear markers showing where content was omitted. This keeps the prompt focused without losing important context.
+You can tune this with `max_file_lines` and `surrounding_lines` in your config.
 
 ### Project Documentation
 
@@ -33,49 +26,25 @@ nitpik automatically includes your team's conventions and guidelines. If a `REVI
 
 See [Project Documentation](12-Project-Docs) for details on controlling this.
 
-### The Diff
-
-The unified diff for the specific file, showing exactly what changed. The LLM is instructed to focus findings only on changed lines.
-
 ## Multi-Agent Coordination
 
-When you run multiple profiles together (e.g. `--profile backend,security`), nitpik coordinates them:
+When you run multiple profiles together (e.g. `--profile backend,security`), nitpik automatically coordinates them to avoid duplicate findings. Each reviewer focuses on its own area of expertise without stepping on the others.
 
-- Each reviewer is told which other reviewers are active and what their focus areas are (derived from their tags and descriptions).
-- Reviewers are instructed to stay in their lane — a backend reviewer won't duplicate security findings that the security reviewer already covers.
-- Each built-in profile also explicitly defines what *not* to report, reinforcing the boundaries.
+You don't need to configure anything — just combine profiles and nitpik handles the rest.
 
-This coordination happens automatically. You don't need to configure anything — just combine profiles and nitpik handles the rest.
+## Prior Findings
 
-## Prior Findings Continuity
-
-When a file changes and the cached review is invalidated, nitpik doesn't start from scratch. It includes the previous findings in the prompt, with explicit instructions:
-
-- **Re-raise** findings that still apply
-- **Drop** findings that have been resolved
-- **Add** new findings for newly introduced issues
-
-This keeps reviews consistent across iterations — the LLM won't flip-flop on findings between runs, and it won't re-report issues you've already fixed.
+When a file changes and the cached review is invalidated, nitpik carries forward the previous findings so reviews stay consistent across iterations. The LLM won't flip-flop on findings between runs, and it won't re-report issues you've already fixed.
 
 Prior findings are scoped per branch so parallel PRs don't contaminate each other. See [Caching & Prior Findings](10-Caching) for configuration.
 
 ## Post-Processing
 
-Before findings reach you, nitpik applies several quality filters:
+Before findings reach you, nitpik applies quality filters:
 
-### Deduplication
-
-When multiple agents review the same file, they may flag the same issue. nitpik deduplicates by detecting findings that target the same file, overlap on line ranges, and have similar titles. Only the first finding survives.
-
-### Diff Scope Filtering
-
-Findings on lines outside the diff hunks are discarded. This prevents the LLM from flagging pre-existing issues in unchanged code — only your changes are reviewed.
-
-> **Note:** This filter is skipped in `--scan` mode, where the entire file is considered in-scope.
-
-### Severity Normalization
-
-LLMs sometimes use non-standard severity labels. nitpik normalizes them: "critical" and "blocker" become `error`, "major" becomes `warning`, "low" and "minor" become `info`. Unknown labels default to `warning`.
+- **Deduplication** — when multiple agents review the same file and flag the same issue, duplicates are removed automatically.
+- **Diff scope filtering** — findings on lines outside the diff are discarded, so only your changes are reviewed. This filter is skipped in `--scan` mode, where the entire file is in scope.
+- **Severity normalization** — LLMs sometimes use inconsistent severity labels. nitpik normalizes them to a standard set (`error`, `warning`, `info`).
 
 ## Related Pages
 
