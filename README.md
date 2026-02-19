@@ -346,6 +346,8 @@ Exact names and prefix globs (ending with `*`) are supported. All env vars not i
 
 ## CI / CD Integration
 
+> **Note:** As of the initial release, only GitHub Actions has been thoroughly tested. More in-depth testing of other CI platforms will follow.
+
 ### Docker
 
 The official image ships with `git` and the `nitpik` binary. Mount your repo and pass environment variables:

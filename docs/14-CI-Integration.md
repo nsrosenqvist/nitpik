@@ -2,6 +2,8 @@
 
 nitpik integrates with every major CI platform. This page covers setup for each, including token management, caching, and secret handling best practices.
 
+> **Note:** As of the initial release, only GitHub Actions has been thoroughly tested. More in-depth testing of other CI platforms will follow.
+
 ---
 
 ## Docker
