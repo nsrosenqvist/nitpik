@@ -79,6 +79,7 @@ Run a code review.
 |---|---|---|
 | `--no-project-docs` | `false` | Skip auto-detected project documentation files. |
 | `--exclude-doc <NAMES>` | — | Comma-separated filenames to exclude from project docs (e.g. `AGENTS.md,CONTRIBUTING.md`). |
+| `--no-commit-context` | `false` | Skip injecting commit summaries into the review prompt. Only affects `--diff-base` mode. |
 
 ### Performance
 

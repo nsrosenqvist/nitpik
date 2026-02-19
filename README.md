@@ -186,7 +186,7 @@ Run `nitpik help review` for the full list of flags.
 
 nitpik doesn't just pass your diff to an LLM and hope for the best. Every review is carefully assembled to maximize precision and minimize noise:
 
-- **Full-context awareness** — the LLM sees the complete file (or smart excerpts for large files), your project's conventions, and the focused diff — so it understands what changed and why it matters.
+- **Full-context awareness** — the LLM sees the complete file (or smart excerpts for large files), your project's conventions, commit history, and the focused diff — so it understands what changed and why it matters.
 - **Multi-agent coordination** — when multiple reviewer profiles run in parallel, each one knows what the others cover and stays in its lane, eliminating duplicate findings and ensuring nothing falls through the cracks.
 - **Iterative continuity** — when you push new changes, nitpik carries forward context from previous reviews so the LLM can distinguish resolved issues from persistent ones, keeping feedback consistent as your code evolves.
 - **Quality post-processing** — findings are deduplicated across agents, filtered to only the lines you actually changed, and severity-normalized before they reach you. The result: actionable findings, not LLM noise.
@@ -597,6 +597,24 @@ nitpik review --diff-base main --exclude-doc AGENTS.md,CONTRIBUTING.md
 ```
 
 > **Note:** Excluding all priority files (e.g. `--exclude-doc REVIEW.md`) causes nitpik to fall back to the generic doc list.
+
+---
+
+## Commit History Context
+
+When reviewing a git ref diff (`--diff-base`), nitpik includes the commit log between the base and HEAD in the review prompt. This gives the LLM insight into the *intent* behind the changes — commit messages explain *why* code was changed, helping the reviewer calibrate severity and avoid flagging deliberate refactors or fixes.
+
+Up to 50 commit summaries (newest first) are included automatically. This feature only applies to `--diff-base` mode — stdin diffs, diff files, and directory scans have no commit history to include.
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--no-commit-context` | `false` | Skip injecting commit summaries into the review prompt |
+
+Disable commit context when commit messages are noisy or to reduce token usage:
+
+```bash
+nitpik review --diff-base main --no-commit-context
+```
 
 ---
 

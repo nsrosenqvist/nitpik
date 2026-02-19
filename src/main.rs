@@ -367,12 +367,23 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     }
 
     // Build baseline context
+    let commit_log = if args.no_commit_context {
+        Vec::new()
+    } else if let models::InputMode::GitBase(ref base_ref) = input_mode {
+        diff::git::git_log(repo_root_path, base_ref, 50)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
     let baseline = context::build_baseline_context(
         repo_root_path,
         &diffs,
         &config,
         args.no_project_docs,
         &args.exclude_doc,
+        commit_log,
     )
     .await;
 
@@ -680,6 +691,7 @@ fn build_review_context(
         baseline: models::BaselineContext {
             file_contents: redacted_contents,
             project_docs: baseline.project_docs.clone(),
+            commit_log: baseline.commit_log.clone(),
         },
         repo_root: repo_root.to_string(),
         is_path_scan,

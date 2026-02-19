@@ -12,6 +12,9 @@ pub struct BaselineContext {
     pub file_contents: IndexMap<String, String>,
     /// Project documentation files found (path → content, insertion-ordered).
     pub project_docs: IndexMap<String, String>,
+    /// Commit summaries between the diff base and HEAD (reverse chronological).
+    /// Empty when the input is not a git ref diff (e.g. stdin, file, scan).
+    pub commit_log: Vec<String>,
 }
 
 /// The complete context for a single review request.

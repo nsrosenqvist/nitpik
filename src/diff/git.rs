@@ -74,6 +74,42 @@ pub async fn detect_branch(repo_root: &Path, env: &Env) -> String {
     String::new()
 }
 
+/// Retrieve the commit log between `base_ref` and HEAD.
+///
+/// Returns a list of one-line commit summaries (`<short-sha> <subject>`)
+/// in reverse chronological order. The result is capped at `max_commits`
+/// entries so the prompt stays within a reasonable token budget.
+pub async fn git_log(
+    repo_root: &Path,
+    base_ref: &str,
+    max_commits: usize,
+) -> Result<Vec<String>, DiffError> {
+    let range = format!("{base_ref}..HEAD");
+    let max_count = format!("--max-count={max_commits}");
+    let output = tokio::process::Command::new("git")
+        .args(["log", "--oneline", "--no-decorate", &max_count, &range])
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| DiffError::GitError(format!("failed to run git log: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DiffError::GitError(format!(
+            "git log failed (exit {}): {stderr}",
+            output.status
+        )));
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let commits: Vec<String> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+    Ok(commits)
+}
+
 /// Find the root of the git repository containing `start_dir`.
 pub async fn find_repo_root(start_dir: &Path) -> Result<String, DiffError> {
     let output = tokio::process::Command::new("git")
@@ -282,5 +318,200 @@ mod tests {
         let branch = detect_branch(p, &env).await;
 
         assert_eq!(branch, "pr-42-branch");
+    }
+
+    #[tokio::test]
+    async fn git_log_returns_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+
+        // Init repo with two commits
+        tokio::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::fs::write(p.join("file.txt"), "v1\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "initial commit"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        // Tag the base point
+        tokio::process::Command::new("git")
+            .args(["tag", "base"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        // Add two more commits
+        tokio::fs::write(p.join("file.txt"), "v2\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "second commit"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        tokio::fs::write(p.join("file.txt"), "v3\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "third commit"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        let commits = git_log(p, "base", 50).await.unwrap();
+        assert_eq!(commits.len(), 2);
+        assert!(commits[0].contains("third commit"));
+        assert!(commits[1].contains("second commit"));
+    }
+
+    #[tokio::test]
+    async fn git_log_respects_max_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+
+        tokio::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::fs::write(p.join("f.txt"), "v0\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "base"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["tag", "base"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        for i in 1..=5 {
+            tokio::fs::write(p.join("f.txt"), format!("v{i}\n"))
+                .await
+                .unwrap();
+            tokio::process::Command::new("git")
+                .args(["add", "."])
+                .current_dir(p)
+                .output()
+                .await
+                .unwrap();
+            tokio::process::Command::new("git")
+                .args(["commit", "-m", &format!("commit {i}")])
+                .current_dir(p)
+                .output()
+                .await
+                .unwrap();
+        }
+
+        let commits = git_log(p, "base", 3).await.unwrap();
+        assert_eq!(commits.len(), 3, "should cap at max_commits");
+    }
+
+    #[tokio::test]
+    async fn git_log_empty_when_no_new_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+
+        tokio::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::fs::write(p.join("f.txt"), "v1\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "only commit"])
+            .current_dir(p)
+            .output()
+            .await
+            .unwrap();
+
+        // HEAD..HEAD = no commits
+        let commits = git_log(p, "HEAD", 50).await.unwrap();
+        assert!(commits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn git_log_non_git_dir_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = git_log(dir.path(), "HEAD", 50).await;
+        assert!(result.is_err());
     }
 }

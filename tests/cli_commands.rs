@@ -308,7 +308,9 @@ async fn no_project_docs_skips_all_docs() {
 
     let config = nitpik::config::Config::default();
     let diffs = vec![];
-    let ctx = nitpik::context::build_baseline_context(dir.path(), &diffs, &config, true, &[]).await;
+    let ctx =
+        nitpik::context::build_baseline_context(dir.path(), &diffs, &config, true, &[], Vec::new())
+            .await;
     assert!(
         ctx.project_docs.is_empty(),
         "expected no docs with --no-project-docs"
@@ -323,8 +325,15 @@ async fn exclude_doc_filters_by_name() {
 
     let config = nitpik::config::Config::default();
     let exclude = vec!["AGENTS.md".to_string()];
-    let ctx =
-        nitpik::context::build_baseline_context(dir.path(), &[], &config, false, &exclude).await;
+    let ctx = nitpik::context::build_baseline_context(
+        dir.path(),
+        &[],
+        &config,
+        false,
+        &exclude,
+        Vec::new(),
+    )
+    .await;
     assert!(!ctx.project_docs.contains_key("AGENTS.md"));
     assert!(ctx.project_docs.contains_key("CONVENTIONS.md"));
 }
@@ -338,8 +347,15 @@ async fn exclude_doc_multiple_names() {
 
     let config = nitpik::config::Config::default();
     let exclude = vec!["AGENTS.md".to_string(), "CONTRIBUTING.md".to_string()];
-    let ctx =
-        nitpik::context::build_baseline_context(dir.path(), &[], &config, false, &exclude).await;
+    let ctx = nitpik::context::build_baseline_context(
+        dir.path(),
+        &[],
+        &config,
+        false,
+        &exclude,
+        Vec::new(),
+    )
+    .await;
     assert_eq!(ctx.project_docs.len(), 1);
     assert!(ctx.project_docs.contains_key("CONVENTIONS.md"));
 }

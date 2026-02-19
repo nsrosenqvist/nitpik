@@ -205,6 +205,10 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub no_project_docs: bool,
 
+    /// Skip injecting commit summaries into the review prompt.
+    #[arg(long, default_value_t = false)]
+    pub no_commit_context: bool,
+
     /// Comma-separated list of project documentation files to exclude by name.
     /// Example: --exclude-doc AGENTS.md,CONVENTIONS.md
     #[arg(long, value_name = "FILENAME", value_delimiter = ',')]
@@ -322,6 +326,7 @@ mod tests {
             max_prior_findings: None,
             quiet: false,
             no_project_docs: false,
+            no_commit_context: false,
             exclude_doc: vec![],
         }
     }

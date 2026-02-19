@@ -26,6 +26,12 @@ nitpik automatically includes your team's conventions and guidelines. If a `REVI
 
 See [Project Documentation](12-Project-Docs) for details on controlling this.
 
+### Commit History
+
+When reviewing a `--diff-base` ref, nitpik includes the commit log (up to 50 commits, newest first) so the LLM understands the author's intent behind the changes. Commit messages like "fix SQL injection in login" help the reviewer verify fixes rather than re-flagging resolved issues.
+
+This only applies to git ref diffs — stdin, file, and scan modes have no commit history. Use `--no-commit-context` to skip it.
+
 ## Multi-Agent Coordination
 
 When you run multiple profiles together (e.g. `--profile backend,security`), nitpik automatically coordinates them to avoid duplicate findings. Each reviewer focuses on its own area of expertise without stepping on the others.

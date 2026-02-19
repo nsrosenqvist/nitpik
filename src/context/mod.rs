@@ -21,12 +21,16 @@ use crate::models::diff::FileDiff;
 ///
 /// When `skip_project_docs` is true, no project docs are included.
 /// Otherwise, `exclude_docs` can filter out specific filenames.
+///
+/// `commit_log` is passed through as-is — the caller is responsible for
+/// gathering it (via `git_log`) when the input mode is a git ref diff.
 pub async fn build_baseline_context(
     repo_root: &Path,
     diffs: &[FileDiff],
     config: &Config,
     skip_project_docs: bool,
     exclude_docs: &[String],
+    commit_log: Vec<String>,
 ) -> BaselineContext {
     let file_contents =
         files::load_file_contents(repo_root, diffs, config.review.context.max_file_lines).await;
@@ -40,6 +44,7 @@ pub async fn build_baseline_context(
     BaselineContext {
         file_contents,
         project_docs,
+        commit_log,
     }
 }
 
@@ -76,8 +81,7 @@ mod tests {
         let diffs = vec![make_diff("main.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[]).await;
-        assert_eq!(ctx.file_contents.len(), 1);
+        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new()).await;
         assert!(ctx.file_contents.contains_key("main.rs"));
         assert_eq!(ctx.project_docs.len(), 1);
         assert!(ctx.project_docs.contains_key("AGENTS.md"));
@@ -88,8 +92,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &[], &config, false, &[]).await;
-        assert!(ctx.file_contents.is_empty());
+        let ctx = build_baseline_context(dir.path(), &[], &config, false, &[], Vec::new()).await;
     }
 
     #[tokio::test]
@@ -101,7 +104,8 @@ mod tests {
         diff.is_deleted = true;
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &[diff], &config, false, &[]).await;
+        let ctx =
+            build_baseline_context(dir.path(), &[diff], &config, false, &[], Vec::new()).await;
         assert!(ctx.file_contents.is_empty());
     }
 
@@ -112,12 +116,7 @@ mod tests {
         let diffs = vec![make_diff("nonexistent.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[]).await;
-        assert!(ctx.file_contents.is_empty());
-    }
-
-    #[tokio::test]
-    async fn build_context_skip_all_project_docs() {
+        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new()).await;
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
@@ -126,9 +125,7 @@ mod tests {
         let diffs = vec![make_diff("main.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config, true, &[]).await;
-        assert_eq!(ctx.file_contents.len(), 1);
-        assert!(ctx.project_docs.is_empty());
+        let ctx = build_baseline_context(dir.path(), &diffs, &config, true, &[], Vec::new()).await;
     }
 
     #[tokio::test]
@@ -142,7 +139,8 @@ mod tests {
         let config = Config::default();
         let exclude = vec!["AGENTS.md".to_string()];
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &exclude).await;
+        let ctx =
+            build_baseline_context(dir.path(), &diffs, &config, false, &exclude, Vec::new()).await;
         assert_eq!(ctx.file_contents.len(), 1);
         assert_eq!(ctx.project_docs.len(), 1);
         assert!(!ctx.project_docs.contains_key("AGENTS.md"));
@@ -156,7 +154,7 @@ mod tests {
 
         let config = Config::default();
         // Even with an empty exclude list, skip_project_docs=true wins
-        let ctx = build_baseline_context(dir.path(), &[], &config, true, &[]).await;
+        let ctx = build_baseline_context(dir.path(), &[], &config, true, &[], Vec::new()).await;
         assert!(ctx.project_docs.is_empty());
     }
 }

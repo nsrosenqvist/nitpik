@@ -291,6 +291,19 @@ fn build_prompt(
         }
     }
 
+    // Commit log context
+    if !context.baseline.commit_log.is_empty() {
+        prompt.push_str("## Commit History\n\n");
+        prompt.push_str(
+            "The following commits are included in this diff (newest first). \
+             Use them to understand the author's intent behind the changes:\n\n",
+        );
+        for commit in &context.baseline.commit_log {
+            prompt.push_str(&format!("- {commit}\n"));
+        }
+        prompt.push('\n');
+    }
+
     // Full file content (if available)
     let file_path = diff.path();
     if let Some(content) = context.baseline.file_contents.get(file_path) {
@@ -1231,5 +1244,98 @@ mod tests {
 
         // Single agent should NOT have a coordination note
         assert!(!prompt.contains("specialized reviewers running in parallel"));
+    }
+
+    #[test]
+    fn build_prompt_includes_commit_log() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext {
+                commit_log: vec![
+                    "abc1234 Fix SQL injection in login".into(),
+                    "def5678 Add input validation".into(),
+                ],
+                ..BaselineContext::default()
+            },
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
+        assert!(prompt.contains("## Commit History"));
+        assert!(prompt.contains("abc1234 Fix SQL injection in login"));
+        assert!(prompt.contains("def5678 Add input validation"));
+        assert!(prompt.contains("author's intent"));
+    }
+
+    #[test]
+    fn build_prompt_omits_empty_commit_log() {
+        let diff = FileDiff {
+            old_path: "test.rs".into(),
+            new_path: "test.rs".into(),
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_binary: false,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
+                header: None,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::Added,
+                    content: "let x = 1;".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                }],
+            }],
+        };
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext::default(),
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
+        assert!(!prompt.contains("Commit History"));
     }
 }
