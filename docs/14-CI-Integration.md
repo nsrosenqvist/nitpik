@@ -41,6 +41,7 @@ jobs:
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
+          save-always: true
       - uses: nsrosenqvist/nitpik@v1
         with:
           profiles: backend,security
@@ -72,6 +73,7 @@ jobs:
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
+          save-always: true
       - name: Install nitpik
         run: curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
       - name: AI Code Review
@@ -92,6 +94,7 @@ jobs:
 - `fetch-depth: 0` is required for `--diff-base` to have access to the full git history.
 - `--format github` outputs findings as workflow commands that appear as inline PR annotations.
 - `--fail-on warning` causes the step to fail if any warning or error is found.
+- `save-always: true` ensures the cache is persisted even when `--fail-on` causes the step to exit non-zero. Without it, `actions/cache` only saves on job success and the cache is never populated.
 
 > **Security:** Always pass API keys via `${{ secrets.* }}` — never hardcode them in workflow files.
 
@@ -116,6 +119,7 @@ code-review:
     key: nitpik
     paths:
       - .nitpik-cache/
+    when: always
   artifacts:
     reports:
       codequality: gl-code-quality-report.json
@@ -130,6 +134,7 @@ code-review:
 - `--format gitlab` outputs a [Code Quality report](https://docs.gitlab.com/ee/ci/testing/code_quality.html) JSON file.
 - Upload it as a `codequality` artifact to see findings in the merge request Code Quality widget.
 - Set `XDG_CONFIG_HOME` to a path inside the project directory so the cache is preserved between runs.
+- `when: always` ensures the cache is saved even when `--fail-on` causes the job to exit non-zero. Without it, GitLab only saves the cache on success.
 
 ## Bitbucket Pipelines
 

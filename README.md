@@ -377,6 +377,7 @@ jobs:
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
+          save-always: true
       - uses: nsrosenqvist/nitpik@v1
         with:
           profiles: backend,security
@@ -409,6 +410,7 @@ jobs:
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
+          save-always: true
       - name: Install nitpik
         run: curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
       - name: AI Code Review
@@ -450,6 +452,7 @@ code-review:
     key: nitpik
     paths:
       - .nitpik-cache/
+    when: always
   artifacts:
     reports:
       codequality: gl-code-quality-report.json
