@@ -41,17 +41,29 @@ pub enum InputMode {
 pub enum ProviderName {
     #[default]
     Anthropic,
-    #[serde(rename = "openai")]
-    OpenAI,
+    Azure,
     Cohere,
-    Gemini,
-    Perplexity,
     #[serde(rename = "deepseek")]
     DeepSeek,
+    Galadriel,
+    Gemini,
+    Groq,
+    #[serde(rename = "huggingface")]
+    HuggingFace,
+    Hyperbolic,
+    Mira,
+    Mistral,
+    Moonshot,
+    Ollama,
+    #[serde(rename = "openai")]
+    OpenAI,
+    #[serde(rename = "openrouter")]
+    OpenRouter,
+    Perplexity,
+    Together,
     #[serde(rename = "xai")]
     XAI,
-    Groq,
-    /// Any OpenAI-compatible API (e.g. Ollama, Together, local servers).
+    /// Any OpenAI-compatible API (e.g. local servers, corporate proxies).
     #[serde(rename = "openai-compatible")]
     OpenAICompatible,
 }
@@ -60,13 +72,23 @@ impl fmt::Display for ProviderName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProviderName::Anthropic => write!(f, "anthropic"),
-            ProviderName::OpenAI => write!(f, "openai"),
+            ProviderName::Azure => write!(f, "azure"),
             ProviderName::Cohere => write!(f, "cohere"),
-            ProviderName::Gemini => write!(f, "gemini"),
-            ProviderName::Perplexity => write!(f, "perplexity"),
             ProviderName::DeepSeek => write!(f, "deepseek"),
-            ProviderName::XAI => write!(f, "xai"),
+            ProviderName::Galadriel => write!(f, "galadriel"),
+            ProviderName::Gemini => write!(f, "gemini"),
             ProviderName::Groq => write!(f, "groq"),
+            ProviderName::HuggingFace => write!(f, "huggingface"),
+            ProviderName::Hyperbolic => write!(f, "hyperbolic"),
+            ProviderName::Mira => write!(f, "mira"),
+            ProviderName::Mistral => write!(f, "mistral"),
+            ProviderName::Moonshot => write!(f, "moonshot"),
+            ProviderName::Ollama => write!(f, "ollama"),
+            ProviderName::OpenAI => write!(f, "openai"),
+            ProviderName::OpenRouter => write!(f, "openrouter"),
+            ProviderName::Perplexity => write!(f, "perplexity"),
+            ProviderName::Together => write!(f, "together"),
+            ProviderName::XAI => write!(f, "xai"),
             ProviderName::OpenAICompatible => write!(f, "openai-compatible"),
         }
     }
@@ -78,17 +100,29 @@ impl std::str::FromStr for ProviderName {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "anthropic" => Ok(ProviderName::Anthropic),
-            "openai" => Ok(ProviderName::OpenAI),
+            "azure" => Ok(ProviderName::Azure),
             "cohere" => Ok(ProviderName::Cohere),
-            "gemini" => Ok(ProviderName::Gemini),
-            "perplexity" => Ok(ProviderName::Perplexity),
             "deepseek" => Ok(ProviderName::DeepSeek),
-            "xai" => Ok(ProviderName::XAI),
+            "galadriel" => Ok(ProviderName::Galadriel),
+            "gemini" => Ok(ProviderName::Gemini),
             "groq" => Ok(ProviderName::Groq),
+            "huggingface" => Ok(ProviderName::HuggingFace),
+            "hyperbolic" => Ok(ProviderName::Hyperbolic),
+            "mira" => Ok(ProviderName::Mira),
+            "mistral" => Ok(ProviderName::Mistral),
+            "moonshot" => Ok(ProviderName::Moonshot),
+            "ollama" => Ok(ProviderName::Ollama),
+            "openai" => Ok(ProviderName::OpenAI),
+            "openrouter" => Ok(ProviderName::OpenRouter),
+            "perplexity" => Ok(ProviderName::Perplexity),
+            "together" => Ok(ProviderName::Together),
+            "xai" => Ok(ProviderName::XAI),
             "openai-compatible" => Ok(ProviderName::OpenAICompatible),
             other => Err(format!(
-                "unsupported provider: '{other}'. Supported: anthropic, openai, cohere, \
-                 gemini, perplexity, deepseek, xai, groq, openai-compatible"
+                "unsupported provider: '{other}'. Supported: anthropic, azure, cohere, \
+                 deepseek, galadriel, gemini, groq, huggingface, hyperbolic, mira, \
+                 mistral, moonshot, ollama, openai, openrouter, perplexity, together, \
+                 xai, openai-compatible"
             )),
         }
     }
@@ -101,13 +135,23 @@ impl ProviderName {
     pub fn api_key_env_var(self) -> &'static str {
         match self {
             ProviderName::Anthropic => "ANTHROPIC_API_KEY",
-            ProviderName::OpenAI | ProviderName::OpenAICompatible => "OPENAI_API_KEY",
+            ProviderName::Azure => "AZURE_OPENAI_API_KEY",
             ProviderName::Cohere => "COHERE_API_KEY",
-            ProviderName::Gemini => "GEMINI_API_KEY",
-            ProviderName::Perplexity => "PERPLEXITY_API_KEY",
             ProviderName::DeepSeek => "DEEPSEEK_API_KEY",
-            ProviderName::XAI => "XAI_API_KEY",
+            ProviderName::Galadriel => "GALADRIEL_API_KEY",
+            ProviderName::Gemini => "GEMINI_API_KEY",
             ProviderName::Groq => "GROQ_API_KEY",
+            ProviderName::HuggingFace => "HUGGINGFACE_API_KEY",
+            ProviderName::Hyperbolic => "HYPERBOLIC_API_KEY",
+            ProviderName::Mira => "MIRA_API_KEY",
+            ProviderName::Mistral => "MISTRAL_API_KEY",
+            ProviderName::Moonshot => "MOONSHOT_API_KEY",
+            ProviderName::Ollama => "OLLAMA_API_KEY",
+            ProviderName::OpenAI | ProviderName::OpenAICompatible => "OPENAI_API_KEY",
+            ProviderName::OpenRouter => "OPENROUTER_API_KEY",
+            ProviderName::Perplexity => "PERPLEXITY_API_KEY",
+            ProviderName::Together => "TOGETHER_API_KEY",
+            ProviderName::XAI => "XAI_API_KEY",
         }
     }
 }
@@ -119,13 +163,23 @@ mod tests {
     #[test]
     fn provider_name_display() {
         assert_eq!(ProviderName::Anthropic.to_string(), "anthropic");
-        assert_eq!(ProviderName::OpenAI.to_string(), "openai");
+        assert_eq!(ProviderName::Azure.to_string(), "azure");
         assert_eq!(ProviderName::Cohere.to_string(), "cohere");
-        assert_eq!(ProviderName::Gemini.to_string(), "gemini");
-        assert_eq!(ProviderName::Perplexity.to_string(), "perplexity");
         assert_eq!(ProviderName::DeepSeek.to_string(), "deepseek");
-        assert_eq!(ProviderName::XAI.to_string(), "xai");
+        assert_eq!(ProviderName::Galadriel.to_string(), "galadriel");
+        assert_eq!(ProviderName::Gemini.to_string(), "gemini");
         assert_eq!(ProviderName::Groq.to_string(), "groq");
+        assert_eq!(ProviderName::HuggingFace.to_string(), "huggingface");
+        assert_eq!(ProviderName::Hyperbolic.to_string(), "hyperbolic");
+        assert_eq!(ProviderName::Mira.to_string(), "mira");
+        assert_eq!(ProviderName::Mistral.to_string(), "mistral");
+        assert_eq!(ProviderName::Moonshot.to_string(), "moonshot");
+        assert_eq!(ProviderName::Ollama.to_string(), "ollama");
+        assert_eq!(ProviderName::OpenAI.to_string(), "openai");
+        assert_eq!(ProviderName::OpenRouter.to_string(), "openrouter");
+        assert_eq!(ProviderName::Perplexity.to_string(), "perplexity");
+        assert_eq!(ProviderName::Together.to_string(), "together");
+        assert_eq!(ProviderName::XAI.to_string(), "xai");
         assert_eq!(
             ProviderName::OpenAICompatible.to_string(),
             "openai-compatible"
@@ -139,27 +193,64 @@ mod tests {
             ProviderName::Anthropic
         );
         assert_eq!(
-            "openai".parse::<ProviderName>().unwrap(),
-            ProviderName::OpenAI
+            "azure".parse::<ProviderName>().unwrap(),
+            ProviderName::Azure
         );
         assert_eq!(
             "cohere".parse::<ProviderName>().unwrap(),
             ProviderName::Cohere
         );
         assert_eq!(
+            "deepseek".parse::<ProviderName>().unwrap(),
+            ProviderName::DeepSeek
+        );
+        assert_eq!(
+            "galadriel".parse::<ProviderName>().unwrap(),
+            ProviderName::Galadriel
+        );
+        assert_eq!(
             "gemini".parse::<ProviderName>().unwrap(),
             ProviderName::Gemini
+        );
+        assert_eq!("groq".parse::<ProviderName>().unwrap(), ProviderName::Groq);
+        assert_eq!(
+            "huggingface".parse::<ProviderName>().unwrap(),
+            ProviderName::HuggingFace
+        );
+        assert_eq!(
+            "hyperbolic".parse::<ProviderName>().unwrap(),
+            ProviderName::Hyperbolic
+        );
+        assert_eq!("mira".parse::<ProviderName>().unwrap(), ProviderName::Mira);
+        assert_eq!(
+            "mistral".parse::<ProviderName>().unwrap(),
+            ProviderName::Mistral
+        );
+        assert_eq!(
+            "moonshot".parse::<ProviderName>().unwrap(),
+            ProviderName::Moonshot
+        );
+        assert_eq!(
+            "ollama".parse::<ProviderName>().unwrap(),
+            ProviderName::Ollama
+        );
+        assert_eq!(
+            "openai".parse::<ProviderName>().unwrap(),
+            ProviderName::OpenAI
+        );
+        assert_eq!(
+            "openrouter".parse::<ProviderName>().unwrap(),
+            ProviderName::OpenRouter
         );
         assert_eq!(
             "perplexity".parse::<ProviderName>().unwrap(),
             ProviderName::Perplexity
         );
         assert_eq!(
-            "deepseek".parse::<ProviderName>().unwrap(),
-            ProviderName::DeepSeek
+            "together".parse::<ProviderName>().unwrap(),
+            ProviderName::Together
         );
         assert_eq!("xai".parse::<ProviderName>().unwrap(), ProviderName::XAI);
-        assert_eq!("groq".parse::<ProviderName>().unwrap(), ProviderName::Groq);
         assert_eq!(
             "openai-compatible".parse::<ProviderName>().unwrap(),
             ProviderName::OpenAICompatible
@@ -197,16 +288,41 @@ mod tests {
             ProviderName::Anthropic.api_key_env_var(),
             "ANTHROPIC_API_KEY"
         );
-        assert_eq!(ProviderName::OpenAI.api_key_env_var(), "OPENAI_API_KEY");
+        assert_eq!(
+            ProviderName::Azure.api_key_env_var(),
+            "AZURE_OPENAI_API_KEY"
+        );
         assert_eq!(ProviderName::Cohere.api_key_env_var(), "COHERE_API_KEY");
+        assert_eq!(ProviderName::DeepSeek.api_key_env_var(), "DEEPSEEK_API_KEY");
+        assert_eq!(
+            ProviderName::Galadriel.api_key_env_var(),
+            "GALADRIEL_API_KEY"
+        );
         assert_eq!(ProviderName::Gemini.api_key_env_var(), "GEMINI_API_KEY");
+        assert_eq!(ProviderName::Groq.api_key_env_var(), "GROQ_API_KEY");
+        assert_eq!(
+            ProviderName::HuggingFace.api_key_env_var(),
+            "HUGGINGFACE_API_KEY"
+        );
+        assert_eq!(
+            ProviderName::Hyperbolic.api_key_env_var(),
+            "HYPERBOLIC_API_KEY"
+        );
+        assert_eq!(ProviderName::Mira.api_key_env_var(), "MIRA_API_KEY");
+        assert_eq!(ProviderName::Mistral.api_key_env_var(), "MISTRAL_API_KEY");
+        assert_eq!(ProviderName::Moonshot.api_key_env_var(), "MOONSHOT_API_KEY");
+        assert_eq!(ProviderName::Ollama.api_key_env_var(), "OLLAMA_API_KEY");
+        assert_eq!(ProviderName::OpenAI.api_key_env_var(), "OPENAI_API_KEY");
+        assert_eq!(
+            ProviderName::OpenRouter.api_key_env_var(),
+            "OPENROUTER_API_KEY"
+        );
         assert_eq!(
             ProviderName::Perplexity.api_key_env_var(),
             "PERPLEXITY_API_KEY"
         );
-        assert_eq!(ProviderName::DeepSeek.api_key_env_var(), "DEEPSEEK_API_KEY");
+        assert_eq!(ProviderName::Together.api_key_env_var(), "TOGETHER_API_KEY");
         assert_eq!(ProviderName::XAI.api_key_env_var(), "XAI_API_KEY");
-        assert_eq!(ProviderName::Groq.api_key_env_var(), "GROQ_API_KEY");
         assert_eq!(
             ProviderName::OpenAICompatible.api_key_env_var(),
             "OPENAI_API_KEY"
@@ -231,12 +347,24 @@ mod tests {
     fn provider_name_serde_all_variants() {
         let variants = [
             (ProviderName::Anthropic, "\"anthropic\""),
-            (ProviderName::OpenAI, "\"openai\""),
+            (ProviderName::Azure, "\"azure\""),
             (ProviderName::Cohere, "\"cohere\""),
-            (ProviderName::Gemini, "\"gemini\""),
             (ProviderName::DeepSeek, "\"deepseek\""),
-            (ProviderName::XAI, "\"xai\""),
+            (ProviderName::Galadriel, "\"galadriel\""),
+            (ProviderName::Gemini, "\"gemini\""),
             (ProviderName::Groq, "\"groq\""),
+            (ProviderName::HuggingFace, "\"huggingface\""),
+            (ProviderName::Hyperbolic, "\"hyperbolic\""),
+            (ProviderName::Mira, "\"mira\""),
+            (ProviderName::Mistral, "\"mistral\""),
+            (ProviderName::Moonshot, "\"moonshot\""),
+            (ProviderName::Ollama, "\"ollama\""),
+            (ProviderName::OpenAI, "\"openai\""),
+            (ProviderName::OpenRouter, "\"openrouter\""),
+            (ProviderName::Perplexity, "\"perplexity\""),
+            (ProviderName::Together, "\"together\""),
+            (ProviderName::XAI, "\"xai\""),
+            (ProviderName::OpenAICompatible, "\"openai-compatible\""),
         ];
         for (variant, expected_json) in &variants {
             let json = serde_json::to_string(variant).unwrap();

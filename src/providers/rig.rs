@@ -1,8 +1,9 @@
 //! rig-core integration for LLM-backed code review.
 //!
 //! Uses rig-core's provider clients and Agent abstraction for multi-provider
-//! support. Currently supports: Anthropic, OpenAI, Cohere, Gemini, Perplexity,
-//! DeepSeek, xAI, Groq, and any OpenAI-compatible API.
+//! support. Currently supports: Anthropic, Azure, Cohere, DeepSeek, Galadriel,
+//! Gemini, Groq, HuggingFace, Hyperbolic, Mira, Mistral, Moonshot, Ollama,
+//! OpenAI, OpenRouter, Perplexity, Together, xAI, and any OpenAI-compatible API.
 //!
 //! In agentic mode (`--agent`), tools are registered with the agent for
 //! multi-turn codebase exploration via rig-core's native tool calling.
@@ -121,7 +122,8 @@ pub struct RigProvider {
 impl RigProvider {
     /// Create a new RigProvider with the given configuration.
     pub fn new(config: ProviderConfig, repo_root: PathBuf) -> Result<Self, ProviderError> {
-        if config.api_key.is_none() {
+        // Ollama runs locally and does not require an API key.
+        if config.api_key.is_none() && config.name != ProviderName::Ollama {
             return Err(ProviderError::NotConfigured(format!(
                 "no API key found for provider '{}'. Set {} or the provider-specific env var.",
                 config.name,
@@ -146,12 +148,17 @@ impl RigProvider {
         Ok(client)
     }
 
-    /// Require `base_url` for OpenAI-compatible providers.
+    /// Require `base_url` for providers that need a custom endpoint.
     fn require_base_url(&self) -> Result<&str, ProviderError> {
         self.config.base_url.as_deref().ok_or_else(|| {
-            ProviderError::NotConfigured(
-                "openai-compatible provider requires base_url to be set".to_string(),
-            )
+            let hint = match self.config.name {
+                ProviderName::Azure => {
+                    "azure provider requires base_url (your Azure endpoint, e.g. \
+                     https://{resource}.openai.azure.com)"
+                }
+                _ => "openai-compatible provider requires base_url to be set",
+            };
+            ProviderError::NotConfigured(hint.to_string())
         })
     }
 
@@ -170,7 +177,12 @@ impl RigProvider {
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<String, ProviderError> {
-        let api_key = self.api_key()?;
+        // Ollama does not require an API key; all other providers do.
+        let api_key = if self.config.name == ProviderName::Ollama {
+            self.config.api_key.as_deref().unwrap_or("")
+        } else {
+            self.api_key()?
+        };
 
         match self.config.name {
             ProviderName::Anthropic => {
@@ -209,6 +221,62 @@ impl RigProvider {
             ProviderName::Groq => {
                 let client = new_client!(providers::groq::Client, api_key, "Groq")?;
                 prompt_simple!(client, model, system_prompt, user_prompt, "Groq")
+            }
+            ProviderName::HuggingFace => {
+                let client = new_client!(providers::huggingface::Client, api_key, "HuggingFace")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "HuggingFace")
+            }
+            ProviderName::Hyperbolic => {
+                let client = new_client!(providers::hyperbolic::Client, api_key, "Hyperbolic")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Hyperbolic")
+            }
+            ProviderName::Mira => {
+                let client = new_client!(providers::mira::Client, api_key, "Mira")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Mira")
+            }
+            ProviderName::Mistral => {
+                let client = new_client!(providers::mistral::Client, api_key, "Mistral")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Mistral")
+            }
+            ProviderName::Moonshot => {
+                let client = new_client!(providers::moonshot::Client, api_key, "Moonshot")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Moonshot")
+            }
+            ProviderName::Ollama => {
+                let mut builder =
+                    providers::ollama::Client::builder().api_key(rig::client::Nothing);
+                if let Some(ref base_url) = self.config.base_url {
+                    builder = builder.base_url(base_url);
+                }
+                let client: providers::ollama::Client = builder.build().map_err(|e| {
+                    ProviderError::ApiError(format!("failed to create Ollama client: {e}"))
+                })?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Ollama")
+            }
+            ProviderName::OpenRouter => {
+                let client = new_client!(providers::openrouter::Client, api_key, "OpenRouter")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "OpenRouter")
+            }
+            ProviderName::Together => {
+                let client = new_client!(providers::together::Client, api_key, "Together")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Together")
+            }
+            ProviderName::Azure => {
+                let base_url = self.require_base_url()?;
+                let client: providers::azure::Client = providers::azure::Client::builder()
+                    .api_key(providers::azure::AzureOpenAIAuth::ApiKey(
+                        api_key.to_string(),
+                    ))
+                    .azure_endpoint(base_url.to_string())
+                    .build()
+                    .map_err(|e| {
+                        ProviderError::ApiError(format!("failed to create Azure client: {e}"))
+                    })?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Azure")
+            }
+            ProviderName::Galadriel => {
+                let client = new_client!(providers::galadriel::Client, api_key, "Galadriel")?;
+                prompt_simple!(client, model, system_prompt, user_prompt, "Galadriel")
             }
             ProviderName::OpenAICompatible => {
                 let base_url = self.require_base_url()?;
@@ -252,7 +320,12 @@ impl RigProvider {
         max_turns: usize,
         custom_tools: Vec<CustomCommandTool>,
     ) -> Result<String, ProviderError> {
-        let api_key = self.api_key()?;
+        // Ollama does not require an API key; all other providers do.
+        let api_key = if self.config.name == ProviderName::Ollama {
+            self.config.api_key.as_deref().unwrap_or("")
+        } else {
+            self.api_key()?
+        };
 
         match self.config.name {
             ProviderName::Anthropic => {
@@ -359,6 +432,152 @@ impl RigProvider {
                     system_prompt,
                     user_prompt,
                     "Groq",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::HuggingFace => {
+                let client = new_client!(providers::huggingface::Client, api_key, "HuggingFace")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "HuggingFace",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Hyperbolic => {
+                let client = new_client!(providers::hyperbolic::Client, api_key, "Hyperbolic")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Hyperbolic",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Mira => {
+                let client = new_client!(providers::mira::Client, api_key, "Mira")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Mira",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Mistral => {
+                let client = new_client!(providers::mistral::Client, api_key, "Mistral")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Mistral",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Moonshot => {
+                let client = new_client!(providers::moonshot::Client, api_key, "Moonshot")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Moonshot",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Ollama => {
+                let mut builder =
+                    providers::ollama::Client::builder().api_key(rig::client::Nothing);
+                if let Some(ref base_url) = self.config.base_url {
+                    builder = builder.base_url(base_url);
+                }
+                let client: providers::ollama::Client = builder.build().map_err(|e| {
+                    ProviderError::ApiError(format!("failed to create Ollama client: {e}"))
+                })?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Ollama",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::OpenRouter => {
+                let client = new_client!(providers::openrouter::Client, api_key, "OpenRouter")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "OpenRouter",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Together => {
+                let client = new_client!(providers::together::Client, api_key, "Together")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Together",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Azure => {
+                let base_url = self.require_base_url()?;
+                let client: providers::azure::Client = providers::azure::Client::builder()
+                    .api_key(providers::azure::AzureOpenAIAuth::ApiKey(
+                        api_key.to_string(),
+                    ))
+                    .azure_endpoint(base_url.to_string())
+                    .build()
+                    .map_err(|e| {
+                        ProviderError::ApiError(format!("failed to create Azure client: {e}"))
+                    })?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Azure",
+                    self.repo_root,
+                    max_turns,
+                    custom_tools
+                )
+            }
+            ProviderName::Galadriel => {
+                let client = new_client!(providers::galadriel::Client, api_key, "Galadriel")?;
+                prompt_agentic!(
+                    client,
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    "Galadriel",
                     self.repo_root,
                     max_turns,
                     custom_tools
@@ -748,6 +967,20 @@ mod tests {
             api_key: Some("sk-test-key".to_string()),
         };
         assert!(RigProvider::new(config, PathBuf::from("/tmp")).is_ok());
+    }
+
+    #[test]
+    fn new_provider_ollama_no_api_key() {
+        let config = ProviderConfig {
+            name: ProviderName::Ollama,
+            model: "llama3".to_string(),
+            base_url: None,
+            api_key: None,
+        };
+        assert!(
+            RigProvider::new(config, PathBuf::from("/tmp")).is_ok(),
+            "Ollama should not require an API key"
+        );
     }
 
     #[test]

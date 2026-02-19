@@ -65,7 +65,7 @@ The key is stored in `~/.config/nitpik/config.toml`. You can also set the `NITPI
 nitpik is bring-your-own-model. Set two environment variables — a provider name and the corresponding API key:
 
 ```bash
-export NITPIK_PROVIDER=anthropic        # or openai, gemini, cohere, deepseek, xai, groq, perplexity
+export NITPIK_PROVIDER=anthropic        # or openai, gemini, cohere, deepseek, xai, groq, mistral, ollama, and more
 export ANTHROPIC_API_KEY=sk-...         # provider-specific key
 ```
 
@@ -636,6 +636,7 @@ nitpik uses third-party large language models (LLMs) to analyze code. **All find
 - **Always review AI suggestions with human judgment** before acting on them.
 - **Code diffs are sent to your configured LLM provider** (e.g. Anthropic, OpenAI, Gemini). nitpik does not store or retain your code, but the LLM provider's data policies apply. Choose a provider whose terms you trust.
 - **Enable `--scan-secrets`** to detect and redact secrets before code is sent to the LLM. Without this flag, secrets present in your diffs will be transmitted to the provider.
+- **Provider integrations rely on a third-party open-source library.** LLM provider support may change, break, or be removed due to upstream updates outside of nitpik's control. If you plan to purchase a commercial license, **please verify that your provider and model work correctly using the free unlicensed version first.** No license key is required for this — just install and test with your own API key.
 - nitpik is a development aid, not a replacement for human code review, testing, or security auditing.
 
 ---

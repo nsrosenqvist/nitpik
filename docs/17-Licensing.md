@@ -20,6 +20,8 @@ For commercial use (proprietary codebases, company projects), purchase a license
 
 **One flat fee, any team size, unlimited usage.** No per-seat charges, no usage caps.
 
+> **Verify compatibility first:** nitpik's LLM provider integrations rely on a third-party open-source library, and provider support may change due to upstream updates outside of nitpik's control. Before purchasing a commercial license, please verify that your chosen provider and model work correctly using the free unlicensed version. No license key is required — just install and run a review with your own API key. See [LLM Providers](03-Providers) for the full list of supported providers.
+
 ## Activating a License
 
 Store the key in your global config:

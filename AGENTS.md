@@ -28,7 +28,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 | `diff/` | Git CLI wrapper, unified diff parsing, file scanning, chunk splitting |
 | `context/` | Baseline context: full file loading, project doc detection with `REVIEW.md`/`NITPIK.md` priority (supports `--no-project-docs` and `--exclude-doc`) |
 | `agents/` | Built-in profiles (`backend`, `frontend`, `architect`, `security`), markdown+YAML parser, auto-profile selection, tag-based profile resolution |
-| `providers/` | `ReviewProvider` trait, rig-core multi-provider integration (Anthropic, OpenAI, Gemini, Cohere, DeepSeek, xAI, Groq, Perplexity, OpenAI-compatible) |
+| `providers/` | `ReviewProvider` trait, rig-core multi-provider integration (Anthropic, Azure, Cohere, DeepSeek, Galadriel, Gemini, Groq, HuggingFace, Hyperbolic, Mira, Mistral, Moonshot, Ollama, OpenAI, OpenRouter, Perplexity, Together, xAI, OpenAI-compatible) |
 | `tools/` | Agentic tools: `ReadFileTool`, `SearchTextTool`, `ListDirectoryTool`, `CustomCommandTool` (user-defined CLI tools from profile frontmatter), `ToolCallLog` (audit log for tool invocations) |
 | `orchestrator/` | Parallel review execution, prompt construction, deduplication |
 | `output/` | `OutputRenderer` trait + format implementations (terminal, JSON, GitHub, GitLab, Bitbucket, Forgejo) |
