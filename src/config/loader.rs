@@ -32,7 +32,7 @@ pub enum ConfigError {
 }
 
 /// Top-level configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub review: ReviewConfig,
@@ -40,18 +40,6 @@ pub struct Config {
     pub secrets: SecretsConfig,
     pub license: LicenseConfig,
     pub telemetry: TelemetryConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            review: ReviewConfig::default(),
-            provider: ProviderConfig::default(),
-            secrets: SecretsConfig::default(),
-            license: LicenseConfig::default(),
-            telemetry: TelemetryConfig::default(),
-        }
-    }
 }
 
 /// Review-related configuration.
@@ -144,34 +132,19 @@ impl Default for ProviderConfig {
 }
 
 /// Secret scanning configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SecretsConfig {
     pub enabled: bool,
     pub additional_rules: Option<String>,
 }
 
-impl Default for SecretsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            additional_rules: None,
-        }
-    }
-}
-
 /// License key configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LicenseConfig {
     /// License key string (base64-encoded signed payload).
     pub key: Option<String>,
-}
-
-impl Default for LicenseConfig {
-    fn default() -> Self {
-        Self { key: None }
-    }
 }
 
 /// Telemetry configuration.

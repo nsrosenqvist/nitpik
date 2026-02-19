@@ -525,7 +525,7 @@ fn list_repo_root(repo_root: &str) -> Result<Vec<String>, std::io::Error> {
         }
 
         let metadata = entry.metadata().ok();
-        let is_dir = metadata.as_ref().map_or(false, |m| m.is_dir());
+        let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
         let size = if is_dir {
             None
         } else {
@@ -658,7 +658,14 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
         assert!(prompt.contains("+let x = 1;"));
         assert!(prompt.contains("test.rs"));
         assert!(prompt.contains("backend"));
@@ -709,7 +716,7 @@ mod tests {
             &diff,
             &context,
             &agent,
-            &[agent.clone()],
+            std::slice::from_ref(&agent),
             Some(&prior),
             false,
         );
@@ -749,7 +756,14 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
         assert!(!prompt.contains("Previous Review Findings"));
     }
 
@@ -794,7 +808,14 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let base = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
+        let base = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
         let with_prior = build_prompt_with_prior(&base, &prior);
 
         // Prior findings section should appear before Instructions
@@ -955,7 +976,7 @@ mod tests {
             make_finding_at("a.rs", 30), // between hunks — out of scope
             make_finding_at("a.rs", 51), // in hunk 2
         ];
-        let result = filter_to_diff_scope(findings, &vec![diff]);
+        let result = filter_to_diff_scope(findings, &[diff]);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 12);
         assert_eq!(result[1].line, 51);
@@ -992,7 +1013,14 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
         assert!(prompt.contains("IMPORTANT SCOPE RULE"));
         assert!(prompt.contains("do NOT flag pre-existing issues"));
     }
@@ -1049,7 +1077,14 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, true);
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            true,
+        );
 
         // Should include agentic exploration section
         assert!(prompt.contains("Agentic Exploration"));
@@ -1094,7 +1129,14 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
 
         // Non-agentic should NOT include tool guidance
         assert!(!prompt.contains("Agentic Exploration"));
@@ -1178,7 +1220,14 @@ mod tests {
         };
         let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(&diff, &context, &agent, &[agent.clone()], None, false);
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
 
         // Single agent should NOT have a coordination note
         assert!(!prompt.contains("specialized reviewers running in parallel"));

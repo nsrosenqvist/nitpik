@@ -25,7 +25,7 @@ pub struct Cli {
 #[derive(clap::Subcommand, Debug)]
 pub enum Command {
     /// Run a code review.
-    Review(ReviewArgs),
+    Review(Box<ReviewArgs>),
 
     /// List available agent profiles.
     Profiles(ProfilesArgs),

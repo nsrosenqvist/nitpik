@@ -277,7 +277,7 @@ mod tests {
             expires_at,
         };
         match check_expiry(&claims).unwrap() {
-            ExpiryStatus::ExpiringSoon { days } => assert!(days <= 30 && days >= 0),
+            ExpiryStatus::ExpiringSoon { days } => assert!((0..=30).contains(&days)),
             other => panic!("expected ExpiringSoon, got {other:?}"),
         }
     }

@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn license_banner_styled_is_non_empty() {
-        assert!(!LICENSE_BANNER_STYLED.is_empty());
+        // Const is statically non-empty; just verify it contains the app name.
         assert!(LICENSE_BANNER_STYLED.contains("nitpik"));
     }
 }

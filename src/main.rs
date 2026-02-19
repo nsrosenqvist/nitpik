@@ -53,7 +53,7 @@ async fn run() -> Result<()> {
     let no_telemetry = cli.no_telemetry;
 
     match cli.command {
-        Command::Review(args) => run_review(args, no_telemetry).await,
+        Command::Review(args) => run_review(*args, no_telemetry).await,
         Command::Profiles(args) => run_profiles(args).await,
         Command::Validate(args) => run_validate(args).await,
         Command::Cache { action } => run_cache(action).await,
@@ -649,7 +649,7 @@ fn build_review_context(
     let rules_path = args
         .secrets_rules
         .as_deref()
-        .or_else(|| config_rules_path.as_deref());
+        .or(config_rules_path.as_deref());
     if let Some(rules_path) = rules_path {
         let extra = security::rules::load_rules_from_file(rules_path)
             .map_err(|e| anyhow::anyhow!("failed to load secret rules: {e}"))?;

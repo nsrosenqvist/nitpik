@@ -260,7 +260,7 @@ fn extract_binary(archive_bytes: &[u8]) -> Result<Vec<u8>, UpdateError> {
             .path()
             .map_err(|e| UpdateError::ExtractError(format!("invalid path in archive: {e}")))?;
 
-        let is_binary = path.file_name().map_or(false, |name| name == "nitpik");
+        let is_binary = path.file_name().is_some_and(|name| name == "nitpik");
         if !is_binary {
             continue;
         }

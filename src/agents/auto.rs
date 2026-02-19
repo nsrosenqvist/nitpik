@@ -49,7 +49,7 @@ pub fn auto_select_profiles(diffs: &[FileDiff]) -> Vec<String> {
     if has_frontend {
         profiles.push("frontend".to_string());
     }
-    if has_backend || (!has_frontend && !has_backend) {
+    if has_backend || !has_frontend {
         profiles.push(DEFAULT_PROFILE.to_string());
     }
 

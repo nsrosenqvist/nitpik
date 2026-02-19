@@ -36,9 +36,10 @@ pub enum InputMode {
 }
 
 /// Supported LLM provider backends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderName {
+    #[default]
     Anthropic,
     #[serde(rename = "openai")]
     OpenAI,
@@ -53,12 +54,6 @@ pub enum ProviderName {
     /// Any OpenAI-compatible API (e.g. Ollama, Together, local servers).
     #[serde(rename = "openai-compatible")]
     OpenAICompatible,
-}
-
-impl Default for ProviderName {
-    fn default() -> Self {
-        ProviderName::Anthropic
-    }
 }
 
 impl fmt::Display for ProviderName {

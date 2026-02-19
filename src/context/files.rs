@@ -104,11 +104,9 @@ fn extract_hunk_context(content: &str, diff: &FileDiff, context: usize) -> Strin
             result.push_str(&format!("[... {} lines omitted ...]\n\n", start));
         }
 
-        for i in *start..=*end {
-            if i < total {
-                result.push_str(lines[i]);
-                result.push('\n');
-            }
+        for line in lines.iter().take(*end + 1).skip(*start) {
+            result.push_str(line);
+            result.push('\n');
         }
 
         prev_end = Some(*end);

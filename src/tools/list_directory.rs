@@ -148,7 +148,7 @@ pub async fn list_directory(
         }
 
         let metadata = entry.metadata().await.ok();
-        let is_dir = metadata.as_ref().map_or(false, |m| m.is_dir());
+        let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
         let size = if is_dir {
             None
         } else {

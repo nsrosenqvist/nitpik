@@ -16,6 +16,12 @@ pub struct FileStore {
     cache_dir: Option<PathBuf>,
 }
 
+impl Default for FileStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileStore {
     /// Create a new file store using the default cache directory.
     pub fn new() -> Self {
@@ -220,10 +226,8 @@ impl FileStore {
                 continue;
             };
             if let Ok(age) = now.duration_since(modified) {
-                if age > max_age {
-                    if std::fs::remove_file(&path).is_ok() {
-                        removed += 1;
-                    }
+                if age > max_age && std::fs::remove_file(&path).is_ok() {
+                    removed += 1;
                 }
             }
         }

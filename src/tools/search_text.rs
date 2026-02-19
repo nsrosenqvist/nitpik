@@ -143,7 +143,7 @@ pub async fn search_text(
             .build();
 
         'outer: for entry in walker.flatten() {
-            if entry.file_type().map_or(true, |ft| !ft.is_file()) {
+            if entry.file_type().is_none_or(|ft| !ft.is_file()) {
                 continue;
             }
 

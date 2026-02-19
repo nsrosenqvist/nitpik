@@ -38,9 +38,8 @@ pub fn parse_unified_diff(input: &str) -> Vec<FileDiff> {
                 lines.next();
             } else if next.starts_with("similarity index")
                 || next.starts_with("dissimilarity index")
+                || next.starts_with("index ")
             {
-                lines.next();
-            } else if next.starts_with("index ") {
                 lines.next();
             } else if next.contains("Binary files") {
                 is_binary = true;

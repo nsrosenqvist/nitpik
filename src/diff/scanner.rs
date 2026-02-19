@@ -27,7 +27,7 @@ pub async fn scan_path(path: &Path) -> Result<Vec<FileDiff>, DiffError> {
         let walker = WalkBuilder::new(path).hidden(true).git_ignore(true).build();
 
         for entry in walker.flatten() {
-            if entry.file_type().map_or(true, |ft| !ft.is_file()) {
+            if entry.file_type().is_none_or(|ft| !ft.is_file()) {
                 continue;
             }
             if let Some(diff) = scan_single_file(entry.path()).await? {
@@ -158,7 +158,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("binary.bin");
         // Write invalid UTF-8
-        std::fs::write(&file, &[0xFF, 0xFE, 0x00, 0x01]).unwrap();
+        std::fs::write(&file, [0xFF, 0xFE, 0x00, 0x01]).unwrap();
 
         let diffs = scan_path(&file).await.unwrap();
         assert!(diffs.is_empty(), "binary file should be skipped");
