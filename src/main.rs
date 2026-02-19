@@ -552,11 +552,21 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             .filter(|f| f.severity >= threshold)
             .collect();
         if !failing.is_empty() {
-            let summary = models::finding::Summary::from_findings(&findings);
-            eprintln!(
-                "\nReview complete: {} error(s), {} warning(s), {} info — failing on {threshold}+",
-                summary.errors, summary.warnings, summary.info,
-            );
+            // For non-terminal formats the renderer doesn't include a summary,
+            // so print one to stderr so CI logs show the counts.  The terminal
+            // renderer already prints its own summary line, so skip it there.
+            if args.format == OutputFormat::Terminal {
+                // Blank line between the renderer's summary and the error.
+                eprintln!();
+            } else {
+                // Non-terminal formats don't include a summary, so print one
+                // to stderr so CI logs show the counts.
+                let summary = models::finding::Summary::from_findings(&findings);
+                eprintln!(
+                    "\nReview complete: {} error(s), {} warning(s), {} info — failing on {threshold}+",
+                    summary.errors, summary.warnings, summary.info,
+                );
+            }
             bail!(
                 "found {} finding(s) at or above {threshold} threshold",
                 failing.len(),
@@ -684,8 +694,15 @@ async fn render_and_output(
     findings: &[models::finding::Finding],
     fail_on: Option<Severity>,
 ) {
+    use std::io::Write;
+
     let rendered = format.render(findings);
     print!("{rendered}");
+
+    // Flush stdout so all findings appear before any stderr messages (summary,
+    // error lines). Without this, CI environments block-buffer stdout and
+    // interleave it with the immediately-flushed stderr output.
+    let _ = std::io::stdout().flush();
 
     let env = Env::real();
 
