@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
 
 permissions:
   contents: write
@@ -21,6 +21,8 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
 
+    outputs:
+      is_prerelease: ${{ steps.detect.outputs.is_prerelease }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +39,7 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Set version from tag
+        id: detect
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           # BSD sed (macOS) requires a backup extension with -i; GNU sed does not.
@@ -44,6 +47,15 @@ jobs:
             sed -i '' "1,/^version = .*/s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
           else
             sed -i "1,/^version = .*/s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
+          fi
+
+          # Detect pre-release suffix (e.g. -alpha, -beta.1, -rc.2)
+          if [[ "$VERSION" == *-* ]]; then
+            echo "IS_PRERELEASE=true" >> "$GITHUB_ENV"
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build
@@ -97,12 +109,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ needs.build.outputs.is_prerelease == 'true' }}
           files: |
             artifacts/*.tar.gz
             artifacts/SHA256SUMS
 
   publish:
-    needs: release
+    needs: [release, build]
+    if: needs.build.outputs.is_prerelease != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,7 +134,8 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   update-floating-tags:
-    needs: release
+    needs: [release, build]
+    if: needs.build.outputs.is_prerelease != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
