@@ -134,7 +134,7 @@ Use one or combine several:
 nitpik review --diff-base main --profile backend,security
 ```
 
-Auto-select profiles based on the files in the diff:
+Auto-select profiles based on what changed — nitpik looks at file extensions, directory structure, and project root files (like `package.json`) to pick the right combination of `frontend`, `backend`, `architect`, and `security`:
 
 ```bash
 nitpik review --diff-base main --profile auto

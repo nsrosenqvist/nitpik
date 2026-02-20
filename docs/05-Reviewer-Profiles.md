@@ -66,7 +66,13 @@ Let nitpik pick profiles based on the files in your diff:
 nitpik review --diff-base main --profile auto
 ```
 
-Auto-selection analyzes file paths and extensions in the diff to determine which profiles are relevant. For example, changes to `.tsx` files activate the `frontend` profile; changes to database migration files activate `backend`.
+Auto-selection examines three layers of signals to choose profiles:
+
+1. **File extensions and paths** — unambiguous extensions (`.vue`, `.css` → frontend; `.rs`, `.go`, `.py` → backend) are classified directly. JS/TS files are disambiguated using directory names (e.g. `controllers/` → backend, `components/` → frontend) and filename patterns (e.g. `*.controller.ts` → backend).
+2. **Project root markers** — when JS/TS path signals are absent or one-sided, nitpik checks the repo root for `package.json` dependencies (Express, React, etc.) and config files (`nest-cli.json`, `wrangler.toml`, etc.) to fill in the gaps.
+3. **Architect triggers** — the `architect` profile is added when the diff touches cross-cutting files (CI configs, Dockerfiles, IaC, dependency manifests, API definitions, database migrations) or when the diff is large (many files or many distinct directories).
+
+The `security` profile is always included. If nothing matches frontend specifically, `backend` is used as the default.
 
 ## Tag-Based Selection
 

@@ -388,7 +388,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     .await;
 
     // Resolve agent profiles
-    let agent_defs = resolve_agents(&args, &config, &diffs).await?;
+    let agent_defs = resolve_agents(&args, &config, &diffs, repo_root_path).await?;
 
     // Fire anonymous telemetry heartbeat (non-blocking, fails silently)
     let telemetry_enabled = config.telemetry.enabled && !no_telemetry;
@@ -598,6 +598,7 @@ async fn resolve_agents(
     args: &cli::args::ReviewArgs,
     config: &Config,
     diffs: &[models::FileDiff],
+    repo_root_path: &Path,
 ) -> Result<Vec<models::AgentDefinition>> {
     let profile_names = if args.profile == vec![DEFAULT_PROFILE.to_string()] {
         // CLI default — check config for overrides
@@ -611,7 +612,7 @@ async fn resolve_agents(
     };
 
     let profiles = if profile_names.iter().any(|p| p == "auto") {
-        agents::auto::auto_select_profiles(diffs)
+        agents::auto::auto_select_profiles(diffs, repo_root_path)
     } else {
         profile_names
     };
