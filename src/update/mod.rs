@@ -55,11 +55,17 @@ struct ReleaseInfo {
 ///
 /// Returns `Ok(())` on success (updated or already up-to-date).
 pub async fn run_update(force: bool) -> Result<(), UpdateError> {
+    use colored::Colorize;
+
     // Warn if running in a container — the image should be rebuilt instead
     if let Some(env) = detect_container_environment() {
         eprintln!(
-            "  {} Running inside {env}. Consider rebuilding the image instead of self-updating.",
-            colored::Colorize::yellow("Warning:"),
+            "  {} {}",
+            "⚠".yellow().bold(),
+            format!(
+                "Running inside {env}. Consider rebuilding the image instead of self-updating."
+            )
+            .yellow(),
         );
         eprintln!();
     }
@@ -67,8 +73,10 @@ pub async fn run_update(force: bool) -> Result<(), UpdateError> {
     // Warn if running in CI — updates should go through the pipeline
     if detect_ci_environment() {
         eprintln!(
-            "  {} Running in a CI environment. Consider pinning a version in your pipeline instead.",
-            colored::Colorize::yellow("Warning:"),
+            "  {} {}",
+            "⚠".yellow().bold(),
+            "Running in a CI environment. Consider pinning a version in your pipeline instead."
+                .yellow(),
         );
         eprintln!();
     }
@@ -76,16 +84,25 @@ pub async fn run_update(force: bool) -> Result<(), UpdateError> {
     // Check platform support
     validate_platform()?;
 
-    eprintln!("  Checking for updates...");
+    eprintln!("  {} {}", "▸".dimmed(), "Checking for updates...".dimmed());
 
     let release = fetch_latest_release().await?;
 
     if !force && !is_newer(&release.version) {
-        eprintln!("  Already on the latest version ({CURRENT_VERSION}).",);
+        eprintln!(
+            "  {} Already on the latest version ({}).",
+            "✔".green().bold(),
+            CURRENT_VERSION.green().bold(),
+        );
         return Ok(());
     }
 
-    eprintln!("  Updating {CURRENT_VERSION} → {} ...", release.version);
+    eprintln!(
+        "  {} Updating {} → {} ...",
+        "▸".dimmed(),
+        CURRENT_VERSION.dimmed(),
+        release.version.bold(),
+    );
 
     // Determine the current executable path
     let current_exe = std::env::current_exe().map_err(|e| {
@@ -99,27 +116,32 @@ pub async fn run_update(force: bool) -> Result<(), UpdateError> {
     // Download the archive
     let asset_name = format!("nitpik-{TARGET}.tar.gz");
     let asset_url = constants::release_asset_url(&release.tag, TARGET);
-    eprintln!("  Downloading {asset_name}...");
+    eprintln!(
+        "  {} {} {}",
+        "▸".dimmed(),
+        "Downloading".dimmed(),
+        asset_name.dimmed()
+    );
     let archive_bytes = download_bytes(&asset_url).await?;
 
     // Download and verify checksum
     let checksums_url = constants::release_checksums_url(&release.tag);
-    eprintln!("  Verifying checksum...");
+    eprintln!("  {} {}", "▸".dimmed(), "Verifying checksum...".dimmed());
     let checksums_text = download_text(&checksums_url).await?;
     verify_checksum(&archive_bytes, &asset_name, &checksums_text)?;
 
     // Extract the binary from the archive
-    eprintln!("  Extracting...");
+    eprintln!("  {} {}", "▸".dimmed(), "Extracting...".dimmed());
     let new_binary = extract_binary(&archive_bytes)?;
 
     // Atomically replace the current binary
-    eprintln!("  Replacing binary...");
+    eprintln!("  {} {}", "▸".dimmed(), "Replacing binary...".dimmed());
     atomic_replace(&current_exe, &new_binary)?;
 
     eprintln!(
         "  {} Updated to {} successfully.",
-        colored::Colorize::green("✓"),
-        release.version
+        "✔".green().bold(),
+        release.version.green().bold(),
     );
 
     Ok(())
