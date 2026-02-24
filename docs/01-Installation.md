@@ -4,33 +4,35 @@ nitpik is a single binary with no runtime dependencies. Install it once and you'
 
 ---
 
-## Pre-built Binary (Recommended)
+## Install Script (Recommended)
 
-Download the latest release for your platform from the [GitHub Releases page](https://github.com/nsrosenqvist/nitpik/releases/latest) and place it somewhere on your `PATH`.
-
-**Linux (x86_64):**
+The install script detects your platform, downloads the latest release, verifies the SHA256 checksum, and installs the binary:
 
 ```bash
-curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
+curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash
 ```
 
-**macOS (Apple Silicon):**
+**Options:**
 
 ```bash
-curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-aarch64-apple-darwin.tar.gz | tar xz -C /usr/local/bin
+# Install to a custom directory (default: /usr/local/bin)
+curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash -s -- --dir ~/.local/bin
+
+# Install a specific version
+curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash -s -- --version v0.3.0
 ```
 
-**macOS (Intel):**
-
-```bash
-curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-apple-darwin.tar.gz | tar xz -C /usr/local/bin
-```
+You can also set `NITPIK_INSTALL_DIR` and `NITPIK_VERSION` as environment variables.
 
 Verify the installation:
 
 ```bash
 nitpik --version
 ```
+
+## Pre-built Binary (Manual)
+
+Alternatively, download a release archive directly from the [GitHub Releases page](https://github.com/nsrosenqvist/nitpik/releases/latest) and place it on your `PATH`.
 
 ## Build from Source
 

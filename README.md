@@ -25,9 +25,21 @@ AI-powered code reviews for your team. Bring your own model, bring your own API 
 
 ### 1. Install
 
-**Pre-built binary (recommended)**
+**Install script (recommended)**
 
-Download the latest binary for your platform from the [GitHub Releases page](https://github.com/nsrosenqvist/nitpik/releases/latest) and place it on your `PATH`.
+```bash
+curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash
+```
+
+This detects your platform, downloads the latest release, verifies the checksum, and installs the binary to `/usr/local/bin`. Pass options to customize:
+
+```bash
+# Install to a custom directory
+curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash -s -- --dir ~/.local/bin
+
+# Install a specific version
+curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash -s -- --version v0.3.0
+```
 
 Or build from source:
 
@@ -414,7 +426,7 @@ jobs:
           key: nitpik-${{ github.repository }}
           save-always: true
       - name: Install nitpik
-        run: curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
+        run: curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash
       - name: AI Code Review
         run: |
           nitpik review \
