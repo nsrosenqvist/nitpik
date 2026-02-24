@@ -30,6 +30,19 @@ Verify the installation:
 nitpik --version
 ```
 
+## Homebrew (macOS and Linux)
+
+```bash
+brew tap nsrosenqvist/nitpik
+brew install nitpik
+```
+
+Update with:
+
+```bash
+brew update && brew upgrade nitpik
+```
+
 ## Pre-built Binary (Manual)
 
 Alternatively, download a release archive directly from the [GitHub Releases page](https://github.com/nsrosenqvist/nitpik/releases/latest) and place it on your `PATH`.

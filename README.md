@@ -41,6 +41,13 @@ curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh
 curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash -s -- --version v0.3.0
 ```
 
+**Homebrew (macOS and Linux)**
+
+```bash
+brew tap nsrosenqvist/nitpik
+brew install nitpik
+```
+
 Or build from source:
 
 ```bash

@@ -161,6 +161,63 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+  update-homebrew:
+    needs: [release, build]
+    if: needs.build.outputs.is_prerelease != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: nsrosenqvist/homebrew-nitpik
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update formula
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+          FORMULA="Formula/nitpik.rb"
+
+          # Download the checksums file from the release
+          curl -sSfL "https://github.com/nsrosenqvist/nitpik/releases/download/${TAG}/SHA256SUMS" -o SHA256SUMS
+
+          # Extract per-target checksums
+          SHA_MACOS_ARM=$(grep 'aarch64-apple-darwin' SHA256SUMS | awk '{print $1}')
+          SHA_MACOS_X86=$(grep 'x86_64-apple-darwin' SHA256SUMS | awk '{print $1}')
+          SHA_LINUX_ARM=$(grep 'aarch64-unknown-linux-gnu' SHA256SUMS | awk '{print $1}')
+          SHA_LINUX_X86=$(grep 'x86_64-unknown-linux-gnu' SHA256SUMS | awk '{print $1}')
+
+          # Update version
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" "$FORMULA"
+
+          # Replace sha256 values in order of appearance in the formula:
+          # 1. macOS ARM, 2. macOS Intel, 3. Linux ARM, 4. Linux Intel
+          python3 -c "
+          import re
+          shas = ['${SHA_MACOS_ARM}', '${SHA_MACOS_X86}', '${SHA_LINUX_ARM}', '${SHA_LINUX_X86}']
+          with open('${FORMULA}') as f:
+              content = f.read()
+          i = 0
+          def replace_sha(m):
+              global i
+              s = 'sha256 \"' + shas[i] + '\"'
+              i += 1
+              return s
+          content = re.sub(r'sha256 \"[a-fA-F0-9]+\"', replace_sha, content)
+          # Also handle PLACEHOLDER values (first-time setup)
+          content = re.sub(r'sha256 \"PLACEHOLDER\"', replace_sha, content)
+          with open('${FORMULA}', 'w') as f:
+              f.write(content)
+          "
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/nitpik.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "nitpik ${GITHUB_REF_NAME}"
+          git push
+
   update-floating-tags:
     needs: [release, build]
     if: needs.build.outputs.is_prerelease != 'true'
