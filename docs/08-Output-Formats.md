@@ -68,9 +68,17 @@ See [CI/CD Integration — Bitbucket](14-CI-Integration#bitbucket-pipelines) for
 nitpik review --diff-base main --format checkstyle > checkstyle-report.xml
 ```
 
-Outputs findings in the standard [Checkstyle XML format](https://checkstyle.sourceforge.io/), which is widely supported by CI platforms, IDE plugins, and code quality tools. Each finding maps to a `<error>` element with `severity`, `message`, and `source` attributes.
+Outputs findings in the standard [Checkstyle XML format](https://checkstyle.sourceforge.io/). Each finding maps to a `<error>` element with `severity`, `message`, and `source` attributes.
 
-This format is particularly useful for Bitbucket Pipelines when combined with the [Checkstyle Code Insight Report pipe](https://bitbucket.org/product/features/pipelines/integrations?search=checkstyle), which converts checkstyle XML into Code Insights annotations on pull requests — no token or API configuration required.
+Checkstyle XML is a universal interchange format supported across the CI ecosystem. Use it when your platform doesn't have a dedicated nitpik output format, or when you want a file-based approach without API calls:
+
+| Platform | How to consume checkstyle XML |
+|---|---|
+| **Bitbucket Pipelines** | Use the [Checkstyle Code Insight Report pipe](https://bitbucket.org/product/features/pipelines/integrations?search=checkstyle) to display findings as Code Insights annotations |
+| **Jenkins** | The [Warnings Next Generation](https://plugins.jenkins.io/warnings-ng/) plugin natively ingests checkstyle XML |
+| **Any platform** | [reviewdog](https://github.com/reviewdog/reviewdog) accepts checkstyle XML via `-f=checkstyle` and posts annotations to GitHub, GitLab, Bitbucket, Gitea, and more |
+
+> **Tip:** If your CI platform already has a dedicated nitpik format (`github`, `gitlab`, `bitbucket`, `forgejo`), prefer that — it provides tighter integration. Use `checkstyle` for platforms without a dedicated format, for local tooling, or when you want a portable file you can process downstream.
 
 ## Forgejo / Gitea
 

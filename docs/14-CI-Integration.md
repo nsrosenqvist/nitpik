@@ -199,6 +199,20 @@ pipelines:
 
 > **Security:** Add `ANTHROPIC_API_KEY` and `NITPIK_LICENSE_KEY` as **secured** pipeline variables — never hardcode them in `bitbucket-pipelines.yml`.
 
+## Other CI Platforms
+
+For CI platforms without a dedicated output format, use `--format checkstyle` to produce standard [Checkstyle XML](https://checkstyle.sourceforge.io/) and feed it into a tool that your platform supports:
+
+- **Jenkins** — the [Warnings Next Generation](https://plugins.jenkins.io/warnings-ng/) plugin natively ingests checkstyle XML and displays findings in build results.
+- **Any platform** — [reviewdog](https://github.com/reviewdog/reviewdog) accepts checkstyle XML via `-f=checkstyle` and posts annotations to GitHub, GitLab, Bitbucket, Gitea, and more.
+
+```bash
+# Example: pipe nitpik output through reviewdog
+nitpik review --diff-base main --format checkstyle | reviewdog -f=checkstyle -reporter=github-pr-review
+```
+
+See [Output Formats — Checkstyle XML](08-Output-Formats#checkstyle-xml) for details.
+
 ## Woodpecker CI (Forgejo / Gitea / Codeberg)
 
 The `forgejo` format posts findings as inline PR review comments via the Forgejo/Gitea API.

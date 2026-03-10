@@ -190,7 +190,7 @@ nitpik profiles --profile-dir ./agents
 | GitHub annotations | `--format github` | GitHub Actions |
 | GitLab Code Quality | `--format gitlab` | GitLab CI merge request widgets |
 | Bitbucket Code Insights | `--format bitbucket` | Bitbucket Pipelines |
-| Checkstyle XML | `--format checkstyle` | Any CI platform with checkstyle support |
+| Checkstyle XML | `--format checkstyle` | Jenkins, reviewdog, Bitbucket Pipes, and any tool that reads checkstyle |
 | Forgejo/Gitea PR review | `--format forgejo` | Woodpecker CI / Forgejo / Gitea (requires `FORGEJO_TOKEN`) |
 
 nitpik exits non-zero on `error`-severity findings by default — just like standard test runners and linters. Adjust the threshold or disable it:
