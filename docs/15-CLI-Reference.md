@@ -45,7 +45,7 @@ Run a code review.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--format <FORMAT>` | `terminal` | Output format: `terminal`, `json`, `github`, `gitlab`, `bitbucket`, `forgejo`. |
+| `--format <FORMAT>` | `terminal` | Output format: `terminal`, `json`, `github`, `gitlab`, `bitbucket`, `checkstyle`, `forgejo`. |
 | `--fail-on <SEVERITY>` | `error` | Exit non-zero if any finding meets this severity: `error`, `warning`, `info`. |
 | `--no-fail` | `false` | Never exit non-zero on findings, even when `--fail-on` or config is set. |
 | `-q`, `--quiet` | `false` | Suppress banner, progress display, and informational messages. Only findings and errors are shown. |

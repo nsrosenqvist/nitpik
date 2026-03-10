@@ -1,6 +1,6 @@
 # Output Formats
 
-nitpik supports six output formats for different environments — from styled terminal output for local development to structured formats for CI platforms.
+nitpik supports seven output formats for different environments — from styled terminal output for local development to structured formats for CI platforms.
 
 ---
 
@@ -13,6 +13,7 @@ nitpik supports six output formats for different environments — from styled te
 | GitHub annotations | `github` | GitHub Actions |
 | GitLab Code Quality | `gitlab` | GitLab CI merge request widgets |
 | Bitbucket Code Insights | `bitbucket` | Bitbucket Pipelines |
+| Checkstyle XML | `checkstyle` | Any CI platform with checkstyle support |
 | Forgejo/Gitea PR review | `forgejo` | Woodpecker CI, Forgejo, Gitea |
 
 ## Terminal (Default)
@@ -57,9 +58,19 @@ See [CI/CD Integration — GitLab](14-CI-Integration#gitlab-cicd) for full pipel
 nitpik review --diff-base main --format bitbucket
 ```
 
-Posts findings as [Code Insights annotations](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-reports/) via the Bitbucket API. Requires a `BITBUCKET_TOKEN` environment variable with `pullrequest` and `repository:write` scopes.
+Posts findings as [Code Insights annotations](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-reports/) via the Bitbucket API. Inside Bitbucket Pipelines, authentication is handled automatically through the built-in proxy — no token required. Outside Pipelines, set the `BITBUCKET_TOKEN` environment variable with `pullrequest` and `repository:write` scopes.
 
-See [CI/CD Integration — Bitbucket](14-CI-Integration#bitbucket-pipelines) for token setup and pipeline config.
+See [CI/CD Integration — Bitbucket](14-CI-Integration#bitbucket-pipelines) for pipeline config.
+
+## Checkstyle XML
+
+```bash
+nitpik review --diff-base main --format checkstyle > checkstyle-report.xml
+```
+
+Outputs findings in the standard [Checkstyle XML format](https://checkstyle.sourceforge.io/), which is widely supported by CI platforms, IDE plugins, and code quality tools. Each finding maps to a `<error>` element with `severity`, `message`, and `source` attributes.
+
+This format is particularly useful for Bitbucket Pipelines when combined with the [Checkstyle Code Insight Report pipe](https://bitbucket.org/product/features/pipelines/integrations?search=checkstyle), which converts checkstyle XML into Code Insights annotations on pull requests — no token or API configuration required.
 
 ## Forgejo / Gitea
 

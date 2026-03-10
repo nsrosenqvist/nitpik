@@ -65,7 +65,8 @@ If you don't need secret scanning for a particular run, omit `--scan-secrets`.
 **Symptom:** "forbidden" or "insufficient permissions" when using `--format bitbucket` or `--format forgejo`.
 
 **Bitbucket:**
-- The `BITBUCKET_TOKEN` needs `pullrequest` and `repository:write` scopes.
+- Inside Bitbucket Pipelines, no token is needed — authentication is automatic.
+- Outside Pipelines, the `BITBUCKET_TOKEN` needs `pullrequest` and `repository:write` scopes.
 - Create a Repository Access Token under **Repository settings → Access tokens**.
 
 **Forgejo/Gitea:**

@@ -1,6 +1,7 @@
-//! Output renderers: terminal, JSON, GitHub Actions, GitLab Code Quality, Bitbucket, Forgejo.
+//! Output renderers: terminal, JSON, GitHub Actions, GitLab Code Quality, Bitbucket, Checkstyle, Forgejo.
 
 pub mod bitbucket;
+pub mod checkstyle;
 pub mod forgejo;
 pub mod github;
 pub mod gitlab;

@@ -140,15 +140,7 @@ code-review:
 
 ## Bitbucket Pipelines
 
-The `bitbucket` format posts findings as Code Insights annotations via the Bitbucket API.
-
-### Token Setup
-
-Create a **Repository Access Token** (or App Password) with these scopes:
-- `pullrequest` — read PR metadata
-- `repository:write` — post Code Insights annotations
-
-Add it as a **secured** pipeline variable named `BITBUCKET_TOKEN` under **Repository settings → Access tokens**.
+The `bitbucket` format posts findings as Code Insights annotations via the Bitbucket API. Inside Bitbucket Pipelines, authentication is handled automatically — no token required.
 
 ### Pipeline Config
 
@@ -176,10 +168,36 @@ pipelines:
             NITPIK_PROVIDER: anthropic
             ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
             NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
-            BITBUCKET_TOKEN: $BITBUCKET_TOKEN
 ```
 
-> **Security:** Add `ANTHROPIC_API_KEY`, `NITPIK_LICENSE_KEY`, and `BITBUCKET_TOKEN` as **secured** pipeline variables — never hardcode them in `bitbucket-pipelines.yml`.
+> **Note:** Inside Bitbucket Pipelines, nitpik uses the built-in authentication proxy at `localhost:29418` to post Code Insights — no `BITBUCKET_TOKEN` needed. If you run nitpik outside Pipelines (e.g. a self-hosted runner), set `BITBUCKET_TOKEN` with `pullrequest` and `repository:write` scopes.
+
+### Alternative: Checkstyle Format
+
+If you prefer a file-based approach without any API calls, use `--format checkstyle` and pipe the output to the [Checkstyle Code Insight Report pipe](https://bitbucket.org/product/features/pipelines/integrations?search=checkstyle):
+
+```yaml
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          image: ghcr.io/nsrosenqvist/nitpik:latest
+          script:
+            - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
+            - nitpik review
+                --diff-base "origin/$BITBUCKET_PR_DESTINATION_BRANCH"
+                --profile security,backend
+                --format checkstyle
+                --fail-on error
+                --scan-secrets
+                > checkstyle-report.xml
+          variables:
+            NITPIK_PROVIDER: anthropic
+            ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+            NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
+```
+
+> **Security:** Add `ANTHROPIC_API_KEY` and `NITPIK_LICENSE_KEY` as **secured** pipeline variables — never hardcode them in `bitbucket-pipelines.yml`.
 
 ## Woodpecker CI (Forgejo / Gitea / Codeberg)
 

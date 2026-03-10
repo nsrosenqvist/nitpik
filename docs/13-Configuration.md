@@ -131,7 +131,7 @@ nitpik checks for a provider-specific key first, then falls back to `NITPIK_API_
 
 | Variable | Purpose |
 |---|---|
-| `BITBUCKET_TOKEN` | Bitbucket access token for `--format bitbucket` |
+| `BITBUCKET_TOKEN` | Bitbucket access token for `--format bitbucket` (optional inside Bitbucket Pipelines) |
 | `FORGEJO_TOKEN` | Forgejo/Gitea API token for `--format forgejo` |
 
 ### Other

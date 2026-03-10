@@ -189,7 +189,8 @@ nitpik profiles --profile-dir ./agents
 | JSON | `--format json` | Custom tooling / dashboards |
 | GitHub annotations | `--format github` | GitHub Actions |
 | GitLab Code Quality | `--format gitlab` | GitLab CI merge request widgets |
-| Bitbucket Code Insights | `--format bitbucket` | Bitbucket Pipelines (requires `BITBUCKET_TOKEN`) |
+| Bitbucket Code Insights | `--format bitbucket` | Bitbucket Pipelines |
+| Checkstyle XML | `--format checkstyle` | Any CI platform with checkstyle support |
 | Forgejo/Gitea PR review | `--format forgejo` | Woodpecker CI / Forgejo / Gitea (requires `FORGEJO_TOKEN`) |
 
 nitpik exits non-zero on `error`-severity findings by default — just like standard test runners and linters. Adjust the threshold or disable it:
@@ -256,7 +257,7 @@ enabled = false
 | `ANTHROPIC_API_KEY` | Anthropic-specific key |
 | `OPENAI_API_KEY` | OpenAI-specific key (also used for openai-compatible) |
 | `GEMINI_API_KEY` | Gemini-specific key |
-| `BITBUCKET_TOKEN` | Bitbucket access token (required for `--format bitbucket`) |
+| `BITBUCKET_TOKEN` | Bitbucket access token (optional inside Bitbucket Pipelines) |
 | `FORGEJO_TOKEN` | Forgejo/Gitea API token (required for `--format forgejo`) |
 
 nitpik tries to use the provider specific environment variable if it exists, and falls back to `NITPIK_API_KEY`.
@@ -488,9 +489,7 @@ Findings appear in the merge request Code Quality widget.
 
 ### Bitbucket Pipelines
 
-The `bitbucket` format posts findings as Code Insights annotations via the Bitbucket API. This requires a **Repository Access Token** (or App Password) with the `pullrequest` and `repository:write` scopes.
-
-Create one under **Repository settings → Access tokens** and add it as a [pipeline variable](https://support.atlassian.com/bitbucket-cloud/docs/variables-and-secrets/) named `BITBUCKET_TOKEN`.
+The `bitbucket` format posts findings as Code Insights annotations via the Bitbucket API. Inside Bitbucket Pipelines, authentication is handled automatically through the built-in proxy — no token required.
 
 ```yaml
 definitions:
@@ -516,10 +515,11 @@ pipelines:
             NITPIK_PROVIDER: anthropic
             ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
             NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
-            BITBUCKET_TOKEN: $BITBUCKET_TOKEN
 ```
 
-> **Security:** Add `ANTHROPIC_API_KEY`, `NITPIK_LICENSE_KEY`, and `BITBUCKET_TOKEN` as **secured** pipeline variables — never hardcode them in `bitbucket-pipelines.yml`.
+> **Note:** Outside Bitbucket Pipelines (e.g. a self-hosted runner), set `BITBUCKET_TOKEN` with `pullrequest` and `repository:write` scopes.
+
+> **Security:** Add `ANTHROPIC_API_KEY` and `NITPIK_LICENSE_KEY` as **secured** pipeline variables — never hardcode them in `bitbucket-pipelines.yml`.
 
 ### Woodpecker CI (Forgejo / Gitea / Codeberg)
 

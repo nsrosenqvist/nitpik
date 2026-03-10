@@ -6,6 +6,7 @@
 use nitpik::models::finding::{Finding, Severity};
 use nitpik::output::OutputRenderer;
 use nitpik::output::bitbucket::BitbucketRenderer;
+use nitpik::output::checkstyle::CheckstyleRenderer;
 use nitpik::output::forgejo::ForgejoRenderer;
 use nitpik::output::github::GithubRenderer;
 use nitpik::output::gitlab::GitlabRenderer;
@@ -113,6 +114,42 @@ fn bitbucket_renderer_empty_findings() {
     let output = renderer.render(&[]);
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert_eq!(parsed["annotations"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn snapshot_checkstyle_renderer() {
+    let renderer = CheckstyleRenderer;
+    let output = renderer.render(&test_findings());
+
+    let expected =
+        std::fs::read_to_string("tests/fixtures/expected_checkstyle_output.xml").unwrap();
+
+    assert_eq!(
+        output, expected,
+        "Checkstyle renderer output does not match snapshot.\nActual:\n{output}"
+    );
+}
+
+#[test]
+fn checkstyle_renderer_empty_findings() {
+    let renderer = CheckstyleRenderer;
+    let output = renderer.render(&[]);
+    assert!(output.contains("<checkstyle"));
+    assert!(output.contains("</checkstyle>"));
+    assert!(!output.contains("<file"));
+    assert!(!output.contains("<error"));
+}
+
+/// Generate the Checkstyle fixture file from current renderer output.
+///
+/// Run with: `cargo test generate_checkstyle_fixture -- --ignored`
+#[test]
+#[ignore]
+fn generate_checkstyle_fixture() {
+    let renderer = CheckstyleRenderer;
+    let output = renderer.render(&test_findings());
+    std::fs::write("tests/fixtures/expected_checkstyle_output.xml", &output).unwrap();
+    eprintln!("Wrote tests/fixtures/expected_checkstyle_output.xml");
 }
 
 #[test]

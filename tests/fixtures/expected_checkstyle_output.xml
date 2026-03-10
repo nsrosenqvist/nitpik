@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="4.3">
+  <file name="src/main.rs">
+    <error line="42" severity="error" message="Using .unwrap() can cause a panic at runtime. Use proper error handling with ? or .expect().
+
+Suggestion: Replace .unwrap() with .context(&quot;description&quot;)? using anyhow" source="nitpik.backend"/>
+    <error line="87" severity="warning" message="This error propagation loses context about what operation failed." source="nitpik.backend"/>
+  </file>
+  <file name="src/utils.rs">
+    <error line="15" severity="info" message="This block of logic is repeated in multiple places and could be extracted into a shared helper function.
+
+Suggestion: Create a `validate_input()` function in utils.rs" source="nitpik.architect"/>
+  </file>
+</checkstyle>

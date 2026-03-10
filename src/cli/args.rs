@@ -223,6 +223,7 @@ pub enum OutputFormat {
     Github,
     Gitlab,
     Bitbucket,
+    Checkstyle,
     Forgejo,
 }
 
@@ -237,6 +238,9 @@ impl OutputFormat {
             OutputFormat::Gitlab => nitpik::output::gitlab::GitlabRenderer.render(findings),
             OutputFormat::Bitbucket => {
                 nitpik::output::bitbucket::BitbucketRenderer.render(findings)
+            }
+            OutputFormat::Checkstyle => {
+                nitpik::output::checkstyle::CheckstyleRenderer.render(findings)
             }
             OutputFormat::Forgejo => nitpik::output::forgejo::ForgejoRenderer.render(findings),
         }
@@ -470,6 +474,7 @@ mod tests {
         let _ = OutputFormat::Json.render(&empty);
         let _ = OutputFormat::Github.render(&empty);
         let _ = OutputFormat::Bitbucket.render(&empty);
+        let _ = OutputFormat::Checkstyle.render(&empty);
         let _ = OutputFormat::Forgejo.render(&empty);
     }
 

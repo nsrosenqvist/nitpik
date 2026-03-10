@@ -57,8 +57,13 @@ impl OutputRenderer for BitbucketRenderer {
 
 /// Post findings to the Bitbucket Code Insights API.
 ///
-/// Requires these env vars: `BITBUCKET_WORKSPACE`, `BITBUCKET_REPO_SLUG`,
-/// `BITBUCKET_COMMIT`, `BITBUCKET_TOKEN`.
+/// When running inside Bitbucket Pipelines (detected via `BITBUCKET_BUILD_NUMBER`),
+/// requests are routed through the local authentication proxy at `localhost:29418`,
+/// which injects credentials automatically — no `BITBUCKET_TOKEN` required.
+///
+/// Outside Pipelines, `BITBUCKET_TOKEN` is required for authentication.
+///
+/// Always requires: `BITBUCKET_WORKSPACE`, `BITBUCKET_REPO_SLUG`, `BITBUCKET_COMMIT`.
 ///
 /// `fail_on` controls the report result: if any finding meets or exceeds
 /// the threshold, the report is marked `FAILED`. When `None`, only errors
@@ -77,13 +82,36 @@ pub async fn post_to_bitbucket(
     let commit = env
         .var("BITBUCKET_COMMIT")
         .map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_COMMIT".into()))?;
-    let token = env
-        .var("BITBUCKET_TOKEN")
-        .map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_TOKEN".into()))?;
 
-    let client = reqwest::Client::new();
+    // Inside Bitbucket Pipelines the local proxy at localhost:29418 injects
+    // auth headers automatically, so no token is needed. Outside Pipelines
+    // we fall back to explicit bearer-token authentication.
+    let in_pipelines = env.is_set("BITBUCKET_BUILD_NUMBER");
+    let token = if in_pipelines {
+        None
+    } else {
+        Some(
+            env.var("BITBUCKET_TOKEN")
+                .map_err(|_| BitbucketError::MissingEnvVar("BITBUCKET_TOKEN".into()))?,
+        )
+    };
+
+    let client = if in_pipelines {
+        reqwest::Client::builder()
+            .proxy(
+                reqwest::Proxy::all("http://localhost:29418")
+                    .map_err(|e| BitbucketError::ApiError(format!("proxy config error: {e}")))?,
+            )
+            .build()
+            .map_err(|e| BitbucketError::ApiError(format!("HTTP client error: {e}")))?
+    } else {
+        reqwest::Client::new()
+    };
+
+    // The proxy expects plain http:// — it handles TLS to the upstream API.
+    let scheme = if in_pipelines { "http" } else { "https" };
     let base_url = format!(
-        "https://api.bitbucket.org/2.0/repositories/{workspace}/{repo_slug}/commit/{commit}"
+        "{scheme}://api.bitbucket.org/2.0/repositories/{workspace}/{repo_slug}/commit/{commit}"
     );
     let report_id = format!("{}-review", crate::constants::APP_NAME);
 
@@ -104,10 +132,13 @@ pub async fn post_to_bitbucket(
         "result": result,
     });
 
-    let report_response = client
+    let mut report_request = client
         .put(format!("{base_url}/reports/{report_id}"))
-        .bearer_auth(&token)
-        .json(&report_body)
+        .json(&report_body);
+    if let Some(ref t) = token {
+        report_request = report_request.bearer_auth(t);
+    }
+    let report_response = report_request
         .send()
         .await
         .map_err(|e| BitbucketError::ApiError(e.to_string()))?;
@@ -150,10 +181,13 @@ pub async fn post_to_bitbucket(
         .collect();
 
     for chunk in annotations.chunks(100) {
-        let ann_response = client
+        let mut ann_request = client
             .post(format!("{base_url}/reports/{report_id}/annotations"))
-            .bearer_auth(&token)
-            .json(&chunk.to_vec())
+            .json(&chunk.to_vec());
+        if let Some(ref t) = token {
+            ann_request = ann_request.bearer_auth(t);
+        }
+        let ann_response = ann_request
             .send()
             .await
             .map_err(|e| BitbucketError::ApiError(e.to_string()))?;
@@ -315,7 +349,7 @@ mod tests {
             "expected BITBUCKET_COMMIT error"
         );
 
-        // Missing BITBUCKET_TOKEN
+        // Missing BITBUCKET_TOKEN (outside Pipelines — no BITBUCKET_BUILD_NUMBER)
         let env = Env::mock([
             ("BITBUCKET_WORKSPACE", "test-ws"),
             ("BITBUCKET_REPO_SLUG", "test-repo"),
@@ -326,6 +360,27 @@ mod tests {
         assert!(
             result.unwrap_err().to_string().contains("BITBUCKET_TOKEN"),
             "expected BITBUCKET_TOKEN error"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_skips_token_in_pipelines() {
+        // With BITBUCKET_BUILD_NUMBER set, BITBUCKET_TOKEN should NOT be required.
+        // The call will fail at the HTTP level (no real server), but it should
+        // not fail with a MissingEnvVar error for BITBUCKET_TOKEN.
+        let env = Env::mock([
+            ("BITBUCKET_WORKSPACE", "test-ws"),
+            ("BITBUCKET_REPO_SLUG", "test-repo"),
+            ("BITBUCKET_COMMIT", "abc123"),
+            ("BITBUCKET_BUILD_NUMBER", "42"),
+        ]);
+        let result = post_to_bitbucket(&sample_findings(), None, &env).await;
+        // Should fail with an API/connection error, not a missing env var error
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.contains("missing environment variable"),
+            "should not require BITBUCKET_TOKEN in Pipelines, got: {err_msg}"
         );
     }
 }
