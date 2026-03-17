@@ -20,9 +20,9 @@ pub struct BaselineContext {
 /// The complete context for a single review request.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct ReviewContext {
+pub struct ReviewContext<'a> {
     /// The file diffs to review.
-    pub diffs: Vec<FileDiff>,
+    pub diffs: Vec<FileDiff<'a>>,
     /// Pre-assembled baseline context.
     pub baseline: BaselineContext,
     /// The root path of the repository.

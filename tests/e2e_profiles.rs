@@ -29,11 +29,58 @@ use nitpik::cache::CacheEngine;
 use nitpik::config::Config;
 use nitpik::context;
 use nitpik::diff;
+use nitpik::models::diff::FileDiff;
 use nitpik::models::finding::{Finding, Severity};
 use nitpik::models::{InputMode, ReviewContext};
 use nitpik::orchestrator::ReviewOrchestrator;
 use nitpik::providers::ReviewProvider;
 use nitpik::providers::rig::RigProvider;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Get diffs for the given input mode, producing owned FileDiffs.
+async fn get_diffs_owned(input: &InputMode, repo_root: &Path) -> Vec<FileDiff<'static>> {
+    let source = diff::get_diff_source(input, repo_root)
+        .await
+        .expect("failed to get diffs");
+    match source {
+        diff::DiffSource::Raw(content) => diff::parser::parse_unified_diff(&content)
+            .into_iter()
+            .map(|d| FileDiff {
+                old_path: d.old_path,
+                new_path: d.new_path,
+                is_new: d.is_new,
+                is_deleted: d.is_deleted,
+                is_rename: d.is_rename,
+                is_binary: d.is_binary,
+                hunks: d
+                    .hunks
+                    .into_iter()
+                    .map(|h| nitpik::models::diff::Hunk {
+                        old_start: h.old_start,
+                        old_count: h.old_count,
+                        new_start: h.new_start,
+                        new_count: h.new_count,
+                        header: h.header,
+                        lines: h
+                            .lines
+                            .into_iter()
+                            .map(|l| nitpik::models::diff::DiffLine {
+                                line_type: l.line_type,
+                                content: std::borrow::Cow::Owned(l.content.into_owned()),
+                                old_line_no: l.old_line_no,
+                                new_line_no: l.new_line_no,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        diff::DiffSource::Scanned(diffs) => diffs,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -157,9 +204,7 @@ fn real_config() -> Config {
 async fn run_review(repo_path: &Path, profile_names: &[&str], config: &Config) -> Vec<Finding> {
     // Get diffs (unstaged changes vs HEAD)
     let input = InputMode::GitBase("HEAD".to_string());
-    let diffs = diff::get_diffs(&input, repo_path)
-        .await
-        .expect("failed to get diffs");
+    let diffs = get_diffs_owned(&input, repo_path).await;
 
     assert!(
         !diffs.is_empty(),
@@ -459,12 +504,12 @@ async fn e2e_output_formats() {
     assert!(!findings.is_empty(), "need findings to test rendering");
 
     // Verify all output formats can render the real findings without panicking
-    use nitpik::output::OutputRenderer;
+    use nitpik::output::OutputFormatter;
 
-    let terminal = nitpik::output::terminal::TerminalRenderer.render(&findings);
+    let terminal = nitpik::output::terminal::TerminalFormatter.format(&findings);
     assert!(!terminal.is_empty(), "terminal output should not be empty");
 
-    let json_out = nitpik::output::json::JsonRenderer.render(&findings);
+    let json_out = nitpik::output::json::JsonFormatter.format(&findings);
     let parsed: serde_json::Value =
         serde_json::from_str(&json_out).expect("JSON output should be valid JSON");
     assert!(
@@ -472,10 +517,10 @@ async fn e2e_output_formats() {
         "JSON output should contain findings"
     );
 
-    let github = nitpik::output::github::GithubRenderer.render(&findings);
+    let github = nitpik::output::github::GithubFormatter.format(&findings);
     assert!(!github.is_empty(), "github output should not be empty");
 
-    let bitbucket = nitpik::output::bitbucket::BitbucketRenderer.render(&findings);
+    let bitbucket = nitpik::output::bitbucket::BitbucketFormatter.format(&findings);
     let bb_parsed: serde_json::Value =
         serde_json::from_str(&bitbucket).expect("Bitbucket output should be valid JSON");
     assert!(
@@ -522,9 +567,7 @@ async fn e2e_custom_profile() {
 
     // Run the review with the custom profile
     let input = InputMode::GitBase("HEAD".to_string());
-    let diffs = diff::get_diffs(&input, &repo)
-        .await
-        .expect("failed to get diffs");
+    let diffs = get_diffs_owned(&input, &repo).await;
     assert!(!diffs.is_empty());
 
     let baseline =
@@ -643,9 +686,7 @@ async fn e2e_custom_tool_agentic() {
 
     // --- Run the review in agentic mode ---
     let input = InputMode::GitBase("HEAD".to_string());
-    let diffs = diff::get_diffs(&input, &repo)
-        .await
-        .expect("failed to get diffs");
+    let diffs = get_diffs_owned(&input, &repo).await;
     assert!(!diffs.is_empty(), "changeset should produce diffs");
 
     let baseline =
@@ -860,9 +901,7 @@ async fn e2e_cache_prior_findings() {
     eprintln!("  stage 1: reviewing changeset v1 (division by zero + unwrap)...");
 
     let input = InputMode::GitBase("HEAD".to_string());
-    let diffs_v1 = diff::get_diffs(&input, &repo)
-        .await
-        .expect("failed to get v1 diffs");
+    let diffs_v1 = get_diffs_owned(&input, &repo).await;
     assert!(!diffs_v1.is_empty(), "v1 should produce diffs");
 
     let profiles: Vec<String> = vec!["backend".to_string()];
@@ -916,9 +955,7 @@ async fn e2e_cache_prior_findings() {
     eprintln!("  stage 2: advancing to changeset v2 (partial fix)...");
     advance_cache_prior_repo(&repo).await;
 
-    let diffs_v2 = diff::get_diffs(&input, &repo)
-        .await
-        .expect("failed to get v2 diffs");
+    let diffs_v2 = get_diffs_owned(&input, &repo).await;
     assert!(!diffs_v2.is_empty(), "v2 should produce diffs");
 
     let baseline_v2 =
@@ -947,8 +984,10 @@ async fn e2e_cache_prior_findings() {
     // We don't know the exact prompt, but we can use a sentinel key.
     // Actually, we can just seed a sidecar with any old key that has the v1 findings.
     let v1_key = format!("e2e-cache-prior-v1-{}", std::process::id());
-    real_store.put(&v1_key, findings_v1);
-    real_store.put_sidecar("calculator.rs", "backend", &model, &v1_key, "");
+    real_store.put(&v1_key, findings_v1).await;
+    real_store
+        .put_sidecar("calculator.rs", "backend", &model, &v1_key, "")
+        .await;
 
     // Now run the review with cache enabled — it will miss (different prompt/key)
     // and should pick up prior findings from the sidecar.
@@ -1001,7 +1040,7 @@ async fn e2e_cache_prior_findings() {
     eprintln!("  ✓ cache prior findings e2e test passed");
 
     // Clean up seeded entries
-    let _ = real_store.clear();
+    let _ = real_store.clear().await;
 }
 
 #[tokio::test]
@@ -1036,9 +1075,7 @@ async fn e2e_agentic_mode() {
 
     // --- run_review variant with agentic=true ---
     let input = InputMode::GitBase("HEAD".to_string());
-    let diffs = diff::get_diffs(&input, &repo)
-        .await
-        .expect("failed to get diffs");
+    let diffs = get_diffs_owned(&input, &repo).await;
     assert!(!diffs.is_empty(), "changeset should produce diffs");
 
     let profiles: Vec<String> = vec!["backend".to_string()];

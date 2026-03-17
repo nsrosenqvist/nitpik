@@ -1,5 +1,11 @@
 //! Self-update logic for the nitpik binary.
 //!
+//! # Bounded Context: Self-Update
+//!
+//! Owns release checking, binary download, checksum verification,
+//! archive extraction, and atomic replacement. Isolated from all
+//! review logic — only called from the `update` CLI subcommand.
+//!
 //! Downloads the latest release from GitHub, verifies its SHA256 checksum,
 //! extracts the binary from the `.tar.gz` archive, and atomically replaces
 //! the currently running executable.
@@ -12,7 +18,7 @@ use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::constants::{self, TARGET, USER_AGENT, VERSION as CURRENT_VERSION};
+use crate::constants::{self, TARGET, VERSION as CURRENT_VERSION};
 
 /// Errors that can occur during self-update.
 #[derive(Debug, Error)]
@@ -71,7 +77,7 @@ pub async fn run_update(force: bool) -> Result<(), UpdateError> {
     }
 
     // Warn if running in CI — updates should go through the pipeline
-    if detect_ci_environment() {
+    if crate::ci::is_ci() {
         eprintln!(
             "  {} {}",
             "⚠".yellow().bold(),
@@ -149,10 +155,10 @@ pub async fn run_update(force: bool) -> Result<(), UpdateError> {
 
 /// Query the GitHub releases API for the latest release tag.
 async fn fetch_latest_release() -> Result<ReleaseInfo, UpdateError> {
-    let client = reqwest::Client::new();
+    let client = crate::http::build_client()
+        .map_err(|e| UpdateError::ApiError(format!("failed to build HTTP client: {e}")))?;
     let resp = client
         .get(constants::GITHUB_RELEASES_LATEST_API)
-        .header("User-Agent", USER_AGENT)
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
@@ -182,33 +188,23 @@ async fn fetch_latest_release() -> Result<ReleaseInfo, UpdateError> {
 
 /// Compare a remote version string against the current version.
 ///
-/// Uses simple tuple comparison of (major, minor, patch) components.
 /// Returns `true` if `remote` is strictly newer than `CURRENT_VERSION`.
 fn is_newer(remote: &str) -> bool {
-    let parse = |v: &str| -> Option<(u64, u64, u64)> {
-        let parts: Vec<&str> = v.split('.').collect();
-        if parts.len() != 3 {
-            return None;
-        }
-        Some((
-            parts[0].parse().ok()?,
-            parts[1].parse().ok()?,
-            parts[2].parse().ok()?,
-        ))
-    };
-
-    match (parse(CURRENT_VERSION), parse(remote)) {
-        (Some(current), Some(remote)) => remote > current,
+    match (
+        semver::Version::parse(CURRENT_VERSION),
+        semver::Version::parse(remote),
+    ) {
+        (Ok(current), Ok(remote)) => remote > current,
         _ => remote != CURRENT_VERSION,
     }
 }
 
 /// Download a URL and return the raw bytes.
 async fn download_bytes(url: &str) -> Result<Vec<u8>, UpdateError> {
-    let client = reqwest::Client::new();
+    let client = crate::http::build_client()
+        .map_err(|e| UpdateError::DownloadError(format!("failed to build HTTP client: {e}")))?;
     let resp = client
         .get(url)
-        .header("User-Agent", USER_AGENT)
         .send()
         .await
         .map_err(|e| UpdateError::DownloadError(format!("{url}: {e}")))?;
@@ -435,31 +431,6 @@ fn detect_container_environment() -> Option<&'static str> {
     None
 }
 
-/// Detect whether the process is running in a CI environment.
-fn detect_ci_environment() -> bool {
-    // Generic CI indicator (set by GitHub Actions, GitLab CI, Travis, etc.)
-    if std::env::var("CI").is_ok() {
-        return true;
-    }
-
-    // Provider-specific indicators
-    let ci_vars = [
-        "GITHUB_ACTIONS",
-        "GITLAB_CI",
-        "CIRCLECI",
-        "TRAVIS",
-        "JENKINS_URL",
-        "BUILDKITE",
-        "BITBUCKET_BUILD_NUMBER",
-        "TF_BUILD",     // Azure Pipelines
-        "CODEBUILD_CI", // AWS CodeBuild
-        "DRONE",
-        "WOODPECKER_CI",
-    ];
-
-    ci_vars.iter().any(|var| std::env::var(var).is_ok())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,7 +556,7 @@ mod tests {
     #[test]
     fn detect_ci_does_not_panic() {
         // Just verify the function runs without panicking regardless of env state.
-        let _ = detect_ci_environment();
+        let _ = crate::ci::is_ci();
     }
 
     #[test]

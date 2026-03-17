@@ -1,5 +1,11 @@
 //! Environment variable abstraction for testability.
 //!
+//! # Bounded Context: Environment Access
+//!
+//! Provides a swappable `Env` handle that isolates env-var reads
+//! behind a trait-like interface, enabling deterministic unit tests
+//! without global state mutation.
+//!
 //! Production code uses [`Env::real()`] which delegates to [`std::env::var`].
 //! Tests use [`Env::mock()`] backed by a `HashMap`, eliminating the need for
 //! `unsafe` calls to [`std::env::set_var`] / [`std::env::remove_var`].

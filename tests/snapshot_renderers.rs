@@ -4,13 +4,13 @@
 //! and compares the output against expected fixture files.
 
 use nitpik::models::finding::{Finding, Severity};
-use nitpik::output::OutputRenderer;
-use nitpik::output::bitbucket::BitbucketRenderer;
-use nitpik::output::checkstyle::CheckstyleRenderer;
-use nitpik::output::forgejo::ForgejoRenderer;
-use nitpik::output::github::GithubRenderer;
-use nitpik::output::gitlab::GitlabRenderer;
-use nitpik::output::json::JsonRenderer;
+use nitpik::output::OutputFormatter;
+use nitpik::output::bitbucket::BitbucketFormatter;
+use nitpik::output::checkstyle::CheckstyleFormatter;
+use nitpik::output::forgejo::ForgejoFormatter;
+use nitpik::output::github::GithubFormatter;
+use nitpik::output::gitlab::GitlabFormatter;
+use nitpik::output::json::JsonFormatter;
 
 /// Standard test findings used across all snapshot tests.
 fn test_findings() -> Vec<Finding> {
@@ -50,8 +50,8 @@ fn test_findings() -> Vec<Finding> {
 
 #[test]
 fn snapshot_json_renderer() {
-    let renderer = JsonRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = JsonFormatter;
+    let output = renderer.format(&test_findings());
 
     let actual: serde_json::Value = serde_json::from_str(&output).unwrap();
     let expected_str = std::fs::read_to_string("tests/fixtures/expected_json_output.json").unwrap();
@@ -65,8 +65,8 @@ fn snapshot_json_renderer() {
 
 #[test]
 fn snapshot_github_renderer() {
-    let renderer = GithubRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = GithubFormatter;
+    let output = renderer.format(&test_findings());
 
     let expected = std::fs::read_to_string("tests/fixtures/expected_github_output.txt").unwrap();
 
@@ -78,8 +78,8 @@ fn snapshot_github_renderer() {
 
 #[test]
 fn snapshot_bitbucket_renderer() {
-    let renderer = BitbucketRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = BitbucketFormatter;
+    let output = renderer.format(&test_findings());
 
     let actual: serde_json::Value = serde_json::from_str(&output).unwrap();
     let expected_str =
@@ -94,8 +94,8 @@ fn snapshot_bitbucket_renderer() {
 
 #[test]
 fn json_renderer_empty_findings() {
-    let renderer = JsonRenderer;
-    let output = renderer.render(&[]);
+    let renderer = JsonFormatter;
+    let output = renderer.format(&[]);
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert_eq!(parsed["findings"].as_array().unwrap().len(), 0);
     assert_eq!(parsed["summary"]["total"], 0);
@@ -103,23 +103,23 @@ fn json_renderer_empty_findings() {
 
 #[test]
 fn github_renderer_empty_findings() {
-    let renderer = GithubRenderer;
-    let output = renderer.render(&[]);
+    let renderer = GithubFormatter;
+    let output = renderer.format(&[]);
     assert_eq!(output, "");
 }
 
 #[test]
 fn bitbucket_renderer_empty_findings() {
-    let renderer = BitbucketRenderer;
-    let output = renderer.render(&[]);
+    let renderer = BitbucketFormatter;
+    let output = renderer.format(&[]);
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert_eq!(parsed["annotations"].as_array().unwrap().len(), 0);
 }
 
 #[test]
 fn snapshot_checkstyle_renderer() {
-    let renderer = CheckstyleRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = CheckstyleFormatter;
+    let output = renderer.format(&test_findings());
 
     let expected =
         std::fs::read_to_string("tests/fixtures/expected_checkstyle_output.xml").unwrap();
@@ -132,8 +132,8 @@ fn snapshot_checkstyle_renderer() {
 
 #[test]
 fn checkstyle_renderer_empty_findings() {
-    let renderer = CheckstyleRenderer;
-    let output = renderer.render(&[]);
+    let renderer = CheckstyleFormatter;
+    let output = renderer.format(&[]);
     assert!(output.contains("<checkstyle"));
     assert!(output.contains("</checkstyle>"));
     assert!(!output.contains("<file"));
@@ -146,16 +146,16 @@ fn checkstyle_renderer_empty_findings() {
 #[test]
 #[ignore]
 fn generate_checkstyle_fixture() {
-    let renderer = CheckstyleRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = CheckstyleFormatter;
+    let output = renderer.format(&test_findings());
     std::fs::write("tests/fixtures/expected_checkstyle_output.xml", &output).unwrap();
     eprintln!("Wrote tests/fixtures/expected_checkstyle_output.xml");
 }
 
 #[test]
 fn snapshot_gitlab_renderer() {
-    let renderer = GitlabRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = GitlabFormatter;
+    let output = renderer.format(&test_findings());
 
     let actual: serde_json::Value = serde_json::from_str(&output).unwrap();
     let expected_str =
@@ -170,8 +170,8 @@ fn snapshot_gitlab_renderer() {
 
 #[test]
 fn gitlab_renderer_empty_findings() {
-    let renderer = GitlabRenderer;
-    let output = renderer.render(&[]);
+    let renderer = GitlabFormatter;
+    let output = renderer.format(&[]);
     let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
     assert!(parsed.is_empty());
 }
@@ -182,8 +182,8 @@ fn gitlab_renderer_empty_findings() {
 #[test]
 #[ignore]
 fn generate_gitlab_fixture() {
-    let renderer = GitlabRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = GitlabFormatter;
+    let output = renderer.format(&test_findings());
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     let pretty = serde_json::to_string_pretty(&parsed).unwrap();
     std::fs::write("tests/fixtures/expected_gitlab_output.json", pretty + "\n").unwrap();
@@ -192,8 +192,8 @@ fn generate_gitlab_fixture() {
 
 #[test]
 fn snapshot_forgejo_renderer() {
-    let renderer = ForgejoRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = ForgejoFormatter;
+    let output = renderer.format(&test_findings());
 
     let actual: serde_json::Value = serde_json::from_str(&output).unwrap();
     let expected_str =
@@ -208,8 +208,8 @@ fn snapshot_forgejo_renderer() {
 
 #[test]
 fn forgejo_renderer_empty_findings() {
-    let renderer = ForgejoRenderer;
-    let output = renderer.render(&[]);
+    let renderer = ForgejoFormatter;
+    let output = renderer.format(&[]);
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert_eq!(parsed["event"], "COMMENT");
     assert!(parsed["body"].as_str().unwrap().contains("0 findings"));
@@ -222,8 +222,8 @@ fn forgejo_renderer_empty_findings() {
 #[test]
 #[ignore]
 fn generate_forgejo_fixture() {
-    let renderer = ForgejoRenderer;
-    let output = renderer.render(&test_findings());
+    let renderer = ForgejoFormatter;
+    let output = renderer.format(&test_findings());
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     let pretty = serde_json::to_string_pretty(&parsed).unwrap();
     std::fs::write("tests/fixtures/expected_forgejo_output.json", pretty + "\n").unwrap();

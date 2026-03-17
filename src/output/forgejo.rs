@@ -1,4 +1,4 @@
-//! Forgejo/Gitea Pull Request Review API renderer.
+//! Forgejo/Gitea Pull Request Review API formatter and publisher.
 //!
 //! Posts findings as inline review comments on a pull request via the
 //! Forgejo (or Gitea) API. The stdout output is a JSON payload matching
@@ -10,8 +10,8 @@
 //! The user only needs to supply `FORGEJO_TOKEN`.
 
 use crate::env::Env;
-use crate::models::finding::{Finding, Severity};
-use crate::output::OutputRenderer;
+use crate::models::finding::Finding;
+use crate::output::{OutputFormatter, OutputPublisher};
 use thiserror::Error;
 
 /// Errors from Forgejo API calls.
@@ -27,16 +27,16 @@ pub enum ForgejoError {
     ApiError(String),
 }
 
-/// Forgejo / Gitea pull request review renderer.
+/// Forgejo / Gitea pull request review formatter.
 ///
-/// The synchronous `render()` method outputs a JSON object matching the
+/// The synchronous `format()` method outputs a JSON object matching the
 /// Forgejo `CreatePullReviewOptions` schema so the payload can be
 /// inspected or piped. For actually posting to the API, use
-/// [`post_to_forgejo`].
-pub struct ForgejoRenderer;
+/// [`ForgejoPublisher`].
+pub struct ForgejoFormatter;
 
-impl OutputRenderer for ForgejoRenderer {
-    fn render(&self, findings: &[Finding]) -> String {
+impl OutputFormatter for ForgejoFormatter {
+    fn format(&self, findings: &[Finding]) -> String {
         let comments: Vec<serde_json::Value> = findings
             .iter()
             .map(|f| {
@@ -80,11 +80,7 @@ impl OutputRenderer for ForgejoRenderer {
 
 /// Format a single finding as a Markdown comment body.
 fn format_comment_body(f: &Finding) -> String {
-    let severity_emoji = match f.severity {
-        Severity::Error => "🔴",
-        Severity::Warning => "🟡",
-        Severity::Info => "🔵",
-    };
+    let severity_emoji = f.severity.emoji();
 
     let mut body = format!(
         "{} **{}** ({})\n\n{}",
@@ -101,6 +97,30 @@ fn format_comment_body(f: &Finding) -> String {
 fn require_env(env: &Env, name: &str) -> Result<String, ForgejoError> {
     env.var(name)
         .map_err(|_| ForgejoError::MissingEnvVar(name.into()))
+}
+
+/// Forgejo / Gitea pull request review publisher.
+///
+/// Posts findings as a review via the Forgejo API.
+pub struct ForgejoPublisher<'a> {
+    env: &'a Env,
+}
+
+impl<'a> ForgejoPublisher<'a> {
+    /// Create a new publisher with the given environment.
+    pub fn new(env: &'a Env) -> Self {
+        Self { env }
+    }
+}
+
+impl OutputPublisher for ForgejoPublisher<'_> {
+    async fn publish(
+        &self,
+        findings: &[Finding],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        post_to_forgejo(findings, self.env).await?;
+        Ok(())
+    }
 }
 
 /// Post findings to the Forgejo/Gitea Pull Request Review API.
@@ -177,7 +197,8 @@ pub async fn post_to_forgejo(findings: &[Finding], env: &Env) -> Result<(), Forg
         pr_index,
     );
 
-    let client = reqwest::Client::new();
+    let client = crate::http::build_client()
+        .map_err(|e| ForgejoError::ApiError(format!("failed to build HTTP client: {e}")))?;
     let response = client
         .post(&url)
         .header("Authorization", format!("token {token}"))
@@ -234,7 +255,7 @@ mod tests {
 
     #[test]
     fn render_produces_valid_json() {
-        let output = ForgejoRenderer.render(&sample_findings());
+        let output = ForgejoFormatter.format(&sample_findings());
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed["event"], "COMMENT");
         assert!(parsed["body"].as_str().unwrap().contains("2 findings"));
@@ -244,7 +265,7 @@ mod tests {
 
     #[test]
     fn render_maps_paths_and_lines() {
-        let output = ForgejoRenderer.render(&sample_findings());
+        let output = ForgejoFormatter.format(&sample_findings());
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let comments = parsed["comments"].as_array().unwrap();
         assert_eq!(comments[0]["path"], "src/main.rs");
@@ -256,7 +277,7 @@ mod tests {
 
     #[test]
     fn render_includes_severity_emoji() {
-        let output = ForgejoRenderer.render(&sample_findings());
+        let output = ForgejoFormatter.format(&sample_findings());
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let comments = parsed["comments"].as_array().unwrap();
         let error_body = comments[0]["body"].as_str().unwrap();
@@ -268,7 +289,7 @@ mod tests {
 
     #[test]
     fn render_includes_suggestion_when_present() {
-        let output = ForgejoRenderer.render(&sample_findings());
+        let output = ForgejoFormatter.format(&sample_findings());
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let comments = parsed["comments"].as_array().unwrap();
         let error_body = comments[0]["body"].as_str().unwrap();
@@ -280,7 +301,7 @@ mod tests {
 
     #[test]
     fn render_includes_agent_attribution() {
-        let output = ForgejoRenderer.render(&sample_findings());
+        let output = ForgejoFormatter.format(&sample_findings());
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let comments = parsed["comments"].as_array().unwrap();
         let body = comments[0]["body"].as_str().unwrap();
@@ -289,7 +310,7 @@ mod tests {
 
     #[test]
     fn render_empty_findings() {
-        let output = ForgejoRenderer.render(&[]);
+        let output = ForgejoFormatter.format(&[]);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed["event"], "COMMENT");
         assert!(parsed["body"].as_str().unwrap().contains("0 findings"));
@@ -309,7 +330,7 @@ mod tests {
             suggestion: None,
             agent: "a".to_string(),
         }];
-        let output = ForgejoRenderer.render(&findings);
+        let output = ForgejoFormatter.format(&findings);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert!(parsed["body"].as_str().unwrap().contains("1 finding"));
         // Must not say "1 findings"

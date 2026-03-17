@@ -50,6 +50,7 @@ colored = "3"
 sha2 = "0.10"
 hex = "0.4"
 md5 = "0.7"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # License key verification (Ed25519 offline signing)
 ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
@@ -57,6 +58,9 @@ base64 = "0.22"
 
 # Ordered maps
 indexmap = { version = "2", features = ["serde"] }
+
+# Enum utilities
+strum = { version = "0.27", features = ["derive"] }
 
 # YAML parsing (agent profile frontmatter)
 serde_yaml_ng = "0.10"
@@ -69,6 +73,9 @@ tar = "0.4"
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
 schemars = "1"
+semver = "1"
+rayon = "1"
+crossbeam-queue = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
@@ -78,6 +85,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 serial_test = "3"
 filetime = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
 
 [[example]]
 name = "keygen"

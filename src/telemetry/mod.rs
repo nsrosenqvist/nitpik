@@ -1,5 +1,11 @@
 //! Anonymous usage telemetry — privacy-respecting heartbeat.
 //!
+//! # Bounded Context: Telemetry
+//!
+//! Owns the heartbeat payload construction and fire-and-forget HTTP
+//! POST. Consumes only aggregate counters — never sees diff content,
+//! findings, or API keys.
+//!
 //! Sends a single fire-and-forget POST on each `review` run containing only
 //! aggregate, non-identifying statistics: file count, diff size, agent count,
 //! whether a license is active, and whether the run is inside CI.
@@ -11,16 +17,9 @@
 //! - fails silently — never affects the review outcome
 
 use serde::Serialize;
-use std::time::Duration;
 
 /// Placeholder endpoint — not operational yet.
 const HEARTBEAT_URL: &str = crate::constants::TELEMETRY_URL;
-
-/// Maximum time we'll wait for the heartbeat POST before giving up.
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Maximum time to wait for a TCP connection (per attempt).
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Payload sent with each heartbeat. Contains only anonymous aggregate data.
 #[derive(Debug, Clone, Serialize)]
@@ -55,33 +54,10 @@ impl HeartbeatPayload {
             diff_lines,
             agent_count,
             licensed,
-            is_ci: detect_ci(),
+            is_ci: crate::ci::is_ci(),
             version: crate::constants::FULL_VERSION,
         }
     }
-}
-
-/// Detect whether we are running inside a CI environment by checking
-/// common environment variables set by popular CI providers.
-pub fn detect_ci() -> bool {
-    // Generic
-    if std::env::var("CI").is_ok() {
-        return true;
-    }
-    // Provider-specific variables (for systems that don't set `CI`)
-    const CI_VARS: &[&str] = &[
-        "GITHUB_ACTIONS",
-        "GITLAB_CI",
-        "BITBUCKET_BUILD_NUMBER",
-        "JENKINS_URL",
-        "CIRCLECI",
-        "TF_BUILD", // Azure Pipelines
-        "BUILDKITE",
-        "TRAVIS",
-        "CODEBUILD_BUILD_ID", // AWS CodeBuild
-        "TEAMCITY_VERSION",
-    ];
-    CI_VARS.iter().any(|var| std::env::var(var).is_ok())
 }
 
 /// Returns `true` when `NITPIK_DEBUG` is set to a truthy value.
@@ -112,10 +88,7 @@ pub fn send_heartbeat(payload: HeartbeatPayload) -> tokio::task::JoinHandle<()> 
 
 /// Actually perform the HTTP POST. Separated for testability.
 async fn post_heartbeat(payload: &HeartbeatPayload) -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::Client::builder()
-        .timeout(HEARTBEAT_TIMEOUT)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()?;
+    let client = crate::http::build_client()?;
 
     client.post(HEARTBEAT_URL).json(payload).send().await?;
 
@@ -134,11 +107,7 @@ async fn debug_post_heartbeat(payload: &HeartbeatPayload) {
         Err(e) => eprintln!("[nitpik:debug] failed to serialise payload: {e}"),
     }
 
-    let client = match reqwest::Client::builder()
-        .timeout(HEARTBEAT_TIMEOUT)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()
-    {
+    let client = match crate::http::build_client() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[nitpik:debug] failed to build HTTP client: {e}");
@@ -208,7 +177,7 @@ mod tests {
         // Remove CI vars if set (best-effort — other tests may set them)
         // In a clean environment this should be false, but in CI it'll be true.
         // We just assert it doesn't panic.
-        let _ = detect_ci();
+        let _ = crate::ci::is_ci();
     }
 
     #[test]
@@ -226,6 +195,6 @@ mod tests {
         // This should silently discard the error (unreachable host)
         send_heartbeat(payload);
         // Give the spawned task a moment to run
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 }

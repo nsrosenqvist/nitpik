@@ -15,7 +15,6 @@ use nitpik::env;
 use nitpik::license;
 use nitpik::models;
 use nitpik::orchestrator;
-use nitpik::output;
 use nitpik::progress;
 use nitpik::providers;
 use nitpik::security;
@@ -158,7 +157,7 @@ async fn run_cache(action: CacheAction) -> Result<()> {
 
     match action {
         CacheAction::Clear => {
-            let stats = engine.clear().context("failed to clear cache")?;
+            let stats = engine.clear().await.context("failed to clear cache")?;
             println!(
                 "Cleared {} cached entry/entries ({}).",
                 stats.entries,
@@ -166,7 +165,7 @@ async fn run_cache(action: CacheAction) -> Result<()> {
             );
         }
         CacheAction::Stats => {
-            let stats = engine.stats().context("failed to read cache stats")?;
+            let stats = engine.stats().await.context("failed to read cache stats")?;
             println!("Cache entries: {}", stats.entries);
             println!("Cache size:    {}", stats.human_size());
         }
@@ -304,82 +303,99 @@ async fn run_license(action: LicenseAction) -> Result<()> {
 
     Ok(())
 }
-async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<()> {
-    // Validate input mode
-    let input_mode = args.validate_input().map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    // Resolve repo / working directory from --path (default: cwd)
-    let base_dir = std::fs::canonicalize(&args.path)
-        .with_context(|| format!("--path directory not found: {}", args.path.display()))?;
-    let repo_root = match diff::git::find_repo_root(&base_dir).await {
-        Ok(root) => root,
-        Err(_) => base_dir.display().to_string(),
-    };
-    let repo_root_path = Path::new(&repo_root);
-
-    // Load config with layering
-    let config =
-        Config::load(Some(repo_root_path), &Env::real()).context("failed to load configuration")?;
-
-    // Verify license key (if present)
-    let license_claims = if let Some(ref key) = config.license.key {
-        match license::verify_license_key(key) {
-            Ok(claims) => match license::check_expiry(&claims) {
-                Ok(license::ExpiryStatus::Expired) => {
-                    use colored::Colorize;
-                    eprintln!(
-                        "\n  {} {}\n  {}\n",
-                        "✖".red().bold(),
-                        "Your nitpik license has expired.".red(),
-                        "Renew at https://nitpik.dev or contact support.".dimmed(),
-                    );
-                    std::process::exit(1);
-                }
-                Ok(license::ExpiryStatus::ExpiringSoon { days }) => Some((claims, Some(days))),
-                Ok(license::ExpiryStatus::Valid) => Some((claims, None)),
-                Err(e) => {
-                    eprintln!("Warning: could not check license expiry: {e}");
-                    Some((claims, None))
-                }
-            },
-            Err(e) => {
-                eprintln!("Warning: invalid license key: {e}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Apply config defaults where CLI didn't override
-    let use_agent = args.agent || config.review.agentic.enabled;
-    let scan_secrets = args.scan_secrets || config.secrets.enabled;
-    let no_cache = args.no_cache;
-
-    // Get diffs
-    let diffs = diff::get_diffs(&input_mode, repo_root_path)
-        .await
-        .context("failed to get diffs")?;
-
-    if diffs.is_empty() {
-        eprintln!("No changes to review.");
-        return Ok(());
+/// Canonicalize the `--path` directory and locate the git repo root.
+async fn resolve_repo_root(path: &Path) -> Result<String> {
+    let base_dir = std::fs::canonicalize(path)
+        .with_context(|| format!("--path directory not found: {}", path.display()))?;
+    match diff::git::find_repo_root(&base_dir).await {
+        Ok(root) => Ok(root),
+        Err(_) => Ok(base_dir.display().to_string()),
     }
+}
 
-    // Build baseline context
-    let commit_log = if args.no_commit_context {
-        Vec::new()
-    } else if let models::InputMode::GitBase(ref base_ref) = input_mode {
+/// Fetch the commit log for baseline context, if applicable.
+async fn build_commit_log(
+    no_commit_context: bool,
+    input_mode: &models::InputMode,
+    repo_root_path: &Path,
+) -> Vec<String> {
+    if no_commit_context {
+        return Vec::new();
+    }
+    if let models::InputMode::GitBase(base_ref) = input_mode {
         diff::git::git_log(repo_root_path, base_ref, 50)
             .await
             .unwrap_or_default()
     } else {
         Vec::new()
-    };
+    }
+}
 
+/// Build the provider, cache engine, and review orchestrator.
+async fn create_orchestrator(
+    config: &Config,
+    repo_root_path: &Path,
+    no_cache: bool,
+    progress: Arc<dyn progress::ProgressReporter>,
+    no_prior_context: bool,
+    max_prior_findings: Option<usize>,
+) -> Result<(Arc<dyn ReviewProvider>, orchestrator::ReviewOrchestrator)> {
+    let provider: Arc<dyn ReviewProvider> = Arc::new(
+        RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
+            .map_err(|e| anyhow::anyhow!("{e}"))?,
+    );
+    let review_scope = diff::git::detect_branch(repo_root_path, &Env::real()).await;
+    let cache = cache::CacheEngine::new(!no_cache);
+    let stale_age = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+    let _removed = cache.cleanup_stale(stale_age).await;
+
+    let orchestrator = orchestrator::ReviewOrchestrator::new(
+        Arc::clone(&provider),
+        config,
+        cache,
+        progress,
+        no_prior_context,
+        max_prior_findings,
+        review_scope,
+    );
+    Ok((provider, orchestrator))
+}
+
+async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<()> {
+    let input_mode = args.validate_input().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let repo_root = resolve_repo_root(&args.path).await?;
+    let repo_root_path = Path::new(&repo_root);
+
+    let config =
+        Config::load(Some(repo_root_path), &Env::real()).context("failed to load configuration")?;
+    let license_claims = verify_license(&config);
+
+    let use_agent = args.agent || config.review.agentic.enabled;
+    let scan_secrets = args.scan_secrets || config.secrets.enabled;
+
+    // Get diff source — keeps raw content alive so parsed diffs
+    // can borrow via Cow (zero-copy).
+    let diff_source = diff::get_diff_source(&input_mode, repo_root_path)
+        .await
+        .context("failed to get diffs")?;
+
+    let parsed_diffs;
+    let diffs: &[models::FileDiff<'_>] = match &diff_source {
+        diff::DiffSource::Raw(content) => {
+            parsed_diffs = diff::parser::parse_unified_diff(content);
+            &parsed_diffs
+        }
+        diff::DiffSource::Scanned(d) => d,
+    };
+    if diffs.is_empty() {
+        eprintln!("No changes to review.");
+        return Ok(());
+    }
+
+    let commit_log = build_commit_log(args.no_commit_context, &input_mode, repo_root_path).await;
     let baseline = context::build_baseline_context(
         repo_root_path,
-        &diffs,
+        diffs,
         &config,
         args.no_project_docs,
         &args.exclude_doc,
@@ -387,53 +403,156 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     )
     .await;
 
-    // Resolve agent profiles
-    let agent_defs = resolve_agents(&args, &config, &diffs, repo_root_path).await?;
+    let agent_defs = resolve_agents(&args, &config, diffs, repo_root_path).await?;
+    fire_telemetry(&config, diffs, &agent_defs, &license_claims, no_telemetry).await;
 
-    // Fire anonymous telemetry heartbeat (non-blocking, fails silently)
-    let telemetry_enabled = config.telemetry.enabled && !no_telemetry;
-    if telemetry_enabled {
-        use models::diff::DiffLineType;
-        let diff_lines: usize = diffs
-            .iter()
-            .flat_map(|d| d.hunks.iter())
-            .flat_map(|h| h.lines.iter())
-            .filter(|l| l.line_type == DiffLineType::Added || l.line_type == DiffLineType::Removed)
-            .count();
-        let licensed = license_claims.is_some();
-        let payload = telemetry::HeartbeatPayload::from_review(
-            diffs.len(),
-            diff_lines,
-            agent_defs.len(),
-            licensed,
-        );
-        let handle = telemetry::send_heartbeat(payload);
-        if telemetry::is_debug() {
-            let _ = handle.await;
+    let progress = setup_progress(&args, diffs, &agent_defs, &baseline, &license_claims);
+    progress.start();
+
+    let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
+    let (review_context, secret_findings) = build_review_context(
+        &args,
+        &config,
+        diffs,
+        baseline,
+        &repo_root,
+        scan_secrets,
+        is_path_scan,
+    )?;
+
+    let (_provider, orchestrator) = create_orchestrator(
+        &config,
+        repo_root_path,
+        args.no_cache,
+        Arc::clone(&progress) as Arc<dyn progress::ProgressReporter>,
+        args.no_prior_context,
+        args.max_prior_findings,
+    )
+    .await?;
+
+    let review_result = orchestrator
+        .run(
+            &review_context,
+            &agent_defs,
+            args.max_concurrent,
+            use_agent,
+            args.max_turns,
+            args.max_tool_calls,
+        )
+        .await
+        .context("review failed")?;
+
+    let mut findings = review_result.findings;
+    findings.extend(secret_findings);
+    findings.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then(a.file.cmp(&b.file))
+            .then(a.line.cmp(&b.line))
+    });
+    progress.finish();
+
+    let fail_on_severity: Option<Severity> = if args.no_fail {
+        None
+    } else {
+        args.fail_on
+            .or(config.review.fail_on)
+            .or(Some(Severity::Error))
+    };
+    render_and_output(&args.format, &findings, fail_on_severity).await;
+    determine_exit(
+        &findings,
+        fail_on_severity,
+        &args.format,
+        review_result.failed_tasks,
+    )
+}
+
+/// Verify the license key from config, returning claims and optional
+/// days-until-expiry. Exits the process if the license has expired.
+fn verify_license(config: &Config) -> Option<(license::LicenseClaims, Option<i64>)> {
+    let key = config.license.key.as_ref()?;
+    match license::verify_license_key(key) {
+        Ok(claims) => match license::check_expiry(&claims) {
+            Ok(license::ExpiryStatus::Expired) => {
+                use colored::Colorize;
+                eprintln!(
+                    "\n  {} {}\n  {}\n",
+                    "✖".red().bold(),
+                    "Your nitpik license has expired.".red(),
+                    "Renew at https://nitpik.dev or contact support.".dimmed(),
+                );
+                std::process::exit(1);
+            }
+            Ok(license::ExpiryStatus::ExpiringSoon { days }) => Some((claims, Some(days))),
+            Ok(license::ExpiryStatus::Valid) => Some((claims, None)),
+            Err(e) => {
+                eprintln!("Warning: could not check license expiry: {e}");
+                Some((claims, None))
+            }
+        },
+        Err(e) => {
+            eprintln!("Warning: invalid license key: {e}");
+            None
         }
     }
+}
 
-    // Determine output verbosity
-    // --quiet suppresses all non-essential stderr output (banner, info, progress)
-    // Progress is also auto-disabled for non-terminal formats and non-TTY stderr
+/// Fire anonymous telemetry heartbeat (non-blocking, fails silently).
+async fn fire_telemetry(
+    config: &Config,
+    diffs: &[models::FileDiff<'_>],
+    agents: &[models::AgentDefinition],
+    license_claims: &Option<(license::LicenseClaims, Option<i64>)>,
+    no_telemetry: bool,
+) {
+    if !config.telemetry.enabled || no_telemetry {
+        return;
+    }
+    use models::diff::DiffLineType;
+    let diff_lines: usize = diffs
+        .iter()
+        .flat_map(|d| d.hunks.iter())
+        .flat_map(|h| h.lines.iter())
+        .filter(|l| l.line_type == DiffLineType::Added || l.line_type == DiffLineType::Removed)
+        .count();
+    let payload = telemetry::HeartbeatPayload::from_review(
+        diffs.len(),
+        diff_lines,
+        agents.len(),
+        license_claims.is_some(),
+    );
+    let handle = telemetry::send_heartbeat(payload);
+    if telemetry::is_debug() {
+        let _ = handle.await;
+    }
+}
+
+/// Build the progress tracker, print the banner and informational messages.
+fn setup_progress(
+    args: &cli::args::ReviewArgs,
+    diffs: &[models::FileDiff<'_>],
+    agents: &[models::AgentDefinition],
+    baseline: &models::BaselineContext,
+    license_claims: &Option<(license::LicenseClaims, Option<i64>)>,
+) -> Arc<ProgressTracker> {
     let is_interactive = args.format == OutputFormat::Terminal && std::io::stderr().is_terminal();
     let show_info = !args.quiet && is_interactive;
     let show_progress = !args.quiet && is_interactive;
 
-    // Build progress tracker
     let file_names: Vec<String> = diffs.iter().map(|d| d.path().to_string()).collect();
-    let agent_names: Vec<String> = agent_defs.iter().map(|a| a.profile.name.clone()).collect();
-    let progress = std::sync::Arc::new(ProgressTracker::new(
+    let agent_names: Vec<String> = agents.iter().map(|a| a.profile.name.clone()).collect();
+    let progress = Arc::new(ProgressTracker::new(
         &file_names,
         &agent_names,
         show_progress,
     ));
+
     if show_info {
         let claims_ref = license_claims.as_ref().map(|(c, _)| c);
         cli::print_banner(claims_ref);
 
-        // Show expiry warning if license is expiring soon
-        if let Some((_, Some(days))) = &license_claims {
+        if let Some((_, Some(days))) = license_claims {
             use colored::Colorize;
             use std::io::Write;
             let stderr = std::io::stderr();
@@ -458,7 +577,6 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             let _ = handle.flush();
         }
 
-        // Show which project documentation files are informing the review
         if !baseline.project_docs.is_empty() {
             use colored::Colorize;
             use std::io::Write;
@@ -475,104 +593,27 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             let _ = handle.flush();
         }
     }
-    progress.start();
 
-    // Secret scanning and context construction
-    let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
-    let (review_context, secret_findings) = build_review_context(
-        &args,
-        &config,
-        &diffs,
-        baseline,
-        &repo_root,
-        scan_secrets,
-        is_path_scan,
-    )?;
+    progress
+}
 
-    // Set up provider
-    let provider: Arc<dyn ReviewProvider> = Arc::new(
-        RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
-            .map_err(|e| anyhow::anyhow!("{e}"))?,
-    );
-
-    // Detect branch/PR scope for sidecar isolation
-    let review_scope = diff::git::detect_branch(repo_root_path, &Env::real()).await;
-
-    // Run orchestrator
-    let cache = cache::CacheEngine::new(!no_cache);
-
-    // Clean up stale sidecar files (>30 days) before the review starts
-    let stale_age = std::time::Duration::from_secs(30 * 24 * 60 * 60);
-    let _removed = cache.cleanup_stale(stale_age);
-
-    let orchestrator = orchestrator::ReviewOrchestrator::new(
-        Arc::clone(&provider),
-        &config,
-        cache,
-        Arc::clone(&progress),
-        args.no_prior_context,
-        args.max_prior_findings,
-        review_scope,
-    );
-
-    let review_result = orchestrator
-        .run(
-            &review_context,
-            &agent_defs,
-            args.max_concurrent,
-            use_agent,
-            args.max_turns,
-            args.max_tool_calls,
-        )
-        .await
-        .context("review failed")?;
-
-    let mut findings = review_result.findings;
-    let failed_tasks = review_result.failed_tasks;
-
-    // Add secret scanner findings
-    findings.extend(secret_findings);
-
-    // Sort findings by severity (errors first), then file, then line
-    findings.sort_by(|a, b| {
-        b.severity
-            .cmp(&a.severity)
-            .then(a.file.cmp(&b.file))
-            .then(a.line.cmp(&b.line))
-    });
-
-    // Finish progress display
-    progress.finish();
-
-    // Resolve fail-on threshold (CLI flag takes priority over config, default: error)
-    let fail_on_severity: Option<Severity> = if args.no_fail {
-        None
-    } else {
-        args.fail_on
-            .or(config.review.fail_on)
-            .or(Some(Severity::Error))
-    };
-
-    // Render and print output
-    render_and_output(&args.format, &findings, fail_on_severity).await;
-
-    // Exit with non-zero code if findings exceed fail_on threshold
-    if let Some(threshold) = fail_on_severity {
+/// Check findings against the fail-on threshold and task failures.
+fn determine_exit(
+    findings: &[models::finding::Finding],
+    fail_on: Option<Severity>,
+    format: &OutputFormat,
+    failed_tasks: usize,
+) -> Result<()> {
+    if let Some(threshold) = fail_on {
         let failing: Vec<_> = findings
             .iter()
             .filter(|f| f.severity >= threshold)
             .collect();
         if !failing.is_empty() {
-            // For non-terminal formats the renderer doesn't include a summary,
-            // so print one to stderr so CI logs show the counts.  The terminal
-            // renderer already prints its own summary line, so skip it there.
-            if args.format == OutputFormat::Terminal {
-                // Blank line between the renderer's summary and the error.
+            if *format == OutputFormat::Terminal {
                 eprintln!();
             } else {
-                // Non-terminal formats don't include a summary, so print one
-                // to stderr so CI logs show the counts.
-                let summary = models::finding::Summary::from_findings(&findings);
+                let summary = models::finding::Summary::from_findings(findings);
                 eprintln!(
                     "\nReview complete: {} error(s), {} warning(s), {} info — failing on {threshold}+",
                     summary.errors, summary.warnings, summary.info,
@@ -584,12 +625,9 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             );
         }
     }
-
-    // Fail if any review tasks could not complete
     if failed_tasks > 0 {
-        bail!("{failed_tasks} review task(s) failed after retries — results are incomplete",);
+        bail!("{failed_tasks} review task(s) failed after retries — results are incomplete");
     }
-
     Ok(())
 }
 
@@ -597,7 +635,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 async fn resolve_agents(
     args: &cli::args::ReviewArgs,
     config: &Config,
-    diffs: &[models::FileDiff],
+    diffs: &[models::FileDiff<'_>],
     repo_root_path: &Path,
 ) -> Result<Vec<models::AgentDefinition>> {
     let profile_names = if args.profile == vec![DEFAULT_PROFILE.to_string()] {
@@ -641,15 +679,15 @@ async fn resolve_agents(
 }
 
 /// Build review context, optionally scanning and redacting secrets.
-fn build_review_context(
+fn build_review_context<'a>(
     args: &cli::args::ReviewArgs,
     config: &Config,
-    diffs: &[models::FileDiff],
+    diffs: &[models::FileDiff<'a>],
     baseline: models::BaselineContext,
     repo_root: &str,
     scan_secrets: bool,
     is_path_scan: bool,
-) -> Result<(models::ReviewContext, Vec<models::finding::Finding>)> {
+) -> Result<(models::ReviewContext<'a>, Vec<models::finding::Finding>)> {
     if !scan_secrets {
         let ctx = models::ReviewContext {
             diffs: diffs.to_vec(),
@@ -719,17 +757,8 @@ async fn render_and_output(
 
     let env = Env::real();
 
-    // Bitbucket: also post to API if env vars are set
-    if *format == OutputFormat::Bitbucket && env.is_set("BITBUCKET_WORKSPACE") {
-        if let Err(e) = output::bitbucket::post_to_bitbucket(findings, fail_on, &env).await {
-            eprintln!("Warning: failed to post to Bitbucket: {e}");
-        }
-    }
-
-    // Forgejo/Gitea: post review via API if env vars are set
-    if *format == OutputFormat::Forgejo && env.is_set("CI_FORGE_URL") {
-        if let Err(e) = output::forgejo::post_to_forgejo(findings, &env).await {
-            eprintln!("Warning: failed to post to Forgejo: {e}");
-        }
+    // Publish to external APIs where applicable (Bitbucket, Forgejo)
+    if let Err(e) = format.publish(findings, fail_on, &env).await {
+        eprintln!("Warning: failed to publish findings: {e}");
     }
 }

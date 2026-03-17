@@ -1,8 +1,13 @@
 //! ReviewProvider trait and LLM integration.
 //!
-//! Provides an abstraction layer over rig-core to decouple the
-//! codebase from the specific LLM library.
+//! # Bounded Context: LLM Providers
+//!
+//! Owns the `ReviewProvider` trait, rig-core client construction,
+//! prompt dispatch, and response parsing. Abstracts the 19-provider
+//! matrix behind a single `review()` call — callers never touch
+//! rig-core types directly.
 
+pub mod response;
 pub mod rig;
 
 use async_trait::async_trait;

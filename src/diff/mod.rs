@@ -1,4 +1,10 @@
 //! Diff engine: git CLI wrapper, unified diff parsing, file scanning, and chunk splitting.
+//!
+//! # Bounded Context: Diff Retrieval & Parsing
+//!
+//! Owns git invocation, unified-diff parsing, directory scanning,
+//! and chunk splitting. Produces [`FileDiff`](crate::models::diff::FileDiff)
+//! values — never interprets diff content semantically.
 
 pub mod chunker;
 pub mod file;
@@ -9,8 +15,8 @@ pub mod scanner;
 use std::path::Path;
 use thiserror::Error;
 
-use crate::models::FileDiff;
 use crate::models::InputMode;
+use crate::models::diff::FileDiff;
 
 /// Errors from the diff engine.
 #[derive(Error, Debug)]
@@ -40,28 +46,82 @@ pub async fn read_diff_stdin() -> Result<String, DiffError> {
     Ok(buf)
 }
 
-/// Produce a list of file diffs from the given input mode.
-pub async fn get_diffs(input: &InputMode, repo_root: &Path) -> Result<Vec<FileDiff>, DiffError> {
+/// The raw diff source: either a string to parse (zero-copy-friendly)
+/// or already-parsed owned diffs from a directory scan.
+pub enum DiffSource {
+    /// Raw unified diff text — call [`parser::parse_unified_diff`] to
+    /// get `FileDiff` values that borrow from this string.
+    Raw(String),
+    /// Pre-parsed diffs from [`scanner::scan_path`] (all owned).
+    Scanned(Vec<FileDiff<'static>>),
+}
+
+/// Obtain the diff source for the given input mode.
+///
+/// For git/file/stdin modes this returns the raw diff string so the
+/// caller can parse it in a scope where the string lives long enough
+/// to be borrowed (zero-copy).  For direct-path scans the diffs are
+/// returned pre-parsed with owned content.
+pub async fn get_diff_source(input: &InputMode, repo_root: &Path) -> Result<DiffSource, DiffError> {
     match input {
-        InputMode::DiffFile(path) => {
-            let content = file::read_diff_file(path).await?;
-            Ok(parser::parse_unified_diff(&content))
-        }
-        InputMode::Stdin => {
-            let content = read_diff_stdin().await?;
-            Ok(parser::parse_unified_diff(&content))
-        }
+        InputMode::DiffFile(path) => Ok(DiffSource::Raw(file::read_diff_file(path).await?)),
+        InputMode::Stdin => Ok(DiffSource::Raw(read_diff_stdin().await?)),
         InputMode::GitBase(base_ref) => {
-            let diff_output = git::git_diff(repo_root, base_ref).await?;
-            Ok(parser::parse_unified_diff(&diff_output))
+            Ok(DiffSource::Raw(git::git_diff(repo_root, base_ref).await?))
         }
-        InputMode::DirectPath(path) => scanner::scan_path(path).await,
+        InputMode::DirectPath(path) => Ok(DiffSource::Scanned(scanner::scan_path(path).await?)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Helper: resolve a DiffSource into a Vec of owned diffs.
+    async fn resolve_diffs(
+        input: &InputMode,
+        root: &Path,
+    ) -> Result<Vec<FileDiff<'static>>, DiffError> {
+        let source = get_diff_source(input, root).await?;
+        match source {
+            DiffSource::Raw(content) => Ok(parser::parse_unified_diff(&content)
+                .into_iter()
+                .map(|d| {
+                    // Convert borrowed content to owned for test assertions
+                    FileDiff {
+                        old_path: d.old_path,
+                        new_path: d.new_path,
+                        is_new: d.is_new,
+                        is_deleted: d.is_deleted,
+                        is_rename: d.is_rename,
+                        is_binary: d.is_binary,
+                        hunks: d
+                            .hunks
+                            .into_iter()
+                            .map(|h| crate::models::diff::Hunk {
+                                old_start: h.old_start,
+                                old_count: h.old_count,
+                                new_start: h.new_start,
+                                new_count: h.new_count,
+                                header: h.header,
+                                lines: h
+                                    .lines
+                                    .into_iter()
+                                    .map(|l| crate::models::diff::DiffLine {
+                                        line_type: l.line_type,
+                                        content: std::borrow::Cow::Owned(l.content.into_owned()),
+                                        old_line_no: l.old_line_no,
+                                        new_line_no: l.new_line_no,
+                                    })
+                                    .collect(),
+                            })
+                            .collect(),
+                    }
+                })
+                .collect()),
+            DiffSource::Scanned(diffs) => Ok(diffs),
+        }
+    }
 
     #[tokio::test]
     async fn get_diffs_from_diff_file() {
@@ -74,7 +134,7 @@ mod tests {
         .unwrap();
 
         let input = InputMode::DiffFile(diff_path);
-        let diffs = get_diffs(&input, dir.path()).await.unwrap();
+        let diffs = resolve_diffs(&input, dir.path()).await.unwrap();
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].new_path, "f.rs");
     }
@@ -86,7 +146,7 @@ mod tests {
         std::fs::write(&file, "fn main() {}\n").unwrap();
 
         let input = InputMode::DirectPath(file);
-        let diffs = get_diffs(&input, dir.path()).await.unwrap();
+        let diffs = resolve_diffs(&input, dir.path()).await.unwrap();
         assert_eq!(diffs.len(), 1);
         assert!(diffs[0].is_new);
     }
@@ -94,7 +154,7 @@ mod tests {
     #[tokio::test]
     async fn get_diffs_file_not_found() {
         let input = InputMode::DiffFile(std::path::PathBuf::from("/tmp/nitpik_nonexistent.diff"));
-        let result = get_diffs(&input, Path::new("/tmp")).await;
+        let result = resolve_diffs(&input, Path::new("/tmp")).await;
         assert!(result.is_err());
     }
 
@@ -106,7 +166,7 @@ mod tests {
             .await
             .expect("should find git repo root");
         let input = InputMode::GitBase("HEAD".to_string());
-        let diffs = get_diffs(&input, Path::new(&repo_root)).await.unwrap();
+        let diffs = resolve_diffs(&input, Path::new(&repo_root)).await.unwrap();
         // HEAD vs HEAD = empty diff (may be non-empty if working tree is dirty,
         // but the call itself must succeed).
         let _ = diffs;
@@ -116,7 +176,7 @@ mod tests {
     async fn get_diffs_git_base_in_non_git_dir() {
         let dir = tempfile::tempdir().unwrap();
         let input = InputMode::GitBase("HEAD".to_string());
-        let result = get_diffs(&input, dir.path()).await;
+        let result = resolve_diffs(&input, dir.path()).await;
         assert!(result.is_err());
     }
 
@@ -126,7 +186,7 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
         std::fs::write(dir.path().join("b.rs"), "fn b() {}\n").unwrap();
         let input = InputMode::DirectPath(dir.path().to_path_buf());
-        let diffs = get_diffs(&input, dir.path()).await.unwrap();
+        let diffs = resolve_diffs(&input, dir.path()).await.unwrap();
         assert!(diffs.len() >= 2);
     }
 }

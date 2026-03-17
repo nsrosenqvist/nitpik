@@ -2,21 +2,23 @@
 //!
 //! Output style inspired by Semgrep/PHPStan — no tables.
 
+use std::fmt::Write;
+
 use colored::Colorize;
 
 use crate::models::finding::{Finding, Severity, Summary};
-use crate::output::OutputRenderer;
+use crate::output::OutputFormatter;
 
 /// Terminal output renderer with colored, flowing text.
-pub struct TerminalRenderer;
+pub struct TerminalFormatter;
 
-impl OutputRenderer for TerminalRenderer {
-    fn render(&self, findings: &[Finding]) -> String {
+impl OutputFormatter for TerminalFormatter {
+    fn format(&self, findings: &[Finding]) -> String {
         if findings.is_empty() {
             return format!("{}", "  ✔ No issues found.\n".green());
         }
 
-        let mut output = String::new();
+        let mut output = String::with_capacity(findings.len() * 200 + 200);
         let mut sorted = findings.to_vec();
         sorted.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
 
@@ -52,20 +54,11 @@ impl OutputRenderer for TerminalRenderer {
                 format!("{}:{}", finding.file, finding.line)
             };
 
-            output.push_str(&format!(
-                " {} {} in {}\n",
-                icon,
-                severity_str,
-                location.bold()
-            ));
-            output.push_str(&format!(
-                "   {} — {}\n",
-                finding.title.bold(),
-                finding.message
-            ));
+            let _ = writeln!(output, " {} {} in {}", icon, severity_str, location.bold());
+            let _ = writeln!(output, "   {} — {}", finding.title.bold(), finding.message);
 
             if let Some(ref suggestion) = finding.suggestion {
-                output.push_str(&format!("   {} {}\n", "→".cyan(), suggestion));
+                let _ = writeln!(output, "   {} {}", "→".cyan(), suggestion);
             }
 
             output.push('\n');
@@ -73,12 +66,10 @@ impl OutputRenderer for TerminalRenderer {
 
         // Summary line
         let summary = Summary::from_findings(findings);
-        output.push_str(&format!(
-            "{}\n",
-            "───────────────────────────────────".dimmed()
-        ));
-        output.push_str(&format!(
-            " {} findings: {} {}, {} {}, {} {}\n",
+        let _ = writeln!(output, "{}", "───────────────────────────────────".dimmed());
+        let _ = writeln!(
+            output,
+            " {} findings: {} {}, {} {}, {} {}",
             summary.total.to_string().bold(),
             summary.errors.to_string().red().bold(),
             if summary.errors == 1 {
@@ -94,8 +85,8 @@ impl OutputRenderer for TerminalRenderer {
             },
             summary.info.to_string().blue().bold(),
             if summary.info == 1 { "info" } else { "infos" },
-        ));
-        output.push_str(&format!(" {}\n", crate::constants::AI_DISCLOSURE.dimmed()));
+        );
+        let _ = writeln!(output, " {}", crate::constants::AI_DISCLOSURE.dimmed());
 
         output
     }
@@ -107,14 +98,14 @@ mod tests {
 
     #[test]
     fn render_empty() {
-        let renderer = TerminalRenderer;
-        let output = renderer.render(&[]);
+        let renderer = TerminalFormatter;
+        let output = renderer.format(&[]);
         assert!(output.contains("No issues found"));
     }
 
     #[test]
     fn render_findings() {
-        let renderer = TerminalRenderer;
+        let renderer = TerminalFormatter;
         let findings = vec![
             Finding {
                 file: "src/main.rs".into(),
@@ -137,7 +128,7 @@ mod tests {
                 agent: "backend".into(),
             },
         ];
-        let output = renderer.render(&findings);
+        let output = renderer.format(&findings);
         // Check content is present (may be wrapped in ANSI color codes)
         assert!(output.contains("src/main.rs:42"));
         assert!(output.contains("Bug found"));

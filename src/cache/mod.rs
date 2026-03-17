@@ -1,7 +1,11 @@
 //! Content-hash based result cache.
 //!
-//! Caches review results to skip redundant LLM calls when
-//! the same file+agent+model combination is reviewed again.
+//! # Bounded Context: Result Caching
+//!
+//! Owns hash computation, cache-hit lookup, result persistence,
+//! and sidecar metadata for prior findings. Operates purely on
+//! content hashes and serialized findings — has no knowledge of
+//! LLM providers or diff parsing.
 //!
 //! A sidecar `.meta` file per file×agent×model triple tracks the
 //! most recent cache key so that prior findings can be retrieved
@@ -9,17 +13,20 @@
 
 pub mod store;
 
-use sha2::{Digest, Sha256};
-
 use crate::models::finding::Finding;
 
 /// Compute a cache key from file content, agent config, and model name.
+///
+/// Uses xxHash3-128 for speed — ~10× faster than SHA-256 on the 50KB+
+/// prompts that typically feed into this. The collision risk is acceptable
+/// for content-addressable cache keys (not security-critical).
 pub fn cache_key(file_content: &str, agent_name: &str, model: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(file_content.as_bytes());
-    hasher.update(agent_name.as_bytes());
-    hasher.update(model.as_bytes());
-    hex::encode(hasher.finalize())
+    let mut data = Vec::with_capacity(file_content.len() + agent_name.len() + model.len());
+    data.extend_from_slice(file_content.as_bytes());
+    data.extend_from_slice(agent_name.as_bytes());
+    data.extend_from_slice(model.as_bytes());
+    let hash = xxhash_rust::xxh3::xxh3_128(&data);
+    format!("{hash:032x}")
 }
 
 /// The cache engine for review results.
@@ -46,24 +53,24 @@ impl CacheEngine {
     }
 
     /// Look up cached findings.
-    pub fn get(&self, key: &str) -> Option<Vec<Finding>> {
+    pub async fn get(&self, key: &str) -> Option<Vec<Finding>> {
         if !self.enabled {
             return None;
         }
-        self.store.get(key)
+        self.store.get(key).await
     }
 
     /// Store findings in the cache.
-    pub fn put(&self, key: &str, findings: &[Finding]) {
+    pub async fn put(&self, key: &str, findings: &[Finding]) {
         if !self.enabled {
             return;
         }
-        self.store.put(key, findings);
+        self.store.put(key, findings).await;
     }
 
     /// Write the sidecar that maps a file×agent×model×scope tuple to its
     /// latest content-hash cache key.
-    pub fn put_sidecar(
+    pub async fn put_sidecar(
         &self,
         file_path: &str,
         agent_name: &str,
@@ -75,7 +82,8 @@ impl CacheEngine {
             return;
         }
         self.store
-            .put_sidecar(file_path, agent_name, model, cache_key, review_scope);
+            .put_sidecar(file_path, agent_name, model, cache_key, review_scope)
+            .await;
     }
 
     /// Retrieve findings from the *previous* review of a file×agent×model×scope
@@ -83,7 +91,7 @@ impl CacheEngine {
     ///
     /// Returns `None` when caching is disabled, on first run, or when
     /// the cache key hasn't changed (pure hit).
-    pub fn get_previous(
+    pub async fn get_previous(
         &self,
         file_path: &str,
         agent_name: &str,
@@ -94,33 +102,35 @@ impl CacheEngine {
         if !self.enabled {
             return None;
         }
-        self.store.get_previous(
-            file_path,
-            agent_name,
-            model,
-            current_cache_key,
-            review_scope,
-        )
+        self.store
+            .get_previous(
+                file_path,
+                agent_name,
+                model,
+                current_cache_key,
+                review_scope,
+            )
+            .await
     }
 
     /// Remove stale `.meta` sidecar files older than the given duration.
     ///
     /// Returns the number of files removed.
-    pub fn cleanup_stale(&self, max_age: std::time::Duration) -> usize {
+    pub async fn cleanup_stale(&self, max_age: std::time::Duration) -> usize {
         if !self.enabled {
             return 0;
         }
-        self.store.cleanup_stale_sidecars(max_age)
+        self.store.cleanup_stale_sidecars(max_age).await
     }
 
     /// Remove all cached entries.
-    pub fn clear(&self) -> Result<store::CacheStats, std::io::Error> {
-        self.store.clear()
+    pub async fn clear(&self) -> Result<store::CacheStats, std::io::Error> {
+        self.store.clear().await
     }
 
     /// Compute statistics about the cache.
-    pub fn stats(&self) -> Result<store::CacheStats, std::io::Error> {
-        self.store.stats()
+    pub async fn stats(&self) -> Result<store::CacheStats, std::io::Error> {
+        self.store.stats().await
     }
 
     /// Return the cache directory path.
@@ -154,27 +164,35 @@ mod tests {
         assert_ne!(k1, k2);
     }
 
-    #[test]
-    fn get_previous_returns_none_when_disabled() {
+    #[tokio::test]
+    async fn get_previous_returns_none_when_disabled() {
         // CacheEngine with enabled=false should never return prior findings
         let engine = CacheEngine::new(false);
         assert!(
             engine
                 .get_previous("f.rs", "backend", "model", "key", "main")
+                .await
                 .is_none()
         );
     }
 
-    #[test]
-    fn put_sidecar_noop_when_disabled() {
+    #[tokio::test]
+    async fn put_sidecar_noop_when_disabled() {
         // Should not panic or write anything when disabled
         let engine = CacheEngine::new(false);
-        engine.put_sidecar("f.rs", "backend", "model", "key", "main");
+        engine
+            .put_sidecar("f.rs", "backend", "model", "key", "main")
+            .await;
     }
 
-    #[test]
-    fn cleanup_stale_noop_when_disabled() {
+    #[tokio::test]
+    async fn cleanup_stale_noop_when_disabled() {
         let engine = CacheEngine::new(false);
-        assert_eq!(engine.cleanup_stale(std::time::Duration::from_secs(1)), 0);
+        assert_eq!(
+            engine
+                .cleanup_stale(std::time::Duration::from_secs(1))
+                .await,
+            0
+        );
     }
 }

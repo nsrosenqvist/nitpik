@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
-use regex::Regex;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
@@ -13,6 +12,9 @@ use serde_json::json;
 
 /// Maximum number of search results to return.
 const MAX_RESULTS: usize = 50;
+
+/// Maximum wall-clock time allowed for a search operation.
+const SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Arguments for the search_text tool.
 #[derive(Debug, Deserialize)]
@@ -125,65 +127,81 @@ pub async fn search_text(
     pattern: &str,
     is_regex: bool,
 ) -> Result<Vec<SearchResult>, String> {
+    use regex::RegexBuilder;
+
+    // Use RegexBuilder with size_limit to prevent pathological backtracking
+    // from LLM-generated patterns.
     let regex = if is_regex {
-        Regex::new(pattern).map_err(|e| format!("invalid regex: {e}"))?
+        RegexBuilder::new(pattern)
+            .size_limit(10 * 1024 * 1024) // 10 MB compiled regex limit
+            .build()
+            .map_err(|e| format!("invalid regex: {e}"))?
     } else {
-        Regex::new(&regex::escape(pattern)).map_err(|e| format!("regex error: {e}"))?
+        RegexBuilder::new(&regex::escape(pattern))
+            .size_limit(10 * 1024 * 1024)
+            .build()
+            .map_err(|e| format!("regex error: {e}"))?
     };
 
     let root = repo_root.to_path_buf();
     let regex_clone = regex.clone();
 
-    // Run file traversal in a blocking task since walkdir is synchronous
-    let results = tokio::task::spawn_blocking(move || {
-        let mut results = Vec::new();
-        let walker = WalkBuilder::new(&root)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
+    // Run file traversal in a blocking task since walkdir is synchronous.
+    // Wrapped in a timeout to prevent pathological regex patterns from
+    // stalling the review indefinitely.
+    let results = tokio::time::timeout(
+        SEARCH_TIMEOUT,
+        tokio::task::spawn_blocking(move || {
+            let mut results = Vec::new();
+            let walker = WalkBuilder::new(&root)
+                .hidden(true)
+                .git_ignore(true)
+                .build();
 
-        'outer: for entry in walker.flatten() {
-            if entry.file_type().is_none_or(|ft| !ft.is_file()) {
-                continue;
-            }
-
-            // Skip binary and very large files
-            if let Ok(metadata) = entry.metadata() {
-                if metadata.len() > 1024 * 1024 {
+            'outer: for entry in walker.flatten() {
+                if entry.file_type().is_none_or(|ft| !ft.is_file()) {
                     continue;
                 }
-            }
 
-            let content = match std::fs::read_to_string(entry.path()) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
+                // Skip binary and very large files
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.len() > 1024 * 1024 {
+                        continue;
+                    }
+                }
 
-            let relative_path = entry
-                .path()
-                .strip_prefix(&root)
-                .unwrap_or(entry.path())
-                .display()
-                .to_string();
+                let content = match std::fs::read_to_string(entry.path()) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
 
-            for (i, line) in content.lines().enumerate() {
-                if regex_clone.is_match(line) {
-                    results.push(SearchResult {
-                        file: relative_path.clone(),
-                        line_number: i as u32 + 1,
-                        content: line.to_string(),
-                    });
+                let relative_path = entry
+                    .path()
+                    .strip_prefix(&root)
+                    .unwrap_or(entry.path())
+                    .display()
+                    .to_string();
 
-                    if results.len() >= MAX_RESULTS {
-                        break 'outer;
+                for (i, line) in content.lines().enumerate() {
+                    if regex_clone.is_match(line) {
+                        results.push(SearchResult {
+                            file: relative_path.clone(),
+                            line_number: i as u32 + 1,
+                            content: line.to_string(),
+                        });
+
+                        if results.len() >= MAX_RESULTS {
+                            break 'outer;
+                        }
                     }
                 }
             }
-        }
 
-        results
-    })
+            results
+        }),
+    )
     .await
+    .map_err(|_| format!("search timed out after {}s", SEARCH_TIMEOUT.as_secs()))?
     .map_err(|e| format!("search task failed: {e}"))?;
 
     Ok(results)

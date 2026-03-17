@@ -1,62 +1,235 @@
 //! Unified diff format parser.
 //!
 //! Parses the output of `git diff` (unified format) into `Vec<FileDiff>`.
+//!
+//! Uses `Cow::Borrowed` so that parsed `DiffLine` content borrows
+//! directly from the input string, avoiding per-line allocations.
+
+use std::borrow::Cow;
 
 use crate::models::diff::{DiffLine, DiffLineType, FileDiff, Hunk};
 
+/// States for the unified diff parser state machine.
+enum ParserState {
+    /// Scanning for the next `diff --git` line.
+    SeekingDiff,
+    /// Parsing extended headers (file mode, rename, index, binary) after a
+    /// `diff --git` line has been consumed.
+    Header,
+    /// Inside a hunk body, parsing `+`, `-`, ` `, and `\` lines.
+    HunkBody,
+}
+
 /// Parse a unified diff string into a list of file diffs.
-pub fn parse_unified_diff(input: &str) -> Vec<FileDiff> {
+///
+/// The returned `FileDiff` values borrow line content from `input`.
+pub fn parse_unified_diff<'a>(input: &'a str) -> Vec<FileDiff<'a>> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut lines = input.lines().peekable();
 
-    while let Some(line) = lines.next() {
-        // Look for "diff --git a/... b/..."
-        if !line.starts_with("diff --git ") {
-            continue;
-        }
+    let mut state = ParserState::SeekingDiff;
 
-        let (old_path, new_path) = parse_diff_header(line);
-        let mut is_new = false;
-        let mut is_deleted = false;
-        let mut is_rename = false;
-        let mut is_binary = false;
-        let mut hunks: Vec<Hunk> = Vec::new();
+    // Per-file accumulators — initialized when we enter Header state.
+    let mut old_path = String::new();
+    let mut new_path = String::new();
+    let mut is_new = false;
+    let mut is_deleted = false;
+    let mut is_rename = false;
+    let mut is_binary = false;
+    let mut hunks: Vec<Hunk> = Vec::new();
 
-        // Parse extended headers until we hit a hunk or another diff
-        while let Some(&next) = lines.peek() {
-            if next.starts_with("diff --git ") {
-                break;
-            }
-            if next.starts_with("new file mode") {
-                is_new = true;
-                lines.next();
-            } else if next.starts_with("deleted file mode") {
-                is_deleted = true;
-                lines.next();
-            } else if next.starts_with("rename from") || next.starts_with("rename to") {
-                is_rename = true;
-                lines.next();
-            } else if next.starts_with("similarity index")
-                || next.starts_with("dissimilarity index")
-                || next.starts_with("index ")
-            {
-                lines.next();
-            } else if next.contains("Binary files") {
-                is_binary = true;
-                lines.next();
-            } else if next.starts_with("---") || next.starts_with("+++") {
-                // File path lines before hunks
-                lines.next();
-            } else if next.starts_with("@@") {
-                // Parse hunk
-                if let Some(hunk) = parse_hunk(&mut lines) {
-                    hunks.push(hunk);
+    // Per-hunk accumulators — initialized when we enter HunkBody state.
+    let mut hunk_old_start: u32 = 0;
+    let mut hunk_old_count: u32 = 0;
+    let mut hunk_new_start: u32 = 0;
+    let mut hunk_new_count: u32 = 0;
+    let mut hunk_header: Option<String> = None;
+    let mut hunk_lines: Vec<DiffLine<'a>> = Vec::new();
+    let mut old_line: u32 = 0;
+    let mut new_line: u32 = 0;
+
+    while let Some(&line) = lines.peek() {
+        match state {
+            ParserState::SeekingDiff => {
+                if line.starts_with("diff --git ") {
+                    let (op, np) = parse_diff_header(line);
+                    old_path = op;
+                    new_path = np;
+                    is_new = false;
+                    is_deleted = false;
+                    is_rename = false;
+                    is_binary = false;
+                    hunks = Vec::new();
+                    state = ParserState::Header;
                 }
-            } else {
                 lines.next();
             }
-        }
 
+            ParserState::Header => {
+                if line.starts_with("diff --git ") {
+                    // New file diff — flush current file and stay in Header
+                    // via transition to SeekingDiff (which will immediately
+                    // re-enter Header on the next iteration).
+                    files.push(FileDiff {
+                        old_path: std::mem::take(&mut old_path),
+                        new_path: std::mem::take(&mut new_path),
+                        is_new,
+                        is_deleted,
+                        is_rename,
+                        is_binary,
+                        hunks: std::mem::take(&mut hunks),
+                    });
+                    state = ParserState::SeekingDiff;
+                    // Don't consume the line — SeekingDiff will pick it up.
+                } else if line.starts_with("new file mode") {
+                    is_new = true;
+                    lines.next();
+                } else if line.starts_with("deleted file mode") {
+                    is_deleted = true;
+                    lines.next();
+                } else if line.starts_with("rename from") || line.starts_with("rename to") {
+                    is_rename = true;
+                    lines.next();
+                } else if line.starts_with("similarity index")
+                    || line.starts_with("dissimilarity index")
+                    || line.starts_with("index ")
+                {
+                    lines.next();
+                } else if line.contains("Binary files") {
+                    is_binary = true;
+                    lines.next();
+                } else if line.starts_with("---") || line.starts_with("+++") {
+                    lines.next();
+                } else if line.starts_with("@@") {
+                    // Transition to hunk body.
+                    if let Some((os, oc, ns, nc, hh)) = parse_hunk_header(line) {
+                        hunk_old_start = os;
+                        hunk_old_count = oc;
+                        hunk_new_start = ns;
+                        hunk_new_count = nc;
+                        hunk_header = hh;
+                        hunk_lines = Vec::new();
+                        old_line = os;
+                        new_line = ns;
+                        state = ParserState::HunkBody;
+                    }
+                    lines.next();
+                } else {
+                    lines.next();
+                }
+            }
+
+            ParserState::HunkBody => {
+                if line.starts_with("diff --git ") {
+                    // Flush current hunk, flush current file.
+                    hunks.push(Hunk {
+                        old_start: hunk_old_start,
+                        old_count: hunk_old_count,
+                        new_start: hunk_new_start,
+                        new_count: hunk_new_count,
+                        header: hunk_header.take(),
+                        lines: std::mem::take(&mut hunk_lines),
+                    });
+                    files.push(FileDiff {
+                        old_path: std::mem::take(&mut old_path),
+                        new_path: std::mem::take(&mut new_path),
+                        is_new,
+                        is_deleted,
+                        is_rename,
+                        is_binary,
+                        hunks: std::mem::take(&mut hunks),
+                    });
+                    state = ParserState::SeekingDiff;
+                    // Don't consume — SeekingDiff will pick it up.
+                } else if line.starts_with("@@") {
+                    // Flush current hunk, start a new one.
+                    hunks.push(Hunk {
+                        old_start: hunk_old_start,
+                        old_count: hunk_old_count,
+                        new_start: hunk_new_start,
+                        new_count: hunk_new_count,
+                        header: hunk_header.take(),
+                        lines: std::mem::take(&mut hunk_lines),
+                    });
+                    if let Some((os, oc, ns, nc, hh)) = parse_hunk_header(line) {
+                        hunk_old_start = os;
+                        hunk_old_count = oc;
+                        hunk_new_start = ns;
+                        hunk_new_count = nc;
+                        hunk_header = hh;
+                        hunk_lines = Vec::new();
+                        old_line = os;
+                        new_line = ns;
+                    } else {
+                        // Malformed hunk header — fall back to header state.
+                        state = ParserState::Header;
+                    }
+                    lines.next();
+                } else if let Some(content) = line.strip_prefix('+') {
+                    hunk_lines.push(DiffLine {
+                        line_type: DiffLineType::Added,
+                        content: Cow::Borrowed(content),
+                        old_line_no: None,
+                        new_line_no: Some(new_line),
+                    });
+                    new_line += 1;
+                    lines.next();
+                } else if let Some(content) = line.strip_prefix('-') {
+                    hunk_lines.push(DiffLine {
+                        line_type: DiffLineType::Removed,
+                        content: Cow::Borrowed(content),
+                        old_line_no: Some(old_line),
+                        new_line_no: None,
+                    });
+                    old_line += 1;
+                    lines.next();
+                } else if line.starts_with(' ') || line.is_empty() {
+                    let content = if line.is_empty() {
+                        Cow::Borrowed("")
+                    } else {
+                        Cow::Borrowed(&line[1..])
+                    };
+                    hunk_lines.push(DiffLine {
+                        line_type: DiffLineType::Context,
+                        content,
+                        old_line_no: Some(old_line),
+                        new_line_no: Some(new_line),
+                    });
+                    old_line += 1;
+                    new_line += 1;
+                    lines.next();
+                } else if line.starts_with('\\') {
+                    // "\ No newline at end of file" — skip
+                    lines.next();
+                } else {
+                    // Unknown line format — flush hunk and return to header parsing.
+                    hunks.push(Hunk {
+                        old_start: hunk_old_start,
+                        old_count: hunk_old_count,
+                        new_start: hunk_new_start,
+                        new_count: hunk_new_count,
+                        header: hunk_header.take(),
+                        lines: std::mem::take(&mut hunk_lines),
+                    });
+                    state = ParserState::Header;
+                    lines.next();
+                }
+            }
+        }
+    }
+
+    // Flush any in-progress hunk and file.
+    if matches!(state, ParserState::HunkBody) {
+        hunks.push(Hunk {
+            old_start: hunk_old_start,
+            old_count: hunk_old_count,
+            new_start: hunk_new_start,
+            new_count: hunk_new_count,
+            header: hunk_header.take(),
+            lines: std::mem::take(&mut hunk_lines),
+        });
+    }
+    if matches!(state, ParserState::Header | ParserState::HunkBody) {
         files.push(FileDiff {
             old_path,
             new_path,
@@ -127,71 +300,6 @@ fn find_second_prefix(s: &str) -> Option<usize> {
         }
     }
     None
-}
-
-/// Parse a single hunk starting with @@ line.
-fn parse_hunk(lines: &mut std::iter::Peekable<std::str::Lines<'_>>) -> Option<Hunk> {
-    let header_line = lines.next()?;
-    let (old_start, old_count, new_start, new_count, header) = parse_hunk_header(header_line)?;
-
-    let mut hunk_lines: Vec<DiffLine> = Vec::new();
-    let mut old_line = old_start;
-    let mut new_line = new_start;
-
-    while let Some(&next) = lines.peek() {
-        if next.starts_with("diff --git ") || next.starts_with("@@") {
-            break;
-        }
-
-        let line = lines.next().unwrap();
-
-        if let Some(content) = line.strip_prefix('+') {
-            hunk_lines.push(DiffLine {
-                line_type: DiffLineType::Added,
-                content: content.to_string(),
-                old_line_no: None,
-                new_line_no: Some(new_line),
-            });
-            new_line += 1;
-        } else if let Some(content) = line.strip_prefix('-') {
-            hunk_lines.push(DiffLine {
-                line_type: DiffLineType::Removed,
-                content: content.to_string(),
-                old_line_no: Some(old_line),
-                new_line_no: None,
-            });
-            old_line += 1;
-        } else if line.starts_with(' ') || line.is_empty() {
-            let content = if line.is_empty() {
-                String::new()
-            } else {
-                line[1..].to_string()
-            };
-            hunk_lines.push(DiffLine {
-                line_type: DiffLineType::Context,
-                content,
-                old_line_no: Some(old_line),
-                new_line_no: Some(new_line),
-            });
-            old_line += 1;
-            new_line += 1;
-        } else if line.starts_with('\\') {
-            // "\ No newline at end of file" — skip
-            continue;
-        } else {
-            // Unknown line format, stop parsing this hunk
-            break;
-        }
-    }
-
-    Some(Hunk {
-        old_start,
-        old_count,
-        new_start,
-        new_count,
-        header,
-        lines: hunk_lines,
-    })
 }
 
 /// Parse a `@@ -old_start,old_count +new_start,new_count @@ header` line.
@@ -493,5 +601,36 @@ index 1234567..abcdefg 100644
         // Edge cases
         assert_eq!(strip_diff_prefix("a"), "a");
         assert_eq!(strip_diff_prefix(""), "");
+    }
+
+    #[test]
+    fn parse_multiple_hunks_in_one_file() {
+        let diff = r#"diff --git a/multi.rs b/multi.rs
+index 1234567..abcdefg 100644
+--- a/multi.rs
++++ b/multi.rs
+@@ -1,3 +1,3 @@
+ fn first() {
+-    old1()
++    new1()
+ }
+@@ -10,3 +10,3 @@ fn gap() {
+ fn second() {
+-    old2()
++    new2()
+ }
+"#;
+        let files = parse_unified_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].hunks.len(), 2);
+
+        let h0 = &files[0].hunks[0];
+        assert_eq!(h0.old_start, 1);
+        assert_eq!(h0.lines.len(), 4);
+
+        let h1 = &files[0].hunks[1];
+        assert_eq!(h1.old_start, 10);
+        assert_eq!(h1.header.as_deref(), Some("fn gap() {"));
+        assert_eq!(h1.lines.len(), 4);
     }
 }

@@ -1,15 +1,17 @@
 //! Shared types used across all modules.
 //!
-//! This module defines the core data structures for findings, diffs,
-//! agent definitions, and review context. Other modules import from
-//! here rather than reaching into each other's internals.
+//! # Bounded Context: Domain Model
+//!
+//! Owns the canonical data structures (`Finding`, `FileDiff`,
+//! `AgentDefinition`, `ReviewContext`, `Severity`, etc.) that all
+//! other modules import. Contains no logic beyond serialization
+//! and display impls — it is the lingua franca of the codebase.
 
 pub mod agent;
 pub mod context;
 pub mod diff;
 pub mod finding;
 
-use std::fmt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -36,8 +38,21 @@ pub enum InputMode {
 }
 
 /// Supported LLM provider backends.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum ProviderName {
     #[default]
     Anthropic,
@@ -65,67 +80,8 @@ pub enum ProviderName {
     XAI,
     /// Any OpenAI-compatible API (e.g. local servers, corporate proxies).
     #[serde(rename = "openai-compatible")]
+    #[strum(serialize = "openai-compatible")]
     OpenAICompatible,
-}
-
-impl fmt::Display for ProviderName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ProviderName::Anthropic => write!(f, "anthropic"),
-            ProviderName::Azure => write!(f, "azure"),
-            ProviderName::Cohere => write!(f, "cohere"),
-            ProviderName::DeepSeek => write!(f, "deepseek"),
-            ProviderName::Galadriel => write!(f, "galadriel"),
-            ProviderName::Gemini => write!(f, "gemini"),
-            ProviderName::Groq => write!(f, "groq"),
-            ProviderName::HuggingFace => write!(f, "huggingface"),
-            ProviderName::Hyperbolic => write!(f, "hyperbolic"),
-            ProviderName::Mira => write!(f, "mira"),
-            ProviderName::Mistral => write!(f, "mistral"),
-            ProviderName::Moonshot => write!(f, "moonshot"),
-            ProviderName::Ollama => write!(f, "ollama"),
-            ProviderName::OpenAI => write!(f, "openai"),
-            ProviderName::OpenRouter => write!(f, "openrouter"),
-            ProviderName::Perplexity => write!(f, "perplexity"),
-            ProviderName::Together => write!(f, "together"),
-            ProviderName::XAI => write!(f, "xai"),
-            ProviderName::OpenAICompatible => write!(f, "openai-compatible"),
-        }
-    }
-}
-
-impl std::str::FromStr for ProviderName {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "anthropic" => Ok(ProviderName::Anthropic),
-            "azure" => Ok(ProviderName::Azure),
-            "cohere" => Ok(ProviderName::Cohere),
-            "deepseek" => Ok(ProviderName::DeepSeek),
-            "galadriel" => Ok(ProviderName::Galadriel),
-            "gemini" => Ok(ProviderName::Gemini),
-            "groq" => Ok(ProviderName::Groq),
-            "huggingface" => Ok(ProviderName::HuggingFace),
-            "hyperbolic" => Ok(ProviderName::Hyperbolic),
-            "mira" => Ok(ProviderName::Mira),
-            "mistral" => Ok(ProviderName::Mistral),
-            "moonshot" => Ok(ProviderName::Moonshot),
-            "ollama" => Ok(ProviderName::Ollama),
-            "openai" => Ok(ProviderName::OpenAI),
-            "openrouter" => Ok(ProviderName::OpenRouter),
-            "perplexity" => Ok(ProviderName::Perplexity),
-            "together" => Ok(ProviderName::Together),
-            "xai" => Ok(ProviderName::XAI),
-            "openai-compatible" => Ok(ProviderName::OpenAICompatible),
-            other => Err(format!(
-                "unsupported provider: '{other}'. Supported: anthropic, azure, cohere, \
-                 deepseek, galadriel, gemini, groq, huggingface, hyperbolic, mira, \
-                 mistral, moonshot, ollama, openai, openrouter, perplexity, together, \
-                 xai, openai-compatible"
-            )),
-        }
-    }
 }
 
 impl ProviderName {
@@ -277,9 +233,6 @@ mod tests {
     fn provider_name_from_str_invalid() {
         let result = "invalid".parse::<ProviderName>();
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("unsupported provider"));
-        assert!(err.contains("invalid"));
     }
 
     #[test]

@@ -1,12 +1,14 @@
 //! Agentic tools for LLM-driven codebase exploration.
 //!
-//! These tools allow the LLM to explore the repository when
-//! running in agentic mode (`--agent`). Each tool implements
-//! rig-core's `Tool` trait for native tool calling support.
+//! # Bounded Context: Tool Execution
 //!
-//! In addition to the built-in tools, users can define custom
-//! command-line tools in their agent profile's YAML frontmatter.
-//! See [`custom_command::CustomCommandTool`] for details.
+//! Owns the built-in tool implementations (`ReadFileTool`,
+//! `SearchTextTool`, `ListDirectoryTool`) and the `CustomCommandTool`
+//! runtime. Each tool implements rig-core's `Tool` trait. The
+//! `ToolCallLog` audit log also lives here.
+//!
+//! Tools execute filesystem and subprocess operations on behalf
+//! of the LLM — they never interpret review findings or diffs.
 //!
 //! ## Tool-call audit log
 //!
@@ -26,7 +28,7 @@ pub use list_directory::ListDirectoryTool;
 pub use read_file::ReadFileTool;
 pub use search_text::SearchTextTool;
 
-use std::sync::Mutex;
+use crossbeam_queue::SegQueue;
 use std::time::{Duration, Instant};
 
 /// A single recorded tool invocation.
@@ -44,49 +46,39 @@ pub struct ToolCallEntry {
 
 /// Process-global append-only log of tool invocations.
 ///
-/// Tools write here during their `call()` method. The progress display
-/// and post-review summary read from here.
-pub struct ToolCallLog {
-    entries: Mutex<Vec<ToolCallEntry>>,
-}
+/// Uses a lock-free `SegQueue` so `record()` never blocks under
+/// parallel agentic tool use.
+pub struct ToolCallLog;
 
-/// Global tool call log instance.
-static TOOL_CALL_LOG: std::sync::LazyLock<ToolCallLog> = std::sync::LazyLock::new(ToolCallLog::new);
+/// Global lock-free tool call log.
+static TOOL_CALL_QUEUE: SegQueue<ToolCallEntry> = SegQueue::new();
 
 impl ToolCallLog {
-    /// Create a new empty log.
-    const fn new() -> Self {
-        Self {
-            entries: Mutex::new(Vec::new()),
-        }
-    }
-
-    /// Record a tool invocation.
+    /// Record a tool invocation (lock-free push).
     pub fn record(entry: ToolCallEntry) {
-        TOOL_CALL_LOG
-            .entries
-            .lock()
-            .expect("tool call log poisoned")
-            .push(entry);
+        TOOL_CALL_QUEUE.push(entry);
     }
 
     /// Take all recorded entries, draining the log.
     pub fn drain() -> Vec<ToolCallEntry> {
-        TOOL_CALL_LOG
-            .entries
-            .lock()
-            .expect("tool call log poisoned")
-            .drain(..)
-            .collect()
+        let mut entries = Vec::new();
+        while let Some(entry) = TOOL_CALL_QUEUE.pop() {
+            entries.push(entry);
+        }
+        entries
     }
 
     /// Read all recorded entries without clearing.
+    ///
+    /// Note: this drains and re-pushes entries, so it is not truly
+    /// non-destructive under concurrent writes. Use only when no
+    /// tools are actively running (e.g., post-review summary).
     pub fn snapshot() -> Vec<ToolCallEntry> {
-        TOOL_CALL_LOG
-            .entries
-            .lock()
-            .expect("tool call log poisoned")
-            .clone()
+        let entries = Self::drain();
+        for entry in &entries {
+            TOOL_CALL_QUEUE.push(entry.clone());
+        }
+        entries
     }
 }
 

@@ -1,4 +1,11 @@
 //! Agent loading, profile resolution, and markdown+YAML parsing.
+//!
+//! # Bounded Context: Reviewer Profiles
+//!
+//! Owns profile parsing (YAML frontmatter + markdown body), built-in
+//! profile registry, tag-based auto-selection, and profile resolution
+//! from CLI flags. Produces [`AgentDefinition`](crate::models::agent::AgentDefinition)
+//! values consumed by the orchestrator — never calls the LLM directly.
 
 pub mod auto;
 pub mod builtin;

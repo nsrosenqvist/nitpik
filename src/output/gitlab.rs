@@ -10,8 +10,8 @@
 //!     codequality: gl-code-quality-report.json
 //! ```
 
-use crate::models::finding::{Finding, Severity};
-use crate::output::OutputRenderer;
+use crate::models::finding::Finding;
+use crate::output::OutputFormatter;
 
 /// GitLab Code Quality renderer.
 ///
@@ -19,18 +19,14 @@ use crate::output::OutputRenderer;
 /// as a `codequality` artifact in GitLab CI. Each finding is mapped to
 /// a CodeClimate issue with a stable fingerprint derived from the
 /// file path, line number, title, and message.
-pub struct GitlabRenderer;
+pub struct GitlabFormatter;
 
-impl OutputRenderer for GitlabRenderer {
-    fn render(&self, findings: &[Finding]) -> String {
+impl OutputFormatter for GitlabFormatter {
+    fn format(&self, findings: &[Finding]) -> String {
         let entries: Vec<serde_json::Value> = findings
             .iter()
             .map(|f| {
-                let severity = match f.severity {
-                    Severity::Error => "critical",
-                    Severity::Warning => "major",
-                    Severity::Info => "minor",
-                };
+                let severity = f.severity.as_gitlab_severity();
 
                 let mut description = f.message.clone();
                 if let Some(ref suggestion) = f.suggestion {
@@ -74,6 +70,7 @@ fn compute_fingerprint(f: &Finding) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::finding::Severity;
 
     #[test]
     fn render_single_finding() {
@@ -88,7 +85,7 @@ mod tests {
             agent: "security".into(),
         }];
 
-        let output = GitlabRenderer.render(&findings);
+        let output = GitlabFormatter.format(&findings);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
 
         assert_eq!(parsed.len(), 1);
@@ -125,7 +122,7 @@ mod tests {
             make(Severity::Warning),
             make(Severity::Info),
         ];
-        let output = GitlabRenderer.render(&findings);
+        let output = GitlabFormatter.format(&findings);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
 
         assert_eq!(parsed[0]["severity"], "critical");
@@ -146,14 +143,14 @@ mod tests {
             agent: "a".into(),
         }];
 
-        let output = GitlabRenderer.render(&findings);
+        let output = GitlabFormatter.format(&findings);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
         assert!(parsed[0]["location"]["lines"]["end"].is_null());
     }
 
     #[test]
     fn render_empty_findings() {
-        let output = GitlabRenderer.render(&[]);
+        let output = GitlabFormatter.format(&[]);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
         assert!(parsed.is_empty());
     }
@@ -211,7 +208,7 @@ mod tests {
             agent: "a".into(),
         }];
 
-        let output = GitlabRenderer.render(&findings);
+        let output = GitlabFormatter.format(&findings);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed[0]["description"], "Just the message.");
     }

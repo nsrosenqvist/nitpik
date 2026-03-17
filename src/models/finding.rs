@@ -54,6 +54,53 @@ impl fmt::Display for Severity {
     }
 }
 
+impl Severity {
+    /// GitHub Actions workflow command level.
+    pub fn as_github_level(&self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "notice",
+        }
+    }
+
+    /// GitLab Code Quality severity.
+    pub fn as_gitlab_severity(&self) -> &'static str {
+        match self {
+            Severity::Error => "critical",
+            Severity::Warning => "major",
+            Severity::Info => "minor",
+        }
+    }
+
+    /// Bitbucket Code Insights severity.
+    pub fn as_bitbucket_severity(&self) -> &'static str {
+        match self {
+            Severity::Error => "HIGH",
+            Severity::Warning => "MEDIUM",
+            Severity::Info => "LOW",
+        }
+    }
+
+    /// Checkstyle XML severity.
+    pub fn as_checkstyle_severity(&self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "info",
+        }
+    }
+
+    /// Emoji indicator for comment-based renderers.
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            Severity::Error => "🔴",
+            Severity::Warning => "🟡",
+            Severity::Info => "🔵",
+        }
+    }
+}
+
 impl std::str::FromStr for Severity {
     type Err = String;
 

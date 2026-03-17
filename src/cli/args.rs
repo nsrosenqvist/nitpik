@@ -228,21 +228,48 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
-    /// Render findings using the renderer for this format.
+    /// Format findings using the formatter for this output format.
     pub fn render(&self, findings: &[nitpik::models::finding::Finding]) -> String {
-        use nitpik::output::OutputRenderer;
+        use nitpik::output::OutputFormatter;
         match self {
-            OutputFormat::Terminal => nitpik::output::terminal::TerminalRenderer.render(findings),
-            OutputFormat::Json => nitpik::output::json::JsonRenderer.render(findings),
-            OutputFormat::Github => nitpik::output::github::GithubRenderer.render(findings),
-            OutputFormat::Gitlab => nitpik::output::gitlab::GitlabRenderer.render(findings),
+            OutputFormat::Terminal => nitpik::output::terminal::TerminalFormatter.format(findings),
+            OutputFormat::Json => nitpik::output::json::JsonFormatter.format(findings),
+            OutputFormat::Github => nitpik::output::github::GithubFormatter.format(findings),
+            OutputFormat::Gitlab => nitpik::output::gitlab::GitlabFormatter.format(findings),
             OutputFormat::Bitbucket => {
-                nitpik::output::bitbucket::BitbucketRenderer.render(findings)
+                nitpik::output::bitbucket::BitbucketFormatter.format(findings)
             }
             OutputFormat::Checkstyle => {
-                nitpik::output::checkstyle::CheckstyleRenderer.render(findings)
+                nitpik::output::checkstyle::CheckstyleFormatter.format(findings)
             }
-            OutputFormat::Forgejo => nitpik::output::forgejo::ForgejoRenderer.render(findings),
+            OutputFormat::Forgejo => nitpik::output::forgejo::ForgejoFormatter.format(findings),
+        }
+    }
+
+    /// Publish findings to external APIs for formats that support it.
+    ///
+    /// Bitbucket publishes when `BITBUCKET_WORKSPACE` is set.
+    /// Forgejo publishes when `CI_FORGE_URL` is set.
+    /// Other formats are no-ops.
+    pub async fn publish(
+        &self,
+        findings: &[nitpik::models::finding::Finding],
+        fail_on: Option<nitpik::models::finding::Severity>,
+        env: &nitpik::env::Env,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use nitpik::output::OutputPublisher;
+        match self {
+            OutputFormat::Bitbucket if env.is_set("BITBUCKET_WORKSPACE") => {
+                nitpik::output::bitbucket::BitbucketPublisher::new(fail_on, env)
+                    .publish(findings)
+                    .await
+            }
+            OutputFormat::Forgejo if env.is_set("CI_FORGE_URL") => {
+                nitpik::output::forgejo::ForgejoPublisher::new(env)
+                    .publish(findings)
+                    .await
+            }
+            _ => Ok(()),
         }
     }
 }

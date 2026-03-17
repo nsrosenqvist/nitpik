@@ -1,10 +1,10 @@
-//! Bitbucket Code Insights Annotations API renderer.
+//! Bitbucket Code Insights Annotations API formatter and publisher.
 //!
 //! Creates reports and annotations via the Bitbucket API using reqwest.
 
 use crate::env::Env;
 use crate::models::finding::{Finding, Severity, Summary};
-use crate::output::OutputRenderer;
+use crate::output::{OutputFormatter, OutputPublisher};
 use thiserror::Error;
 
 /// Errors from Bitbucket API calls.
@@ -17,22 +17,18 @@ pub enum BitbucketError {
     ApiError(String),
 }
 
-/// Bitbucket Code Insights renderer.
+/// Bitbucket Code Insights formatter.
 ///
-/// For non-async rendering, this outputs JSON that can be posted
-/// to the Bitbucket API. For actual API calls, use `post_to_bitbucket`.
-pub struct BitbucketRenderer;
+/// Outputs JSON that can be posted to the Bitbucket API.
+/// For actually posting to the API, use [`BitbucketPublisher`].
+pub struct BitbucketFormatter;
 
-impl OutputRenderer for BitbucketRenderer {
-    fn render(&self, findings: &[Finding]) -> String {
+impl OutputFormatter for BitbucketFormatter {
+    fn format(&self, findings: &[Finding]) -> String {
         let annotations: Vec<serde_json::Value> = findings
             .iter()
             .map(|f| {
-                let severity = match f.severity {
-                    Severity::Error => "HIGH",
-                    Severity::Warning => "MEDIUM",
-                    Severity::Info => "LOW",
-                };
+                let severity = f.severity.as_bitbucket_severity();
                 let mut message = f.message.clone();
                 if let Some(ref suggestion) = f.suggestion {
                     message.push_str(&format!("\n\nSuggestion: {suggestion}"));
@@ -52,6 +48,31 @@ impl OutputRenderer for BitbucketRenderer {
             "annotations": annotations
         }))
         .unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
+/// Bitbucket Code Insights publisher.
+///
+/// Posts findings as reports and annotations to the Bitbucket API.
+pub struct BitbucketPublisher<'a> {
+    fail_on: Option<Severity>,
+    env: &'a Env,
+}
+
+impl<'a> BitbucketPublisher<'a> {
+    /// Create a new publisher with the given threshold and environment.
+    pub fn new(fail_on: Option<Severity>, env: &'a Env) -> Self {
+        Self { fail_on, env }
+    }
+}
+
+impl OutputPublisher for BitbucketPublisher<'_> {
+    async fn publish(
+        &self,
+        findings: &[Finding],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        post_to_bitbucket(findings, self.fail_on, self.env).await?;
+        Ok(())
     }
 }
 
@@ -97,15 +118,11 @@ pub async fn post_to_bitbucket(
     };
 
     let client = if in_pipelines {
-        reqwest::Client::builder()
-            .proxy(
-                reqwest::Proxy::all("http://localhost:29418")
-                    .map_err(|e| BitbucketError::ApiError(format!("proxy config error: {e}")))?,
-            )
-            .build()
+        crate::http::build_bitbucket_pipelines_client()
             .map_err(|e| BitbucketError::ApiError(format!("HTTP client error: {e}")))?
     } else {
-        reqwest::Client::new()
+        crate::http::build_client()
+            .map_err(|e| BitbucketError::ApiError(format!("HTTP client error: {e}")))?
     };
 
     // The proxy expects plain http:// — it handles TLS to the upstream API.
@@ -159,11 +176,7 @@ pub async fn post_to_bitbucket(
         .iter()
         .enumerate()
         .map(|(i, f)| {
-            let severity = match f.severity {
-                Severity::Error => "HIGH",
-                Severity::Warning => "MEDIUM",
-                Severity::Info => "LOW",
-            };
+            let severity = f.severity.as_bitbucket_severity();
             let mut message = f.message.clone();
             if let Some(ref suggestion) = f.suggestion {
                 message.push_str(&format!("\n\nSuggestion: {suggestion}"));
@@ -241,7 +254,7 @@ mod tests {
     #[test]
     fn render_produces_valid_json() {
         let findings = sample_findings();
-        let output = BitbucketRenderer.render(&findings);
+        let output = BitbucketFormatter.format(&findings);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let annotations = parsed["annotations"].as_array().unwrap();
         assert_eq!(annotations.len(), 2);
@@ -281,7 +294,7 @@ mod tests {
                 agent: "t".to_string(),
             },
         ];
-        let output = BitbucketRenderer.render(&findings);
+        let output = BitbucketFormatter.format(&findings);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let annotations = parsed["annotations"].as_array().unwrap();
         assert_eq!(annotations[0]["severity"], "HIGH");
@@ -292,7 +305,7 @@ mod tests {
     #[test]
     fn render_includes_suggestion_in_message() {
         let findings = sample_findings();
-        let output = BitbucketRenderer.render(&findings);
+        let output = BitbucketFormatter.format(&findings);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let annotations = parsed["annotations"].as_array().unwrap();
         // First finding has a suggestion
@@ -305,7 +318,7 @@ mod tests {
 
     #[test]
     fn render_empty_findings() {
-        let output = BitbucketRenderer.render(&[]);
+        let output = BitbucketFormatter.format(&[]);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let annotations = parsed["annotations"].as_array().unwrap();
         assert!(annotations.is_empty());

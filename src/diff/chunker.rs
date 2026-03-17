@@ -5,15 +5,12 @@
 
 use crate::models::diff::FileDiff;
 
-/// Default max lines per chunk.
-const DEFAULT_MAX_CHUNK_LINES: usize = 500;
-
 /// Split a file diff into smaller chunks if it exceeds the line limit.
 ///
 /// Each chunk is a subset of hunks from the original diff. Returns the
 /// original diff in a single-element vec if it's small enough.
-pub fn chunk_diff(diff: &FileDiff, max_lines: Option<usize>) -> Vec<FileDiff> {
-    let max = max_lines.unwrap_or(DEFAULT_MAX_CHUNK_LINES);
+pub fn chunk_diff<'a>(diff: &FileDiff<'a>, max_lines: Option<usize>) -> Vec<FileDiff<'a>> {
+    let max = max_lines.unwrap_or(crate::constants::DEFAULT_CHUNK_LINES);
 
     let total_lines: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
     if total_lines <= max {
@@ -67,7 +64,7 @@ mod tests {
     use super::*;
     use crate::models::diff::{DiffLine, DiffLineType, Hunk};
 
-    fn make_hunk(line_count: usize) -> Hunk {
+    fn make_hunk(line_count: usize) -> Hunk<'static> {
         Hunk {
             old_start: 1,
             old_count: line_count as u32,
@@ -77,7 +74,7 @@ mod tests {
             lines: (0..line_count)
                 .map(|i| DiffLine {
                     line_type: DiffLineType::Context,
-                    content: format!("line {i}"),
+                    content: std::borrow::Cow::Owned(format!("line {i}")),
                     old_line_no: Some(i as u32 + 1),
                     new_line_no: Some(i as u32 + 1),
                 })

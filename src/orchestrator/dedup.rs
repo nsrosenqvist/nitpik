@@ -10,6 +10,8 @@
 //!    concatenation of title + message, giving a larger corpus that
 //!    naturally includes shared variable/function names.
 
+use std::collections::HashMap;
+
 use crate::models::finding::Finding;
 
 /// Deduplicate findings that are about the same issue.
@@ -17,6 +19,10 @@ use crate::models::finding::Finding;
 /// Two findings are considered duplicates if they have the same file,
 /// overlapping line ranges, and at least one of the similarity signals
 /// fires (title overlap, shared code symbol, or combined text overlap).
+///
+/// Uses a file-keyed index so each finding is only compared against
+/// other findings in the same file — O(n × k) where k is the per-file
+/// count, instead of O(n²) over the entire result set.
 pub fn deduplicate(mut findings: Vec<Finding>) -> Vec<Finding> {
     if findings.len() <= 1 {
         return findings;
@@ -26,15 +32,23 @@ pub fn deduplicate(mut findings: Vec<Finding>) -> Vec<Finding> {
     findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
 
     let mut result: Vec<Finding> = Vec::new();
+    // Index from file path → range of indices in `result` for that file
+    let mut file_index: HashMap<String, Vec<usize>> = HashMap::new();
 
     for finding in findings {
-        let is_dup = result.iter().any(|existing| {
-            existing.file == finding.file
-                && lines_overlap(existing, &finding)
-                && content_similar(existing, &finding)
+        let is_dup = file_index.get(&finding.file).is_some_and(|indices| {
+            indices.iter().any(|&i| {
+                let existing = &result[i];
+                lines_overlap(existing, &finding) && content_similar(existing, &finding)
+            })
         });
 
         if !is_dup {
+            let idx = result.len();
+            file_index
+                .entry(finding.file.clone())
+                .or_default()
+                .push(idx);
             result.push(finding);
         }
     }

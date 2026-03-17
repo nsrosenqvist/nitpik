@@ -295,16 +295,24 @@ const BROAD_DIFF_DIR_THRESHOLD: usize = 8;
 ///
 /// A non-empty list of profile name strings (e.g. `["frontend", "security"]`)
 /// suitable for passing to [`crate::agents::resolve_profiles`].
-pub fn auto_select_profiles(diffs: &[FileDiff], repo_root: &Path) -> Vec<String> {
-    let mut profiles = Vec::new();
-    let mut has_frontend = false;
-    let mut has_backend = false;
-    let mut has_architect = false;
+/// Accumulated classification signals from analyzing changed files.
+struct FileClassification {
+    has_frontend: bool,
+    has_backend: bool,
+    has_js_ts: bool,
+    js_ts_backend_signals: u32,
+    js_ts_frontend_signals: u32,
+}
 
-    // Track JS/TS files separately — their classification is ambiguous.
-    let mut has_js_ts = false;
-    let mut js_ts_backend_signals = 0u32;
-    let mut js_ts_frontend_signals = 0u32;
+/// Classify diff files by extension, path patterns, and filename heuristics.
+fn classify_files(diffs: &[FileDiff<'_>]) -> FileClassification {
+    let mut c = FileClassification {
+        has_frontend: false,
+        has_backend: false,
+        has_js_ts: false,
+        js_ts_backend_signals: 0,
+        js_ts_frontend_signals: 0,
+    };
 
     for diff in diffs {
         let path = diff.path();
@@ -313,7 +321,7 @@ pub fn auto_select_profiles(diffs: &[FileDiff], repo_root: &Path) -> Vec<String>
         // ── Always-frontend extensions ────────────────────────────────
         match ext {
             "vue" | "svelte" | "css" | "scss" | "less" | "html" | "astro" => {
-                has_frontend = true;
+                c.has_frontend = true;
                 continue;
             }
             _ => {}
@@ -323,7 +331,7 @@ pub fn auto_select_profiles(diffs: &[FileDiff], repo_root: &Path) -> Vec<String>
         match ext {
             "rs" | "go" | "py" | "rb" | "java" | "kt" | "cs" | "php" | "ex" | "exs" | "c"
             | "cpp" | "h" | "hpp" | "scala" | "clj" | "zig" | "nim" | "erl" | "gleam" => {
-                has_backend = true;
+                c.has_backend = true;
                 continue;
             }
             _ => {}
@@ -334,40 +342,36 @@ pub fn auto_select_profiles(diffs: &[FileDiff], repo_root: &Path) -> Vec<String>
             ext,
             "js" | "jsx" | "ts" | "tsx" | "mjs" | "mts" | "cjs" | "cts"
         ) {
-            has_js_ts = true;
+            c.has_js_ts = true;
 
-            // Filename-suffix heuristics (e.g. *.controller.ts → backend)
             if JS_BACKEND_FILE_SUFFIXES.iter().any(|s| path.ends_with(s)) {
-                js_ts_backend_signals += 1;
+                c.js_ts_backend_signals += 1;
                 continue;
             }
 
-            // Root-level server entrypoints (e.g. src/server.ts → backend)
             let filename = path.rsplit('/').next().unwrap_or(path);
             if JS_BACKEND_ROOT_FILES.contains(&filename) && !is_frontend_path(path) {
-                js_ts_backend_signals += 1;
+                c.js_ts_backend_signals += 1;
                 continue;
             }
 
-            // Path-segment heuristics
             if JS_BACKEND_PATH_SEGMENTS
                 .iter()
                 .any(|seg| path.contains(seg))
             {
-                js_ts_backend_signals += 1;
+                c.js_ts_backend_signals += 1;
                 continue;
             }
             if JS_FRONTEND_PATH_SEGMENTS
                 .iter()
                 .any(|seg| path.contains(seg))
             {
-                js_ts_frontend_signals += 1;
+                c.js_ts_frontend_signals += 1;
                 continue;
             }
 
-            // JSX/TSX files without explicit backend signals lean frontend
             if matches!(ext, "jsx" | "tsx") {
-                js_ts_frontend_signals += 1;
+                c.js_ts_frontend_signals += 1;
             }
 
             continue;
@@ -375,21 +379,25 @@ pub fn auto_select_profiles(diffs: &[FileDiff], repo_root: &Path) -> Vec<String>
 
         // ── Generic path-based heuristics for other extensions ────────
         if path.contains("frontend/") || path.contains("client/") {
-            has_frontend = true;
+            c.has_frontend = true;
         }
         if path.contains("backend/") || path.contains("server/") || path.contains("api/") {
-            has_backend = true;
+            c.has_backend = true;
         }
     }
 
-    // ── Architect triggers ────────────────────────────────────────────
-    // 1. Structural files: CI, IaC, build configs, dependency manifests, etc.
+    c
+}
+
+/// Returns `true` if the diff set warrants an architect reviewer.
+///
+/// Triggers on structural files (CI, IaC, build configs) or large/broad diffs.
+fn should_include_architect(diffs: &[FileDiff<'_>]) -> bool {
     let touches_architecture = diffs.iter().any(|d| {
         let p = d.path();
         ARCHITECTURE_FILE_PATTERNS.iter().any(|pat| p.contains(pat))
     });
 
-    // 2. Large or broad diffs: many files or many distinct directories.
     let file_count = diffs.len();
     let dir_count = {
         let mut dirs: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -403,54 +411,46 @@ pub fn auto_select_profiles(diffs: &[FileDiff], repo_root: &Path) -> Vec<String>
     let is_large_diff =
         file_count >= LARGE_DIFF_FILE_THRESHOLD || dir_count >= BROAD_DIFF_DIR_THRESHOLD;
 
-    if touches_architecture || is_large_diff {
-        has_architect = true;
-    }
+    touches_architecture || is_large_diff
+}
+
+pub fn auto_select_profiles(diffs: &[FileDiff<'_>], repo_root: &Path) -> Vec<String> {
+    let mut c = classify_files(diffs);
+    let has_architect = should_include_architect(diffs);
 
     // ── Resolve ambiguous JS/TS classification ────────────────────────
-    if has_js_ts {
-        // Start from path-level signals, then layer in project root context.
-        // Path signals are authoritative for the files they match, but some
-        // JS/TS files may not sit under a recognized directory (e.g.
-        // `worker/src/index.ts`), so we always consult the project root to
-        // catch what paths alone miss.
-        if js_ts_backend_signals > 0 {
-            has_backend = true;
+    if c.has_js_ts {
+        if c.js_ts_backend_signals > 0 {
+            c.has_backend = true;
         }
-        if js_ts_frontend_signals > 0 {
-            has_frontend = true;
+        if c.js_ts_frontend_signals > 0 {
+            c.has_frontend = true;
         }
 
-        // Consult the project root when paths left either side unresolved,
-        // or when there were JS/TS files with no path signal at all.
-        let has_unclassified_js_ts = has_js_ts
-            && (js_ts_backend_signals + js_ts_frontend_signals)
-                < diffs
-                    .iter()
-                    .filter(|d| {
-                        matches!(
-                            d.path().rsplit('.').next().unwrap_or(""),
-                            "js" | "jsx" | "ts" | "tsx" | "mjs" | "mts" | "cjs" | "cts"
-                        )
-                    })
-                    .count() as u32;
+        let js_ts_file_count = diffs
+            .iter()
+            .filter(|d| {
+                matches!(
+                    d.path().rsplit('.').next().unwrap_or(""),
+                    "js" | "jsx" | "ts" | "tsx" | "mjs" | "mts" | "cjs" | "cts"
+                )
+            })
+            .count() as u32;
+        let has_unclassified =
+            (c.js_ts_backend_signals + c.js_ts_frontend_signals) < js_ts_file_count;
 
-        if has_unclassified_js_ts
-            || (has_js_ts && (js_ts_backend_signals == 0 || js_ts_frontend_signals == 0))
-        {
+        if has_unclassified || (c.js_ts_backend_signals == 0 || c.js_ts_frontend_signals == 0) {
             let root_signal = detect_js_ts_project_type(repo_root);
             match root_signal {
-                JsTsSignal::Backend => has_backend = true,
-                JsTsSignal::Frontend => has_frontend = true,
+                JsTsSignal::Backend => c.has_backend = true,
+                JsTsSignal::Frontend => c.has_frontend = true,
                 JsTsSignal::Both => {
-                    has_backend = true;
-                    has_frontend = true;
+                    c.has_backend = true;
+                    c.has_frontend = true;
                 }
                 JsTsSignal::Unknown => {
-                    // Root gave no signal either — if paths didn't resolve
-                    // anything, default JS/TS to frontend.
-                    if !has_backend && !has_frontend {
-                        has_frontend = true;
+                    if !c.has_backend && !c.has_frontend {
+                        c.has_frontend = true;
                     }
                 }
             }
@@ -458,10 +458,11 @@ pub fn auto_select_profiles(diffs: &[FileDiff], repo_root: &Path) -> Vec<String>
     }
 
     // ── Build profile list ────────────────────────────────────────────
-    if has_frontend {
+    let mut profiles = Vec::new();
+    if c.has_frontend {
         profiles.push("frontend".to_string());
     }
-    if has_backend || !has_frontend {
+    if c.has_backend || !c.has_frontend {
         profiles.push(DEFAULT_PROFILE.to_string());
     }
     if has_architect {
@@ -566,7 +567,7 @@ mod tests {
     use crate::models::diff::FileDiff;
     use std::path::PathBuf;
 
-    fn make_diff(path: &str) -> FileDiff {
+    fn make_diff(path: &str) -> FileDiff<'static> {
         FileDiff {
             old_path: path.to_string(),
             new_path: path.to_string(),
@@ -879,7 +880,7 @@ mod tests {
     fn large_diff_triggers_architect() {
         let (_dir, root) = bare_root();
         // 15 files across a few dirs — meets the file count threshold.
-        let diffs: Vec<FileDiff> = (0..15)
+        let diffs: Vec<FileDiff<'_>> = (0..15)
             .map(|i| make_diff(&format!("src/module_{i}.rs")))
             .collect();
         let profiles = auto_select_profiles(&diffs, &root);
@@ -893,7 +894,7 @@ mod tests {
     fn broad_diff_triggers_architect() {
         let (_dir, root) = bare_root();
         // 8 files in 8 distinct directories — meets the directory breadth threshold.
-        let diffs: Vec<FileDiff> = (0..8)
+        let diffs: Vec<FileDiff<'_>> = (0..8)
             .map(|i| make_diff(&format!("src/module_{i}/lib.rs")))
             .collect();
         let profiles = auto_select_profiles(&diffs, &root);
@@ -917,7 +918,7 @@ mod tests {
     #[test]
     fn few_files_in_same_dir_does_not_trigger_architect() {
         let (_dir, root) = bare_root();
-        let diffs: Vec<FileDiff> = (0..5)
+        let diffs: Vec<FileDiff<'_>> = (0..5)
             .map(|i| make_diff(&format!("src/handlers/handler_{i}.rs")))
             .collect();
         let profiles = auto_select_profiles(&diffs, &root);

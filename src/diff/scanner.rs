@@ -3,6 +3,7 @@
 //! When `--path` is used, we scan files and create synthetic diffs
 //! treating all content as "added" for review purposes.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use ignore::WalkBuilder;
@@ -12,7 +13,7 @@ use crate::models::diff::{DiffLine, DiffLineType, FileDiff, Hunk};
 use super::DiffError;
 
 /// Scan a file or directory and produce synthetic file diffs for review.
-pub async fn scan_path(path: &Path) -> Result<Vec<FileDiff>, DiffError> {
+pub async fn scan_path(path: &Path) -> Result<Vec<FileDiff<'static>>, DiffError> {
     if !path.exists() {
         return Err(DiffError::PathNotFound(path.display().to_string()));
     }
@@ -40,7 +41,7 @@ pub async fn scan_path(path: &Path) -> Result<Vec<FileDiff>, DiffError> {
 }
 
 /// Create a synthetic diff for a single file (all lines as "added").
-async fn scan_single_file(path: &Path) -> Result<Option<FileDiff>, DiffError> {
+async fn scan_single_file(path: &Path) -> Result<Option<FileDiff<'static>>, DiffError> {
     let content = match tokio::fs::read_to_string(path).await {
         Ok(c) => c,
         Err(_) => return Ok(None), // Skip binary or unreadable files
@@ -50,12 +51,12 @@ async fn scan_single_file(path: &Path) -> Result<Option<FileDiff>, DiffError> {
         return Ok(None);
     }
 
-    let lines: Vec<DiffLine> = content
+    let lines: Vec<DiffLine<'static>> = content
         .lines()
         .enumerate()
         .map(|(i, line)| DiffLine {
             line_type: DiffLineType::Added,
-            content: line.to_string(),
+            content: Cow::Owned(line.to_string()),
             old_line_no: None,
             new_line_no: Some(i as u32 + 1),
         })

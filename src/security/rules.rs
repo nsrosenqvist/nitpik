@@ -9,14 +9,10 @@
 //! states. This cost is paid once per process and only when secret scanning
 //! is enabled — the rules are never loaded on the normal review path.
 
+use rayon::prelude::*;
 use regex::Regex;
 use serde::Deserialize;
 use std::path::Path;
-
-/// Maximum compiled regex size (50 MB). Some gitleaks patterns with
-/// large bounded repetitions (e.g. `[\w-]{50,1000}`) produce DFA states
-/// that exceed the default 10 MB limit.
-const REGEX_SIZE_LIMIT: usize = 50 * 1024 * 1024;
 
 /// A single secret scanning rule with a pre-compiled regex.
 #[derive(Debug, Clone)]
@@ -41,7 +37,7 @@ pub struct SecretRule {
 /// Compile a regex pattern with the project-wide elevated size limit.
 fn compile_regex(pattern: &str) -> Result<Regex, regex::Error> {
     regex::RegexBuilder::new(pattern)
-        .size_limit(REGEX_SIZE_LIMIT)
+        .size_limit(crate::constants::REGEX_SIZE_LIMIT)
         .build()
 }
 
@@ -112,6 +108,46 @@ struct GitleaksAllowlist {
     _extra: std::collections::HashMap<String, toml::Value>,
 }
 
+/// Compile a single gitleaks rule into a `SecretRule`, returning `None`
+/// for path-only or invalid-regex rules.
+fn compile_gitleaks_rule(r: GitleaksRule) -> Option<SecretRule> {
+    // Skip path-only rules that have no regex pattern.
+    let regex_str = r.regex?;
+
+    // Pre-compile with elevated size limit for large patterns.
+    let compiled_regex = match compile_regex(&regex_str) {
+        Ok(re) => re,
+        Err(e) => {
+            eprintln!(
+                "Warning: skipping secret rule '{}': invalid regex: {e}",
+                r.id
+            );
+            return None;
+        }
+    };
+
+    // Merge allowlist from both singular and plural forms
+    let mut allowlist_patterns = Vec::new();
+    if let Some(al) = r.allowlist {
+        allowlist_patterns.extend(al.regexes);
+    }
+    if let Some(als) = r.allowlists {
+        for al in als {
+            allowlist_patterns.extend(al.regexes);
+        }
+    }
+
+    Some(SecretRule {
+        id: r.id.clone(),
+        description: r.description,
+        regex: regex_str,
+        compiled_regex,
+        keywords: r.keywords,
+        entropy_threshold: r.entropy,
+        allowlist_regexes: compile_allowlist(allowlist_patterns, &r.id),
+    })
+}
+
 /// Load the default built-in rules from embedded gitleaks-compatible TOML.
 ///
 /// The rules are vendored from the gitleaks project and compiled into
@@ -122,44 +158,8 @@ pub fn default_rules() -> Vec<SecretRule> {
 
     config
         .rules
-        .into_iter()
-        .filter_map(|r| {
-            // Skip path-only rules that have no regex pattern.
-            let regex_str = r.regex?;
-
-            // Pre-compile with elevated size limit for large patterns.
-            let compiled_regex = match compile_regex(&regex_str) {
-                Ok(re) => re,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: skipping secret rule '{}': invalid regex: {e}",
-                        r.id
-                    );
-                    return None;
-                }
-            };
-
-            // Merge allowlist from both singular and plural forms
-            let mut allowlist_patterns = Vec::new();
-            if let Some(al) = r.allowlist {
-                allowlist_patterns.extend(al.regexes);
-            }
-            if let Some(als) = r.allowlists {
-                for al in als {
-                    allowlist_patterns.extend(al.regexes);
-                }
-            }
-
-            Some(SecretRule {
-                id: r.id.clone(),
-                description: r.description,
-                regex: regex_str,
-                compiled_regex,
-                keywords: r.keywords,
-                entropy_threshold: r.entropy,
-                allowlist_regexes: compile_allowlist(allowlist_patterns, &r.id),
-            })
-        })
+        .into_par_iter()
+        .filter_map(compile_gitleaks_rule)
         .collect()
 }
 
@@ -173,41 +173,8 @@ pub fn load_rules_from_file(path: &Path) -> Result<Vec<SecretRule>, String> {
 
     Ok(config
         .rules
-        .into_iter()
-        .filter_map(|r| {
-            let regex_str = r.regex?;
-
-            let compiled_regex = match compile_regex(&regex_str) {
-                Ok(re) => re,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: skipping secret rule '{}': invalid regex: {e}",
-                        r.id
-                    );
-                    return None;
-                }
-            };
-
-            let mut allowlist_patterns = Vec::new();
-            if let Some(al) = r.allowlist {
-                allowlist_patterns.extend(al.regexes);
-            }
-            if let Some(als) = r.allowlists {
-                for al in als {
-                    allowlist_patterns.extend(al.regexes);
-                }
-            }
-
-            Some(SecretRule {
-                id: r.id.clone(),
-                description: r.description,
-                regex: regex_str,
-                compiled_regex,
-                keywords: r.keywords,
-                entropy_threshold: r.entropy,
-                allowlist_regexes: compile_allowlist(allowlist_patterns, &r.id),
-            })
-        })
+        .into_par_iter()
+        .filter_map(compile_gitleaks_rule)
         .collect())
 }
 

@@ -51,7 +51,7 @@ impl ReviewProvider for MockProvider {
 }
 
 /// Helper: build a simple file diff for testing.
-fn test_diff(path: &str, added_content: &str) -> FileDiff {
+fn test_diff(path: &str, added_content: &str) -> FileDiff<'static> {
     FileDiff {
         old_path: path.to_string(),
         new_path: path.to_string(),
@@ -68,13 +68,13 @@ fn test_diff(path: &str, added_content: &str) -> FileDiff {
             lines: vec![
                 DiffLine {
                     line_type: DiffLineType::Context,
-                    content: "// existing".to_string(),
+                    content: std::borrow::Cow::Owned("// existing".to_string()),
                     old_line_no: Some(1),
                     new_line_no: Some(1),
                 },
                 DiffLine {
                     line_type: DiffLineType::Added,
-                    content: added_content.to_string(),
+                    content: std::borrow::Cow::Owned(added_content.to_string()),
                     old_line_no: None,
                     new_line_no: Some(2),
                 },
@@ -582,23 +582,27 @@ async fn prior_findings_injected_on_cache_invalidation() {
     let cache_key1 = nitpik::cache::cache_key(&prompt1, "prior-agent", &config.provider.model);
 
     // Store findings + sidecar for run 1
-    store.put(&cache_key1, &initial_findings);
-    store.put_sidecar(
-        "src/app.rs",
-        "prior-agent",
-        &config.provider.model,
-        &cache_key1,
-        "",
-    );
+    store.put(&cache_key1, &initial_findings).await;
+    store
+        .put_sidecar(
+            "src/app.rs",
+            "prior-agent",
+            &config.provider.model,
+            &cache_key1,
+            "",
+        )
+        .await;
 
     // Verify the sidecar was written
-    let prior = store.get_previous(
-        "src/app.rs",
-        "prior-agent",
-        &config.provider.model,
-        "different-key",
-        "",
-    );
+    let prior = store
+        .get_previous(
+            "src/app.rs",
+            "prior-agent",
+            &config.provider.model,
+            "different-key",
+            "",
+        )
+        .await;
     assert!(
         prior.is_some(),
         "sidecar should return prior findings for a different key"
@@ -622,14 +626,16 @@ async fn prior_findings_injected_on_cache_invalidation() {
     // Pre-seed the cache: write findings + sidecar under our temp dir
     let seeded_store =
         nitpik::cache::store::FileStore::new_with_dir(cache_dir.path().to_path_buf());
-    seeded_store.put(&cache_key1, &initial_findings);
-    seeded_store.put_sidecar(
-        "src/app.rs",
-        "prior-agent",
-        &config.provider.model,
-        &cache_key1,
-        "",
-    );
+    seeded_store.put(&cache_key1, &initial_findings).await;
+    seeded_store
+        .put_sidecar(
+            "src/app.rs",
+            "prior-agent",
+            &config.provider.model,
+            &cache_key1,
+            "",
+        )
+        .await;
 
     // Create an orchestrator with cache pointing to our temp dir
     let cache2 = CacheEngine::new_with_dir(cache_dir.path().to_path_buf());
@@ -658,20 +664,22 @@ async fn prior_findings_injected_on_cache_invalidation() {
     assert_eq!(provider.call_count.load(Ordering::SeqCst), 1);
 
     // The prompt should contain the prior findings section
-    let prompts = provider.captured_prompts.lock().unwrap();
-    assert_eq!(prompts.len(), 1, "provider should have been called once");
-    assert!(
-        prompts[0].contains("Previous Review Findings"),
-        "prompt should contain prior findings section"
-    );
-    assert!(
-        prompts[0].contains("Potential null deref"),
-        "prompt should contain the title of the prior finding"
-    );
-    assert!(
-        prompts[0].contains("Re-raise"),
-        "prompt should contain instructions about re-raising findings"
-    );
+    {
+        let prompts = provider.captured_prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 1, "provider should have been called once");
+        assert!(
+            prompts[0].contains("Previous Review Findings"),
+            "prompt should contain prior findings section"
+        );
+        assert!(
+            prompts[0].contains("Potential null deref"),
+            "prompt should contain the title of the prior finding"
+        );
+        assert!(
+            prompts[0].contains("Re-raise"),
+            "prompt should contain instructions about re-raising findings"
+        );
+    }
 
     // The result should contain the follow-up findings (from the mock)
     assert_eq!(result2.findings.len(), 1);
@@ -681,7 +689,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
     );
 
     // Clean up the seeded entries from the real cache dir
-    let _ = seeded_store.clear();
+    let _ = seeded_store.clear().await;
 }
 
 /// Verifies that `--no-prior-context` suppresses prior findings injection.
@@ -737,14 +745,16 @@ async fn no_prior_context_flag_suppresses_injection() {
     let seed_content = format!("let seed_npc_{} = 1;", std::process::id());
     let seed_prompt = format!("seed-prompt-{seed_content}");
     let seed_key = nitpik::cache::cache_key(&seed_prompt, "sec-agent", &config.provider.model);
-    seeded_store.put(&seed_key, &initial_findings);
-    seeded_store.put_sidecar(
-        "src/lib.rs",
-        "sec-agent",
-        &config.provider.model,
-        &seed_key,
-        "",
-    );
+    seeded_store.put(&seed_key, &initial_findings).await;
+    seeded_store
+        .put_sidecar(
+            "src/lib.rs",
+            "sec-agent",
+            &config.provider.model,
+            &seed_key,
+            "",
+        )
+        .await;
 
     // Run orchestrator with no_prior_context = true
     let provider = Arc::new(PromptRecordingProvider {
@@ -783,19 +793,21 @@ async fn no_prior_context_flag_suppresses_injection() {
         .expect("run should succeed");
 
     // The prompt should NOT contain prior findings
-    let prompts = provider.captured_prompts.lock().unwrap();
-    assert_eq!(prompts.len(), 1);
-    assert!(
-        !prompts[0].contains("Previous Review Findings"),
-        "prompt should NOT contain prior findings when --no-prior-context is set"
-    );
-    assert!(
-        !prompts[0].contains("SQL injection"),
-        "prompt should NOT mention prior finding titles"
-    );
+    {
+        let prompts = provider.captured_prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 1);
+        assert!(
+            !prompts[0].contains("Previous Review Findings"),
+            "prompt should NOT contain prior findings when --no-prior-context is set"
+        );
+        assert!(
+            !prompts[0].contains("SQL injection"),
+            "prompt should NOT mention prior finding titles"
+        );
+    }
 
     // Clean up
-    let _ = seeded_store.clear();
+    let _ = seeded_store.clear().await;
 }
 
 // ---------------------------------------------------------------------------

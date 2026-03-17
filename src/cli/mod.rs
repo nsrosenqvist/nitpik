@@ -1,5 +1,11 @@
 //! CLI command definitions and argument parsing.
 //!
+//! # Bounded Context: CLI Surface
+//!
+//! Owns argument definitions, subcommand dispatch, and flag
+//! validation. Translates user input into typed values consumed
+//! by `main.rs` — never performs I/O beyond printing help/errors.
+//!
 //! Uses clap derive macros for ergonomic argument definitions.
 
 pub mod args;

@@ -69,9 +69,10 @@ pub struct CustomCommandTool {
     all_param_names: Vec<String>,
     /// Repository root directory (commands run here).
     repo_root: PathBuf,
-    /// Environment variable names (or prefix globs like `AWS_*`) to
-    /// allow through to the subprocess despite being on the sensitive list.
-    env_passthrough: Vec<String>,
+    /// Pre-computed sanitized environment for subprocess execution.
+    /// Built once at construction time from the safe set +
+    /// profile-declared passthrough patterns.
+    sanitized_env: HashMap<String, String>,
 }
 
 impl CustomCommandTool {
@@ -110,6 +111,9 @@ impl CustomCommandTool {
             "required": required,
         });
 
+        // Pre-compute sanitized environment once at construction time
+        let sanitized_env = build_sanitized_env(&env_passthrough);
+
         Self {
             tool_name: def.name.clone(),
             description: def.description.clone(),
@@ -118,7 +122,7 @@ impl CustomCommandTool {
             required_params: required.clone(),
             all_param_names: all_names,
             repo_root,
-            env_passthrough,
+            sanitized_env,
         }
     }
 
@@ -153,56 +157,26 @@ impl CustomCommandTool {
         cmd
     }
 
-    /// Build a sanitized copy of the current environment.
+    /// Validate that all required parameters are present and detect unknown ones.
     ///
-    /// Uses an **allowlist** model: only variables in
-    /// [`crate::constants::SAFE_ENV_VARS`] / [`crate::constants::SAFE_ENV_PREFIXES`]
-    /// plus those matching the profile's `env_passthrough` patterns are
-    /// included. Everything else is dropped so that API keys, tokens,
-    /// and credentials never leak to LLM-invoked commands by default.
-    fn build_sanitized_env(&self) -> HashMap<String, String> {
-        let mut env = HashMap::new();
-
-        for (key, value) in std::env::vars() {
-            if self.is_allowed(&key) {
-                env.insert(key, value);
+    /// Returns the list of unknown parameter names (silently ignored but logged).
+    fn validate_params(
+        &self,
+        params: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Vec<String>, CustomCommandError> {
+        for required in &self.required_params {
+            if !params.contains_key(required) {
+                return Err(CustomCommandError(format!(
+                    "missing required parameter: {required}"
+                )));
             }
         }
-
-        env
-    }
-
-    /// Returns `true` if `var_name` is allowed in the subprocess.
-    ///
-    /// A variable is allowed if it appears in the safe set
-    /// ([`crate::constants::SAFE_ENV_VARS`] or matches a
-    /// [`crate::constants::SAFE_ENV_PREFIXES`] entry) **or** matches the
-    /// profile's `env_passthrough` patterns.
-    fn is_allowed(&self, var_name: &str) -> bool {
-        // Check the static safe list
-        if crate::constants::SAFE_ENV_VARS.contains(&var_name) {
-            return true;
-        }
-
-        // Check safe prefixes
-        for &prefix in crate::constants::SAFE_ENV_PREFIXES {
-            if var_name.starts_with(prefix) {
-                return true;
-            }
-        }
-
-        // Check profile-declared passthrough patterns
-        for pattern in &self.env_passthrough {
-            if let Some(prefix) = pattern.strip_suffix('*') {
-                if var_name.starts_with(prefix) {
-                    return true;
-                }
-            } else if pattern == var_name {
-                return true;
-            }
-        }
-
-        false
+        let unknown: Vec<String> = params
+            .keys()
+            .filter(|k| !self.all_param_names.contains(k))
+            .cloned()
+            .collect();
+        Ok(unknown)
     }
 }
 
@@ -225,47 +199,64 @@ impl Tool for CustomCommandTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // Validate required parameters
-        for required in &self.required_params {
-            if !args.params.contains_key(required) {
-                return Err(CustomCommandError(format!(
-                    "missing required parameter: {required}"
-                )));
-            }
-        }
-
-        // Warn about unknown parameters (silently ignored, but logged)
-        let unknown_params: Vec<&String> = args
-            .params
-            .keys()
-            .filter(|k| !self.all_param_names.contains(k))
-            .collect();
+        let unknown_params = self.validate_params(&args.params)?;
 
         let full_command = self.build_command(&args.params);
         let sandboxed_command = build_sandboxed_command(&full_command);
-        let sanitized_env = self.build_sanitized_env();
         let start = crate::tools::start_tool_call();
 
-        // Execute via shell to support pipes, redirects, etc.
-        let output = tokio::time::timeout(
+        let output = self
+            .execute_command(&sandboxed_command, &self.sanitized_env)
+            .await?;
+        let result = Self::prepare_output(&output);
+
+        let exit_code = output.status.code().unwrap_or(-1);
+        let mut audit_result = format!("exit {exit_code}, {}", format_byte_size(result.len()));
+        if !unknown_params.is_empty() {
+            audit_result.push_str(&format!(
+                ", ignored unknown params: {}",
+                unknown_params
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        crate::tools::finish_tool_call(start, &self.tool_name, &full_command, audit_result);
+
+        Ok(result)
+    }
+}
+
+impl CustomCommandTool {
+    /// Execute the sandboxed command with timeout and sanitized environment.
+    async fn execute_command(
+        &self,
+        sandboxed_command: &str,
+        sanitized_env: &std::collections::HashMap<String, String>,
+    ) -> Result<std::process::Output, CustomCommandError> {
+        tokio::time::timeout(
             COMMAND_TIMEOUT,
             tokio::process::Command::new("sh")
                 .arg("-c")
-                .arg(&sandboxed_command)
+                .arg(sandboxed_command)
                 .current_dir(&self.repo_root)
                 .env_clear()
-                .envs(&sanitized_env)
+                .envs(sanitized_env)
                 .output(),
         )
         .await
         .map_err(|_| {
             CustomCommandError(format!(
-                "command timed out after {}s: {full_command}",
+                "command timed out after {}s",
                 COMMAND_TIMEOUT.as_secs()
             ))
         })?
-        .map_err(|e| CustomCommandError(format!("failed to execute command: {e}")))?;
+        .map_err(|e| CustomCommandError(format!("failed to execute command: {e}")))
+    }
 
+    /// Combine stdout/stderr output, truncating if necessary.
+    fn prepare_output(output: &std::process::Output) -> String {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -295,21 +286,7 @@ impl Tool for CustomCommandTool {
             result.push_str("\n... [output truncated]");
         }
 
-        let exit_code = output.status.code().unwrap_or(-1);
-        let mut audit_result = format!("exit {exit_code}, {}", format_byte_size(result.len()));
-        if !unknown_params.is_empty() {
-            audit_result.push_str(&format!(
-                ", ignored unknown params: {}",
-                unknown_params
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        crate::tools::finish_tool_call(start, &self.tool_name, &full_command, audit_result);
-
-        Ok(result)
+        result
     }
 }
 
@@ -354,6 +331,58 @@ fn shell_escape(value: &str) -> String {
 
     // Wrap in single quotes, escaping any embedded single quotes
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Build a sanitized copy of the current environment.
+///
+/// Uses an **allowlist** model: only variables in
+/// [`crate::constants::SAFE_ENV_VARS`] / [`crate::constants::SAFE_ENV_PREFIXES`]
+/// plus those matching the profile's `env_passthrough` patterns are
+/// included. Everything else is dropped so that API keys, tokens,
+/// and credentials never leak to LLM-invoked commands by default.
+///
+/// Called once at `CustomCommandTool` construction time so the cost
+/// is not repeated per tool invocation.
+fn build_sanitized_env(env_passthrough: &[String]) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+
+    for (key, value) in std::env::vars() {
+        if is_var_allowed(&key, env_passthrough) {
+            env.insert(key, value);
+        }
+    }
+
+    env
+}
+
+/// Returns `true` if `var_name` is allowed in the subprocess.
+///
+/// A variable is allowed if it appears in the safe set
+/// ([`crate::constants::SAFE_ENV_VARS`] or matches a
+/// [`crate::constants::SAFE_ENV_PREFIXES`] entry) **or** matches the
+/// profile-declared `env_passthrough` patterns.
+fn is_var_allowed(var_name: &str, env_passthrough: &[String]) -> bool {
+    if crate::constants::SAFE_ENV_VARS.contains(&var_name) {
+        return true;
+    }
+
+    for &prefix in crate::constants::SAFE_ENV_PREFIXES {
+        if var_name.starts_with(prefix) {
+            return true;
+        }
+    }
+
+    for pattern in env_passthrough {
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            if var_name.starts_with(prefix) {
+                return true;
+            }
+        } else if pattern == var_name {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -505,8 +534,7 @@ mod tests {
         // Set a var that IS on the safe list
         // (PATH is always present, but let's verify)
 
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
-        let env = tool.build_sanitized_env();
+        let env = build_sanitized_env(&[]);
 
         assert!(
             !env.contains_key("SOME_SECRET_TOKEN"),
@@ -533,12 +561,7 @@ mod tests {
     fn env_passthrough_exact_match() {
         unsafe { std::env::set_var("CUSTOM_DB_URL", "postgres://localhost/mydb") };
 
-        let tool = CustomCommandTool::new(
-            &test_def(),
-            PathBuf::from("/tmp"),
-            vec!["CUSTOM_DB_URL".to_string()],
-        );
-        let env = tool.build_sanitized_env();
+        let env = build_sanitized_env(&["CUSTOM_DB_URL".to_string()]);
 
         assert_eq!(
             env.get("CUSTOM_DB_URL").map(|s| s.as_str()),
@@ -555,20 +578,14 @@ mod tests {
         unsafe { std::env::set_var("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI") };
 
         // Without passthrough, AWS_ vars should NOT appear
-        let tool_no_pass = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
-        let env_no_pass = tool_no_pass.build_sanitized_env();
+        let env_no_pass = build_sanitized_env(&[]);
         assert!(
             !env_no_pass.contains_key("AWS_REGION"),
             "AWS_REGION should not appear without passthrough"
         );
 
         // With passthrough, they should
-        let tool = CustomCommandTool::new(
-            &test_def(),
-            PathBuf::from("/tmp"),
-            vec!["AWS_*".to_string()],
-        );
-        let env = tool.build_sanitized_env();
+        let env = build_sanitized_env(&["AWS_*".to_string()]);
 
         assert_eq!(
             env.get("AWS_REGION").map(|s| s.as_str()),
@@ -587,30 +604,26 @@ mod tests {
 
     #[test]
     fn is_allowed_logic() {
-        let tool = CustomCommandTool::new(
-            &test_def(),
-            PathBuf::from("/tmp"),
-            vec!["JIRA_TOKEN".to_string(), "AWS_*".to_string()],
-        );
+        let passthrough = vec!["JIRA_TOKEN".to_string(), "AWS_*".to_string()];
 
         // Safe list vars
-        assert!(tool.is_allowed("PATH"));
-        assert!(tool.is_allowed("HOME"));
-        assert!(tool.is_allowed("LANG"));
+        assert!(is_var_allowed("PATH", &passthrough));
+        assert!(is_var_allowed("HOME", &passthrough));
+        assert!(is_var_allowed("LANG", &passthrough));
 
         // Safe prefix vars
-        assert!(tool.is_allowed("LC_ALL"));
-        assert!(tool.is_allowed("XDG_CONFIG_HOME"));
+        assert!(is_var_allowed("LC_ALL", &passthrough));
+        assert!(is_var_allowed("XDG_CONFIG_HOME", &passthrough));
 
         // Passthrough vars
-        assert!(tool.is_allowed("JIRA_TOKEN"));
-        assert!(tool.is_allowed("AWS_REGION"));
-        assert!(tool.is_allowed("AWS_SECRET_ACCESS_KEY"));
+        assert!(is_var_allowed("JIRA_TOKEN", &passthrough));
+        assert!(is_var_allowed("AWS_REGION", &passthrough));
+        assert!(is_var_allowed("AWS_SECRET_ACCESS_KEY", &passthrough));
 
         // Non-allowed vars
-        assert!(!tool.is_allowed("ANTHROPIC_API_KEY"));
-        assert!(!tool.is_allowed("GITHUB_TOKEN"));
-        assert!(!tool.is_allowed("DATABASE_URL"));
+        assert!(!is_var_allowed("ANTHROPIC_API_KEY", &passthrough));
+        assert!(!is_var_allowed("GITHUB_TOKEN", &passthrough));
+        assert!(!is_var_allowed("DATABASE_URL", &passthrough));
     }
 
     #[tokio::test]
@@ -642,8 +655,7 @@ mod tests {
         unsafe { std::env::set_var("LC_ALL", "en_US.UTF-8") };
         unsafe { std::env::set_var("XDG_CONFIG_HOME", "/home/test/.config") };
 
-        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
-        let env = tool.build_sanitized_env();
+        let env = build_sanitized_env(&[]);
 
         assert_eq!(
             env.get("LC_ALL").map(|s| s.as_str()),
@@ -686,6 +698,35 @@ mod tests {
         let sandboxed = build_sandboxed_command("true");
         assert!(sandboxed.contains(&format!("ulimit -v {ULIMIT_VMEM_KB}")));
         assert!(sandboxed.contains(&format!("ulimit -f {ULIMIT_FSIZE_BLOCKS}")));
+    }
+
+    #[test]
+    fn validate_params_missing_required() {
+        let def = CustomToolDefinition {
+            name: "needs_param".to_string(),
+            description: "Test".to_string(),
+            command: "echo".to_string(),
+            parameters: vec![ToolParameter {
+                name: "arg".to_string(),
+                param_type: "string".to_string(),
+                description: "Required".to_string(),
+                required: true,
+            }],
+        };
+        let tool = CustomCommandTool::new(&def, PathBuf::from("/tmp"), vec![]);
+        let params = serde_json::Map::new();
+        let result = tool.validate_params(&params);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_params_unknown_params_returned() {
+        let tool = CustomCommandTool::new(&test_def(), PathBuf::from("/tmp"), vec![]);
+        let mut params = serde_json::Map::new();
+        params.insert("filter".to_string(), serde_json::Value::String("x".into()));
+        params.insert("rogue".to_string(), serde_json::Value::String("y".into()));
+        let unknown = tool.validate_params(&params).unwrap();
+        assert_eq!(unknown, vec!["rogue".to_string()]);
     }
 
     #[tokio::test]

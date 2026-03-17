@@ -1,7 +1,11 @@
 //! Secret scanner: detection, redaction, and rule loading.
 //!
-//! Embedded scanner using vendored gitleaks rules for detecting
-//! secrets before content is sent to LLMs.
+//! # Bounded Context: Secret Scanning
+//!
+//! Owns regex rule compilation, entropy analysis, secret detection,
+//! and redaction. Runs before content reaches the LLM — produces
+//! redacted text and security `Finding` values. Has no dependency
+//! on providers or diff parsing.
 
 pub mod entropy;
 pub mod rules;

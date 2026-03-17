@@ -1,7 +1,10 @@
 //! App-wide constants.
 //!
-//! Centralizes the tool name, config paths, environment variable names,
-//! and URLs so a rename only requires changing this file.
+//! # Bounded Context: Identity & Configuration Names
+//!
+//! Single source of truth for the app name, config filenames, env var
+//! names, version strings, and URLs. Every other module imports from
+//! here — a rename only requires changing this file.
 
 // ── Version & build metadata ────────────────────────────────────────
 
@@ -122,3 +125,36 @@ pub const SAFE_ENV_PREFIXES: &[&str] = &[
     "LC_",  // locale categories (LC_ALL, LC_CTYPE, …)
     "XDG_", // XDG base directory spec
 ];
+
+// ── Retry constants ─────────────────────────────────────────────────
+
+/// Maximum number of retry attempts for transient API errors.
+pub const MAX_RETRIES: u32 = 5;
+
+/// Initial backoff delay between retries.
+pub const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Maximum backoff delay between retries.
+pub const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(60);
+
+// ── HTTP constants ──────────────────────────────────────────────────
+
+/// Default total request timeout for outgoing HTTP calls.
+pub const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Default TCP connect timeout for outgoing HTTP calls.
+pub const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+// ── Resource limits ─────────────────────────────────────────────────
+
+/// Maximum lines per chunk when splitting large diffs (context window guard).
+pub const DEFAULT_CHUNK_LINES: usize = 500;
+
+/// Maximum file size (bytes) for project documentation files.
+pub const MAX_DOC_SIZE: u64 = 256 * 1024;
+
+/// Context lines around hunks when excerpting large files.
+pub const LARGE_FILE_CONTEXT_LINES: usize = 50;
+
+/// Maximum compiled regex DFA size for gitleaks rules (50 MB).
+pub const REGEX_SIZE_LIMIT: usize = 50 * 1024 * 1024;

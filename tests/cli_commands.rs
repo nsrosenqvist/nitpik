@@ -157,11 +157,11 @@ fn sample_findings() -> Vec<Finding> {
     }]
 }
 
-#[test]
-fn cache_stats_empty() {
+#[tokio::test]
+async fn cache_stats_empty() {
     let engine = CacheEngine::new(true);
     // Stats should work even if cache dir doesn't exist yet
-    let stats = engine.stats().unwrap();
+    let stats = engine.stats().await.unwrap();
     // Just verify it doesn't error — the global cache may or may not have entries.
     let _ = stats.entries;
 }
@@ -177,31 +177,31 @@ fn cache_path_returns_value() {
     }
 }
 
-#[test]
-fn cache_clear_and_stats_roundtrip() {
+#[tokio::test]
+async fn cache_clear_and_stats_roundtrip() {
     // Use the store directly with a temp dir for isolation
     use nitpik::cache::store::FileStore;
 
     let dir = tempfile::tempdir().unwrap();
     let store = FileStore::new_with_dir(dir.path().to_path_buf());
 
-    store.put("a", &sample_findings());
-    store.put("b", &sample_findings());
+    store.put("a", &sample_findings()).await;
+    store.put("b", &sample_findings()).await;
 
-    let stats = store.stats().unwrap();
+    let stats = store.stats().await.unwrap();
     assert_eq!(stats.entries, 2);
     assert!(stats.total_bytes > 0);
 
-    let cleared = store.clear().unwrap();
+    let cleared = store.clear().await.unwrap();
     assert_eq!(cleared.entries, 2);
 
-    let after = store.stats().unwrap();
+    let after = store.stats().await.unwrap();
     assert_eq!(after.entries, 0);
     assert_eq!(after.total_bytes, 0);
 }
 
-#[test]
-fn cache_clear_idempotent() {
+#[tokio::test]
+async fn cache_clear_idempotent() {
     use nitpik::cache::store::FileStore;
 
     let dir = tempfile::tempdir().unwrap();
@@ -209,11 +209,11 @@ fn cache_clear_idempotent() {
     let store = FileStore::new_with_dir(cache_dir);
 
     // Clear when nothing exists
-    let stats = store.clear().unwrap();
+    let stats = store.clear().await.unwrap();
     assert_eq!(stats.entries, 0);
 
     // Clear again
-    let stats = store.clear().unwrap();
+    let stats = store.clear().await.unwrap();
     assert_eq!(stats.entries, 0);
 }
 

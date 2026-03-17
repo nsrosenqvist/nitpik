@@ -4,11 +4,13 @@
 
 pub mod agents;
 pub mod cache;
+pub mod ci;
 pub mod config;
 pub mod constants;
 pub mod context;
 pub mod diff;
 pub mod env;
+pub mod http;
 pub mod license;
 pub mod models;
 pub mod orchestrator;

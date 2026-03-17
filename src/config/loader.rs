@@ -210,61 +210,76 @@ impl Config {
     }
 
     /// Merge another config into this one (other takes precedence for non-default values).
-    ///
-    /// Uses a partial-config pattern: we serialize `other` to TOML value,
-    /// then only override fields that were explicitly set (non-default).
     fn merge(&mut self, other: Config) {
+        /// Override `$target` with `$source` when `$source` differs from its default.
+        macro_rules! merge_if_changed {
+            ($target:expr, $source:expr, $default:expr) => {
+                if $source != $default {
+                    $target = $source;
+                }
+            };
+        }
+        /// Override `$target` with `$source` when `$source` is `Some`.
+        macro_rules! merge_if_some {
+            ($target:expr, $source:expr) => {
+                if $source.is_some() {
+                    $target = $source;
+                }
+            };
+        }
+
         // Review settings
-        let default_review = ReviewConfig::default();
-        if other.review.default_profiles != default_review.default_profiles {
-            self.review.default_profiles = other.review.default_profiles;
-        }
-        if other.review.fail_on.is_some() {
-            self.review.fail_on = other.review.fail_on;
-        }
+        let dr = ReviewConfig::default();
+        merge_if_changed!(
+            self.review.default_profiles,
+            other.review.default_profiles,
+            dr.default_profiles
+        );
+        merge_if_some!(self.review.fail_on, other.review.fail_on);
         if other.review.agentic.enabled {
             self.review.agentic.enabled = true;
         }
-        if other.review.agentic.max_turns != AgenticConfig::default().max_turns {
-            self.review.agentic.max_turns = other.review.agentic.max_turns;
-        }
-        if other.review.agentic.max_tool_calls != AgenticConfig::default().max_tool_calls {
-            self.review.agentic.max_tool_calls = other.review.agentic.max_tool_calls;
-        }
-        if other.review.context.max_file_lines != ContextConfig::default().max_file_lines {
-            self.review.context.max_file_lines = other.review.context.max_file_lines;
-        }
-        if other.review.context.surrounding_lines != ContextConfig::default().surrounding_lines {
-            self.review.context.surrounding_lines = other.review.context.surrounding_lines;
-        }
+        let da = AgenticConfig::default();
+        merge_if_changed!(
+            self.review.agentic.max_turns,
+            other.review.agentic.max_turns,
+            da.max_turns
+        );
+        merge_if_changed!(
+            self.review.agentic.max_tool_calls,
+            other.review.agentic.max_tool_calls,
+            da.max_tool_calls
+        );
+        let dc = ContextConfig::default();
+        merge_if_changed!(
+            self.review.context.max_file_lines,
+            other.review.context.max_file_lines,
+            dc.max_file_lines
+        );
+        merge_if_changed!(
+            self.review.context.surrounding_lines,
+            other.review.context.surrounding_lines,
+            dc.surrounding_lines
+        );
 
         // Provider settings
-        let default_provider = ProviderConfig::default();
-        if other.provider.name != default_provider.name {
-            self.provider.name = other.provider.name;
-        }
-        if other.provider.model != default_provider.model {
-            self.provider.model = other.provider.model;
-        }
-        if other.provider.base_url.is_some() {
-            self.provider.base_url = other.provider.base_url;
-        }
-        if other.provider.api_key.is_some() {
-            self.provider.api_key = other.provider.api_key;
-        }
+        let dp = ProviderConfig::default();
+        merge_if_changed!(self.provider.name, other.provider.name, dp.name);
+        merge_if_changed!(self.provider.model, other.provider.model, dp.model);
+        merge_if_some!(self.provider.base_url, other.provider.base_url);
+        merge_if_some!(self.provider.api_key, other.provider.api_key);
 
         // Secret settings
         if other.secrets.enabled {
             self.secrets.enabled = true;
         }
-        if other.secrets.additional_rules.is_some() {
-            self.secrets.additional_rules = other.secrets.additional_rules;
-        }
+        merge_if_some!(
+            self.secrets.additional_rules,
+            other.secrets.additional_rules
+        );
 
         // License settings
-        if other.license.key.is_some() {
-            self.license.key = other.license.key;
-        }
+        merge_if_some!(self.license.key, other.license.key);
 
         // Telemetry settings (disabled overrides enabled)
         if !other.telemetry.enabled {

@@ -1,5 +1,11 @@
 //! Offline cryptographic license key verification.
 //!
+//! # Bounded Context: Licensing
+//!
+//! Owns key decoding, Ed25519 signature verification, expiry checks,
+//! and claims extraction. Has no network dependencies — verification
+//! is fully offline using the embedded public key.
+//!
 //! License keys are Ed25519-signed payloads containing customer info and
 //! an expiry date. The binary embeds only the public key; forging a valid
 //! key requires the private key, which never leaves the issuing server.

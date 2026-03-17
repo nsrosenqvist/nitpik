@@ -1,12 +1,18 @@
 //! Progress reporting for terminal output.
 //!
-//! Provides a live-updating file status display with colored checkmarks,
-//! spinners, and failure indicators. Designed for interactive terminals;
-//! silenced with `--quiet`.
+//! # Bounded Context: Progress Display
+//!
+//! Owns the live terminal status display — spinners, colored
+//! checkmarks, and tool-call audit summaries. Consumed by the
+//! orchestrator via `ProgressTracker`; has no knowledge of LLM
+//! providers or finding content.
+//!
+//! Designed for interactive terminals; silenced with `--quiet`.
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use colored::Colorize;
 
@@ -30,6 +36,17 @@ pub enum TaskStatus {
     },
 }
 
+/// Trait for progress reporting, enabling testable and pluggable
+/// progress displays (live terminal, quiet/no-op, custom CI, etc.).
+pub trait ProgressReporter: Send + Sync {
+    /// Update the status of a single file review task.
+    fn update(&self, file: &str, status: TaskStatus);
+    /// Print the initial progress display.
+    fn start(&self);
+    /// Clear progress and print the final summary.
+    fn finish(&self);
+}
+
 /// Tracks and renders live progress for file reviews.
 ///
 /// Thread-safe — meant to be shared across async tasks via `Arc`.
@@ -46,6 +63,8 @@ struct ProgressState {
     rendered_lines: usize,
     /// Agent names for the header.
     agents: Vec<String>,
+    /// Last time we rendered, for debouncing.
+    last_render: Instant,
 }
 
 impl ProgressTracker {
@@ -64,17 +83,27 @@ impl ProgressTracker {
                 files: file_map,
                 rendered_lines: 0,
                 agents: agents.to_vec(),
+                last_render: Instant::now(),
             }),
             enabled,
         }
     }
 
-    /// Update the status of a file and re-render.
+    /// Update the status of a file and re-render if enough time has elapsed.
+    ///
+    /// Renders immediately for terminal states (Done, Failed) to ensure
+    /// the final status is always visible. For transient states, renders
+    /// at most once per 100ms to avoid excessive terminal I/O.
     pub fn update(&self, file: &str, status: TaskStatus) {
+        let is_terminal_state = matches!(status, TaskStatus::Done | TaskStatus::Failed(_));
         let mut state = self.inner.lock().unwrap();
         state.files.insert(file.to_string(), status);
         if self.enabled {
-            Self::render(&mut state);
+            let elapsed = state.last_render.elapsed();
+            if is_terminal_state || elapsed.as_millis() >= 100 {
+                Self::render(&mut state);
+                state.last_render = Instant::now();
+            }
         }
     }
 
@@ -228,6 +257,20 @@ impl ProgressTracker {
             let _ = write!(handle, "\x1b[1A\x1b[2K");
         }
         let _ = handle.flush();
+    }
+}
+
+impl ProgressReporter for ProgressTracker {
+    fn update(&self, file: &str, status: TaskStatus) {
+        self.update(file, status);
+    }
+
+    fn start(&self) {
+        self.start();
+    }
+
+    fn finish(&self) {
+        self.finish();
     }
 }
 

@@ -1,7 +1,11 @@
 //! Baseline context assembly.
 //!
-//! Orchestrates loading full file contents for changed files
-//! and auto-detecting project documentation files.
+//! # Bounded Context: Review Context
+//!
+//! Owns full-file loading, project-doc discovery (`REVIEW.md` /
+//! `NITPIK.md` priority), and `--no-project-docs` / `--exclude-doc`
+//! filtering. Produces a [`ReviewContext`](crate::models::context::ReviewContext)
+//! that the orchestrator injects into prompts.
 
 pub mod files;
 pub mod project_docs;
@@ -26,7 +30,7 @@ use crate::models::diff::FileDiff;
 /// gathering it (via `git_log`) when the input mode is a git ref diff.
 pub async fn build_baseline_context(
     repo_root: &Path,
-    diffs: &[FileDiff],
+    diffs: &[FileDiff<'_>],
     config: &Config,
     skip_project_docs: bool,
     exclude_docs: &[String],
@@ -53,7 +57,7 @@ mod tests {
     use super::*;
     use crate::models::diff::{FileDiff, Hunk};
 
-    fn make_diff(path: &str) -> FileDiff {
+    fn make_diff(path: &str) -> FileDiff<'_> {
         FileDiff {
             old_path: path.to_string(),
             new_path: path.to_string(),
@@ -92,7 +96,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &[], &config, false, &[], Vec::new()).await;
+        let _ctx = build_baseline_context(dir.path(), &[], &config, false, &[], Vec::new()).await;
     }
 
     #[tokio::test]
@@ -116,7 +120,8 @@ mod tests {
         let diffs = vec![make_diff("nonexistent.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new()).await;
+        let _ctx =
+            build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new()).await;
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
@@ -125,7 +130,7 @@ mod tests {
         let diffs = vec![make_diff("main.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config, true, &[], Vec::new()).await;
+        let _ctx = build_baseline_context(dir.path(), &diffs, &config, true, &[], Vec::new()).await;
     }
 
     #[tokio::test]

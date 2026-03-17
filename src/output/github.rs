@@ -3,64 +3,68 @@
 //! Outputs `::warning::` and `::error::` workflow commands that
 //! GitHub Actions intercepts to create inline PR annotations.
 
-use crate::models::finding::{Finding, Severity};
-use crate::output::OutputRenderer;
+use crate::models::finding::Finding;
+use crate::output::OutputFormatter;
+use crate::output::escape;
+use std::fmt::Write;
 
 /// GitHub Actions annotation renderer.
-pub struct GithubRenderer;
+pub struct GithubFormatter;
 
-impl OutputRenderer for GithubRenderer {
-    fn render(&self, findings: &[Finding]) -> String {
-        let mut output = String::new();
+impl OutputFormatter for GithubFormatter {
+    fn format(&self, findings: &[Finding]) -> String {
+        // ~150 bytes per finding annotation
+        let mut output = String::with_capacity(findings.len() * 150 + 100);
 
         for finding in findings {
-            let level = match finding.severity {
-                Severity::Error => "error",
-                Severity::Warning => "warning",
-                Severity::Info => "notice",
-            };
+            let level = finding.severity.as_github_level();
 
-            let mut params = format!("file={},line={}", finding.file, finding.line);
+            let _ = write!(
+                output,
+                "::{level} file={},line={}",
+                finding.file, finding.line
+            );
             if let Some(end) = finding.end_line {
-                params.push_str(&format!(",endLine={end}"));
+                let _ = write!(output, ",endLine={end}");
             }
-            params.push_str(&format!(",title={}", escape_annotation(&finding.title)));
+            let _ = write!(
+                output,
+                ",title={}",
+                escape::github_annotation(&finding.title)
+            );
 
-            let mut message = escape_annotation(&finding.message);
+            let _ = write!(output, "::{}", escape::github_annotation(&finding.message));
             if let Some(ref suggestion) = finding.suggestion {
-                message.push_str(&format!(" Suggestion: {}", escape_annotation(suggestion)));
+                let _ = write!(
+                    output,
+                    " Suggestion: {}",
+                    escape::github_annotation(suggestion)
+                );
             }
-
-            output.push_str(&format!("::{level} {params}::{message}\n"));
+            output.push('\n');
         }
 
         if !findings.is_empty() {
-            output.push_str(&format!(
-                "::notice title=AI-Generated Analysis::{}\n",
-                escape_annotation(crate::constants::AI_DISCLOSURE),
-            ));
+            let _ = writeln!(
+                output,
+                "::notice title=AI-Generated Analysis::{}",
+                escape::github_annotation(crate::constants::AI_DISCLOSURE),
+            );
         }
 
         output
     }
 }
 
-/// Escape special characters for GitHub Actions annotations.
-///
-/// Workflow commands use `%0A` for newlines and `%25` for percent signs.
-fn escape_annotation(s: &str) -> String {
-    s.replace('%', "%25")
-        .replace('\n', "%0A")
-        .replace('\r', "%0D")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::finding::Severity;
+    use crate::output::escape;
 
     #[test]
     fn render_error() {
-        let renderer = GithubRenderer;
+        let renderer = GithubFormatter;
         let findings = vec![Finding {
             file: "src/auth.rs".into(),
             line: 42,
@@ -72,7 +76,7 @@ mod tests {
             agent: "security".into(),
         }];
 
-        let output = renderer.render(&findings);
+        let output = renderer.format(&findings);
         assert_eq!(
             output,
             concat!(
@@ -88,7 +92,7 @@ mod tests {
 
     #[test]
     fn render_warning() {
-        let renderer = GithubRenderer;
+        let renderer = GithubFormatter;
         let findings = vec![Finding {
             file: "test.rs".into(),
             line: 1,
@@ -100,14 +104,14 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let output = renderer.render(&findings);
+        let output = renderer.format(&findings);
         assert!(output.starts_with("::warning "));
         assert!(output.contains("file=test.rs,line=1,"));
     }
 
     #[test]
     fn render_info_as_notice() {
-        let renderer = GithubRenderer;
+        let renderer = GithubFormatter;
         let findings = vec![Finding {
             file: "test.rs".into(),
             line: 1,
@@ -119,13 +123,13 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let output = renderer.render(&findings);
+        let output = renderer.format(&findings);
         assert!(output.starts_with("::notice "));
     }
 
     #[test]
     fn escape_newlines() {
         let s = "line1\nline2";
-        assert_eq!(escape_annotation(s), "line1%0Aline2");
+        assert_eq!(escape::github_annotation(s), "line1%0Aline2");
     }
 }

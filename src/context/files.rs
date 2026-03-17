@@ -6,9 +6,6 @@ use indexmap::IndexMap;
 
 use crate::models::diff::FileDiff;
 
-/// Number of context lines around each hunk for large-file fallback.
-const LARGE_FILE_CONTEXT_LINES: usize = 50;
-
 /// Load full file contents for all changed files.
 ///
 /// For files under `max_lines`, the entire file is loaded.
@@ -16,7 +13,7 @@ const LARGE_FILE_CONTEXT_LINES: usize = 50;
 /// lines so the LLM still has type/function context around the changes.
 pub async fn load_file_contents(
     repo_root: &Path,
-    diffs: &[FileDiff],
+    diffs: &[FileDiff<'_>],
     max_lines: usize,
 ) -> IndexMap<String, String> {
     let mut contents = IndexMap::new();
@@ -38,7 +35,11 @@ pub async fn load_file_contents(
                     contents.insert(diff.path().to_string(), content);
                 } else {
                     // Large file: extract hunk regions + surrounding context
-                    let excerpt = extract_hunk_context(&content, diff, LARGE_FILE_CONTEXT_LINES);
+                    let excerpt = extract_hunk_context(
+                        &content,
+                        diff,
+                        crate::constants::LARGE_FILE_CONTEXT_LINES,
+                    );
                     contents.insert(diff.path().to_string(), excerpt);
                 }
             }
@@ -57,18 +58,39 @@ pub async fn load_file_contents(
 /// For each hunk, takes `context` lines before the hunk start and
 /// `context` lines after the hunk end, then joins non-overlapping
 /// regions with `[... N lines omitted ...]` markers.
-fn extract_hunk_context(content: &str, diff: &FileDiff, context: usize) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let total = lines.len();
-
-    if total == 0 || diff.hunks.is_empty() {
+///
+/// Uses precomputed byte offsets for O(1) per-range slicing instead
+/// of collecting all lines into a Vec.
+fn extract_hunk_context(content: &str, diff: &FileDiff<'_>, context: usize) -> String {
+    if content.is_empty() || diff.hunks.is_empty() {
         return content.to_string();
     }
 
-    // Collect ranges (0-indexed, inclusive)
+    // Build line-start byte offsets in a single pass.
+    // line_offsets[i] = byte offset of line i (0-indexed).
+    // line_offsets[total] = content.len() (sentinel for slicing).
+    let mut line_offsets: Vec<usize> = Vec::with_capacity(content.len() / 40 + 2);
+    line_offsets.push(0);
+    for (i, b) in content.bytes().enumerate() {
+        if b == b'\n' {
+            line_offsets.push(i + 1);
+        }
+    }
+    // Total number of lines (content may or may not end with '\n')
+    let total = if content.ends_with('\n') {
+        line_offsets.len() - 1
+    } else {
+        line_offsets.len()
+    };
+
+    if total == 0 {
+        return content.to_string();
+    }
+
+    // Collect ranges (0-indexed, inclusive line indices)
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     for hunk in &diff.hunks {
-        let start = hunk.new_start.saturating_sub(1) as usize; // 1-indexed to 0-indexed
+        let start = hunk.new_start.saturating_sub(1) as usize;
         let end = start + (hunk.new_count.saturating_sub(1) as usize);
 
         let range_start = start.saturating_sub(context);
@@ -90,7 +112,15 @@ fn extract_hunk_context(content: &str, diff: &FileDiff, context: usize) -> Strin
         merged.push((start, end));
     }
 
-    // Build the excerpt
+    // Slice the content directly using byte offsets
+    let line_end_byte = |line: usize| -> usize {
+        if line + 1 < line_offsets.len() {
+            line_offsets[line + 1]
+        } else {
+            content.len()
+        }
+    };
+
     let mut result = String::new();
     let mut prev_end: Option<usize> = None;
 
@@ -104,8 +134,12 @@ fn extract_hunk_context(content: &str, diff: &FileDiff, context: usize) -> Strin
             result.push_str(&format!("[... {} lines omitted ...]\n\n", start));
         }
 
-        for line in lines.iter().take(*end + 1).skip(*start) {
-            result.push_str(line);
+        let byte_start = line_offsets[*start];
+        let byte_end = line_end_byte(*end);
+        let slice = &content[byte_start..byte_end];
+        result.push_str(slice);
+        // Ensure the slice ends with a newline
+        if !slice.ends_with('\n') {
             result.push('\n');
         }
 

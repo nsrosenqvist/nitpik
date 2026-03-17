@@ -28,9 +28,6 @@ const PROJECT_DOC_FILES: &[&str] = &[
     "DEVELOPMENT.md",
 ];
 
-/// Maximum size of a project doc to include (256 KB).
-const MAX_DOC_SIZE: u64 = 256 * 1024;
-
 /// Detect and load project documentation files from the repo root.
 ///
 /// **Precedence rule:** if any priority review context file (`REVIEW.md` or
@@ -71,7 +68,7 @@ async fn load_doc_list(
 
         // Check file size before reading
         if let Ok(metadata) = tokio::fs::metadata(&path).await {
-            if metadata.len() > MAX_DOC_SIZE {
+            if metadata.len() > crate::constants::MAX_DOC_SIZE {
                 continue;
             }
         }

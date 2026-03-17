@@ -8,8 +8,7 @@
 //! In agentic mode (`--agent`), tools are registered with the agent for
 //! multi-turn codebase exploration via rig-core's native tool calling.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use rig::client::CompletionClient;
@@ -20,6 +19,7 @@ use crate::config::ProviderConfig;
 use crate::models::agent::CustomToolDefinition;
 use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
+use crate::providers::response::parse_findings_response;
 use crate::tools::{CustomCommandTool, ListDirectoryTool, ReadFileTool, SearchTextTool};
 
 use super::{ProviderError, ReviewProvider};
@@ -30,84 +30,63 @@ use super::{ProviderError, ReviewProvider};
 /// that consume part of the budget for internal reasoning tokens.
 const MAX_TOKENS: u64 = 65536;
 
-/// Maximum length of LLM response text to include in parse error messages.
-const PARSE_ERROR_PREVIEW_LEN: usize = 2000;
+/// Map a client-construction error into a [`ProviderError`].
+fn map_client_err<T>(
+    result: Result<T, impl std::fmt::Display>,
+    label: &str,
+) -> Result<T, ProviderError> {
+    result.map_err(|e| ProviderError::ApiError(format!("failed to create {label} client: {e}")))
+}
 
-/// Maximum number of retry attempts for transient API errors.
-pub const MAX_RETRIES: u32 = 5;
-
-/// Initial backoff delay between retries.
-pub const INITIAL_BACKOFF: Duration = Duration::from_secs(10);
-
-/// Maximum backoff delay between retries.
-pub const MAX_BACKOFF: Duration = Duration::from_secs(60);
-
-/// Build a simple (non-agentic) agent from a rig-core client and prompt it.
+/// Dispatch a review call through a rig-core client.
 ///
-/// Always sets `max_tokens` — all rig-core providers support it and without
-/// it some (e.g. Gemini) default to a low limit that truncates responses.
-macro_rules! prompt_simple {
-    ($client:expr, $model:expr, $system:expr, $user:expr, $label:expr) => {{
-        let agent = $client
-            .agent($model)
-            .preamble($system)
+/// In agentic mode, built-in + custom tools are registered with the agent
+/// and the output-schema / max-tokens hints are omitted so the model has
+/// full output budget for tool calls. In non-agentic mode, structured
+/// output and max-tokens are configured directly.
+#[allow(clippy::too_many_arguments)] // Parameters map 1:1 to rig-core API requirements.
+async fn dispatch_review<C: CompletionClient>(
+    client: &C,
+    model: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    label: &str,
+    agentic: bool,
+    repo_root: &Path,
+    max_turns: usize,
+    custom_tools: Vec<CustomCommandTool>,
+) -> Result<String, ProviderError> {
+    if agentic {
+        let mut builder = client
+            .agent(model)
+            .preamble(system_prompt)
+            .temperature(0.0)
+            .tool(ReadFileTool::new(repo_root.to_path_buf()))
+            .tool(SearchTextTool::new(repo_root.to_path_buf()))
+            .tool(ListDirectoryTool::new(repo_root.to_path_buf()));
+
+        for custom_tool in custom_tools {
+            builder = builder.tool(custom_tool);
+        }
+
+        let agent = builder.default_max_turns(max_turns).build();
+        agent
+            .prompt(user_prompt)
+            .await
+            .map_err(|e| ProviderError::ApiError(format!("{label} agentic error: {e}")))
+    } else {
+        let agent = client
+            .agent(model)
+            .preamble(system_prompt)
             .temperature(0.0)
             .max_tokens(MAX_TOKENS)
             .output_schema::<Vec<Finding>>()
             .build();
         agent
-            .prompt($user)
+            .prompt(user_prompt)
             .await
-            .map_err(|e| ProviderError::ApiError(format!("{} API error: {e}", $label)))
-    }};
-}
-
-/// Build an agentic agent with tools from a rig-core client and prompt it.
-///
-/// Unlike `prompt_simple!`, this intentionally omits `max_tokens` so the
-/// model has the full output budget for tool calls and reasoning.
-/// Registers the three built-in tools plus any custom command tools
-/// defined in the agent profile.
-macro_rules! prompt_agentic {
-    ($client:expr, $model:expr, $system:expr, $user:expr, $label:expr, $repo:expr, $max_turns:expr, $custom_tools:expr) => {{
-        // NOTE: `output_schema` is intentionally omitted here. Setting it
-        // alongside tools causes models (especially Gemini) to skip tool
-        // calls and immediately return schema-conforming JSON (often `[]`).
-        // We rely on the system prompt for JSON format instructions and
-        // `parse_findings_response` for parsing.
-        //
-        // NOTE: `max_tokens` is intentionally omitted. Agentic mode needs
-        // the full output budget for tool calls + reasoning tokens. An
-        // artificial cap here was causing truncated responses. The model
-        // will stop generating when it's done regardless.
-        let mut builder = $client
-            .agent($model)
-            .preamble($system)
-            .temperature(0.0)
-            .tool(ReadFileTool::new($repo.clone()))
-            .tool(SearchTextTool::new($repo.clone()))
-            .tool(ListDirectoryTool::new($repo.clone()));
-
-        // Register custom command tools from the agent profile
-        for custom_tool in $custom_tools {
-            builder = builder.tool(custom_tool);
-        }
-
-        let agent = builder.default_max_turns($max_turns).build();
-        agent
-            .prompt($user)
-            .await
-            .map_err(|e| ProviderError::ApiError(format!("{} agentic error: {e}", $label)))
-    }};
-}
-
-/// Create a rig-core client using the `Client::new(api_key)` convention.
-macro_rules! new_client {
-    ($provider_mod:path, $api_key:expr, $label:expr) => {{
-        <$provider_mod>::new($api_key).map_err(|e| {
-            ProviderError::ApiError(format!("failed to create {} client: {e}", $label))
-        })
-    }};
+            .map_err(|e| ProviderError::ApiError(format!("{label} API error: {e}")))
+    }
 }
 
 /// rig-core based review provider.
@@ -170,153 +149,17 @@ impl RigProvider {
             .ok_or_else(|| ProviderError::NotConfigured("missing API key".to_string()))
     }
 
-    /// Make a completion call through rig-core and return the raw response text.
-    async fn call_rig(
+    /// Make a completion call through rig-core, dispatching on provider once.
+    ///
+    /// In agentic mode, tools are registered with the agent for multi-turn
+    /// codebase exploration. `max_turns` and `custom_tools` are only used
+    /// when `agentic` is true.
+    async fn call(
         &self,
         model: &str,
         system_prompt: &str,
         user_prompt: &str,
-    ) -> Result<String, ProviderError> {
-        // Ollama does not require an API key; all other providers do.
-        let api_key = if self.config.name == ProviderName::Ollama {
-            self.config.api_key.as_deref().unwrap_or("")
-        } else {
-            self.api_key()?
-        };
-
-        match self.config.name {
-            ProviderName::Anthropic => {
-                let client: providers::anthropic::Client = providers::anthropic::Client::builder()
-                    .api_key(api_key)
-                    .build()
-                    .map_err(|e| {
-                        ProviderError::ApiError(format!("failed to create Anthropic client: {e}"))
-                    })?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Anthropic")
-            }
-            ProviderName::OpenAI => {
-                let client = self.build_openai_client(api_key)?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "OpenAI")
-            }
-            ProviderName::Cohere => {
-                let client = new_client!(providers::cohere::Client, api_key, "Cohere")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Cohere")
-            }
-            ProviderName::Gemini => {
-                let client = new_client!(providers::gemini::Client, api_key, "Gemini")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Gemini")
-            }
-            ProviderName::Perplexity => {
-                let client = new_client!(providers::perplexity::Client, api_key, "Perplexity")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Perplexity")
-            }
-            ProviderName::DeepSeek => {
-                let client = new_client!(providers::deepseek::Client, api_key, "DeepSeek")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "DeepSeek")
-            }
-            ProviderName::XAI => {
-                let client = new_client!(providers::xai::Client, api_key, "xAI")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "xAI")
-            }
-            ProviderName::Groq => {
-                let client = new_client!(providers::groq::Client, api_key, "Groq")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Groq")
-            }
-            ProviderName::HuggingFace => {
-                let client = new_client!(providers::huggingface::Client, api_key, "HuggingFace")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "HuggingFace")
-            }
-            ProviderName::Hyperbolic => {
-                let client = new_client!(providers::hyperbolic::Client, api_key, "Hyperbolic")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Hyperbolic")
-            }
-            ProviderName::Mira => {
-                let client = new_client!(providers::mira::Client, api_key, "Mira")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Mira")
-            }
-            ProviderName::Mistral => {
-                let client = new_client!(providers::mistral::Client, api_key, "Mistral")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Mistral")
-            }
-            ProviderName::Moonshot => {
-                let client = new_client!(providers::moonshot::Client, api_key, "Moonshot")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Moonshot")
-            }
-            ProviderName::Ollama => {
-                let mut builder =
-                    providers::ollama::Client::builder().api_key(rig::client::Nothing);
-                if let Some(ref base_url) = self.config.base_url {
-                    builder = builder.base_url(base_url);
-                }
-                let client: providers::ollama::Client = builder.build().map_err(|e| {
-                    ProviderError::ApiError(format!("failed to create Ollama client: {e}"))
-                })?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Ollama")
-            }
-            ProviderName::OpenRouter => {
-                let client = new_client!(providers::openrouter::Client, api_key, "OpenRouter")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "OpenRouter")
-            }
-            ProviderName::Together => {
-                let client = new_client!(providers::together::Client, api_key, "Together")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Together")
-            }
-            ProviderName::Azure => {
-                let base_url = self.require_base_url()?;
-                let client: providers::azure::Client = providers::azure::Client::builder()
-                    .api_key(providers::azure::AzureOpenAIAuth::ApiKey(
-                        api_key.to_string(),
-                    ))
-                    .azure_endpoint(base_url.to_string())
-                    .build()
-                    .map_err(|e| {
-                        ProviderError::ApiError(format!("failed to create Azure client: {e}"))
-                    })?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Azure")
-            }
-            ProviderName::Galadriel => {
-                let client = new_client!(providers::galadriel::Client, api_key, "Galadriel")?;
-                prompt_simple!(client, model, system_prompt, user_prompt, "Galadriel")
-            }
-            ProviderName::OpenAICompatible => {
-                let base_url = self.require_base_url()?;
-                let client: providers::openai::CompletionsClient =
-                    providers::openai::CompletionsClient::builder()
-                        .api_key(api_key)
-                        .base_url(base_url)
-                        .build()
-                        .map_err(|e| {
-                            ProviderError::ApiError(format!(
-                                "failed to create OpenAI-compatible client: {e}"
-                            ))
-                        })?;
-                prompt_simple!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "OpenAI-compatible"
-                )
-            }
-        }
-    }
-
-    /// Make an agentic call through rig-core with tools registered.
-    ///
-    /// Uses rig-core's native tool calling support. The agent will
-    /// autonomously call tools to explore the codebase. All rig-core
-    /// providers support tool calling through the `CompletionModel` trait,
-    /// so tools are registered uniformly regardless of provider.
-    ///
-    /// `max_turns` controls the maximum number of agentic loop iterations
-    /// via rig-core's `default_max_turns` on the agent builder.
-    ///
-    /// `custom_tools` are user-defined command-line tools from the agent profile.
-    async fn call_rig_agentic(
-        &self,
-        model: &str,
-        system_prompt: &str,
-        user_prompt: &str,
+        agentic: bool,
         max_turns: usize,
         custom_tools: Vec<CustomCommandTool>,
     ) -> Result<String, ProviderError> {
@@ -327,180 +170,159 @@ impl RigProvider {
             self.api_key()?
         };
 
+        // Helper closure: dispatch to the generic review function after
+        // creating a provider-specific client.  Each match arm creates
+        // its concrete client and the generic `dispatch_review` handles
+        // agent building, tool registration, and prompting.
+        let args = (
+            model,
+            system_prompt,
+            user_prompt,
+            agentic,
+            &self.repo_root,
+            max_turns,
+            custom_tools,
+        );
+
         match self.config.name {
             ProviderName::Anthropic => {
-                let client: providers::anthropic::Client = providers::anthropic::Client::builder()
-                    .api_key(api_key)
-                    .build()
-                    .map_err(|e| {
-                        ProviderError::ApiError(format!("failed to create Anthropic client: {e}"))
-                    })?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
+                let client: providers::anthropic::Client = map_client_err(
+                    providers::anthropic::Client::builder()
+                        .api_key(api_key)
+                        .build(),
                     "Anthropic",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                )?;
+                dispatch_review(
+                    &client,
+                    args.0,
+                    args.1,
+                    args.2,
+                    "Anthropic",
+                    args.3,
+                    args.4,
+                    args.5,
+                    args.6,
                 )
+                .await
             }
-            ProviderName::OpenAI | ProviderName::OpenAICompatible => {
+            ProviderName::OpenAI => {
                 let client = self.build_openai_client(api_key)?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "OpenAI",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "OpenAI", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Cohere => {
-                let client = new_client!(providers::cohere::Client, api_key, "Cohere")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Cohere",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::cohere::Client =
+                    map_client_err(providers::cohere::Client::new(api_key), "Cohere")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Cohere", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Gemini => {
-                let client = new_client!(providers::gemini::Client, api_key, "Gemini")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Gemini",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::gemini::Client =
+                    map_client_err(providers::gemini::Client::new(api_key), "Gemini")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Gemini", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Perplexity => {
-                let client = new_client!(providers::perplexity::Client, api_key, "Perplexity")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
+                let client: providers::perplexity::Client =
+                    map_client_err(providers::perplexity::Client::new(api_key), "Perplexity")?;
+                dispatch_review(
+                    &client,
+                    args.0,
+                    args.1,
+                    args.2,
                     "Perplexity",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                    args.3,
+                    args.4,
+                    args.5,
+                    args.6,
                 )
+                .await
             }
             ProviderName::DeepSeek => {
-                let client = new_client!(providers::deepseek::Client, api_key, "DeepSeek")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "DeepSeek",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::deepseek::Client =
+                    map_client_err(providers::deepseek::Client::new(api_key), "DeepSeek")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "DeepSeek", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::XAI => {
-                let client = new_client!(providers::xai::Client, api_key, "xAI")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "xAI",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::xai::Client =
+                    map_client_err(providers::xai::Client::new(api_key), "xAI")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "xAI", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Groq => {
-                let client = new_client!(providers::groq::Client, api_key, "Groq")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Groq",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::groq::Client =
+                    map_client_err(providers::groq::Client::new(api_key), "Groq")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Groq", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::HuggingFace => {
-                let client = new_client!(providers::huggingface::Client, api_key, "HuggingFace")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
+                let client: providers::huggingface::Client =
+                    map_client_err(providers::huggingface::Client::new(api_key), "HuggingFace")?;
+                dispatch_review(
+                    &client,
+                    args.0,
+                    args.1,
+                    args.2,
                     "HuggingFace",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                    args.3,
+                    args.4,
+                    args.5,
+                    args.6,
                 )
+                .await
             }
             ProviderName::Hyperbolic => {
-                let client = new_client!(providers::hyperbolic::Client, api_key, "Hyperbolic")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
+                let client: providers::hyperbolic::Client =
+                    map_client_err(providers::hyperbolic::Client::new(api_key), "Hyperbolic")?;
+                dispatch_review(
+                    &client,
+                    args.0,
+                    args.1,
+                    args.2,
                     "Hyperbolic",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                    args.3,
+                    args.4,
+                    args.5,
+                    args.6,
                 )
+                .await
             }
             ProviderName::Mira => {
-                let client = new_client!(providers::mira::Client, api_key, "Mira")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Mira",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::mira::Client =
+                    map_client_err(providers::mira::Client::new(api_key), "Mira")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Mira", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Mistral => {
-                let client = new_client!(providers::mistral::Client, api_key, "Mistral")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Mistral",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::mistral::Client =
+                    map_client_err(providers::mistral::Client::new(api_key), "Mistral")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Mistral", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Moonshot => {
-                let client = new_client!(providers::moonshot::Client, api_key, "Moonshot")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Moonshot",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::moonshot::Client =
+                    map_client_err(providers::moonshot::Client::new(api_key), "Moonshot")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Moonshot", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Ollama => {
                 let mut builder =
@@ -508,80 +330,89 @@ impl RigProvider {
                 if let Some(ref base_url) = self.config.base_url {
                     builder = builder.base_url(base_url);
                 }
-                let client: providers::ollama::Client = builder.build().map_err(|e| {
-                    ProviderError::ApiError(format!("failed to create Ollama client: {e}"))
-                })?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Ollama",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::ollama::Client = map_client_err(builder.build(), "Ollama")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Ollama", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::OpenRouter => {
-                let client = new_client!(providers::openrouter::Client, api_key, "OpenRouter")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
+                let client: providers::openrouter::Client =
+                    map_client_err(providers::openrouter::Client::new(api_key), "OpenRouter")?;
+                dispatch_review(
+                    &client,
+                    args.0,
+                    args.1,
+                    args.2,
                     "OpenRouter",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                    args.3,
+                    args.4,
+                    args.5,
+                    args.6,
                 )
+                .await
             }
             ProviderName::Together => {
-                let client = new_client!(providers::together::Client, api_key, "Together")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
-                    "Together",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                let client: providers::together::Client =
+                    map_client_err(providers::together::Client::new(api_key), "Together")?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Together", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Azure => {
                 let base_url = self.require_base_url()?;
-                let client: providers::azure::Client = providers::azure::Client::builder()
-                    .api_key(providers::azure::AzureOpenAIAuth::ApiKey(
-                        api_key.to_string(),
-                    ))
-                    .azure_endpoint(base_url.to_string())
-                    .build()
-                    .map_err(|e| {
-                        ProviderError::ApiError(format!("failed to create Azure client: {e}"))
-                    })?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
+                let client: providers::azure::Client = map_client_err(
+                    providers::azure::Client::builder()
+                        .api_key(providers::azure::AzureOpenAIAuth::ApiKey(
+                            api_key.to_string(),
+                        ))
+                        .azure_endpoint(base_url.to_string())
+                        .build(),
                     "Azure",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                )?;
+                dispatch_review(
+                    &client, args.0, args.1, args.2, "Azure", args.3, args.4, args.5, args.6,
                 )
+                .await
             }
             ProviderName::Galadriel => {
-                let client = new_client!(providers::galadriel::Client, api_key, "Galadriel")?;
-                prompt_agentic!(
-                    client,
-                    model,
-                    system_prompt,
-                    user_prompt,
+                let client: providers::galadriel::Client =
+                    map_client_err(providers::galadriel::Client::new(api_key), "Galadriel")?;
+                dispatch_review(
+                    &client,
+                    args.0,
+                    args.1,
+                    args.2,
                     "Galadriel",
-                    self.repo_root,
-                    max_turns,
-                    custom_tools
+                    args.3,
+                    args.4,
+                    args.5,
+                    args.6,
                 )
+                .await
+            }
+            ProviderName::OpenAICompatible => {
+                let base_url = self.require_base_url()?;
+                let client: providers::openai::CompletionsClient = map_client_err(
+                    providers::openai::CompletionsClient::builder()
+                        .api_key(api_key)
+                        .base_url(base_url)
+                        .build(),
+                    "OpenAI-compatible",
+                )?;
+                dispatch_review(
+                    &client,
+                    args.0,
+                    args.1,
+                    args.2,
+                    "OpenAI-compatible",
+                    args.3,
+                    args.4,
+                    args.5,
+                    args.6,
+                )
+                .await
             }
         }
     }
@@ -622,16 +453,18 @@ impl ReviewProvider for RigProvider {
                 agent.profile.agentic_instructions.as_deref(),
             );
 
-            self.call_rig_agentic(
+            self.call(
                 model,
                 &agentic_system_prompt,
                 prompt,
+                true,
                 max_turns,
                 custom_tools,
             )
             .await
         } else {
-            self.call_rig(model, &agent.system_prompt, prompt).await
+            self.call(model, &agent.system_prompt, prompt, false, 0, Vec::new())
+                .await
         };
 
         match result {
@@ -724,224 +557,12 @@ fn build_agentic_system_prompt(
     prompt
 }
 
-/// Check whether a provider error is transient and worth retrying.
-///
-/// Matches HTTP status codes commonly used for rate limiting and
-/// temporary unavailability: 429 (Too Many Requests), 503 (Service
-/// Unavailable), 529 (Overloaded), and connection/timeout errors.
-///
-/// Parse errors are never retried — the LLM is likely to produce the
-/// same malformed output on a retry (especially truncated responses).
-pub fn is_retryable(err: &ProviderError) -> bool {
-    match err {
-        ProviderError::ParseError(_) => false,
-        _ => classify_error(err).is_some(),
-    }
-}
-
-/// Classifies a provider error into a short, user-friendly message.
-///
-/// Returns `Some(message)` for transient/retryable errors, `None` otherwise.
-pub fn classify_error(err: &ProviderError) -> Option<&'static str> {
-    match err {
-        ProviderError::ApiError(msg) => {
-            let msg_lower = msg.to_lowercase();
-            if msg_lower.contains("429")
-                || msg_lower.contains("rate limit")
-                || msg_lower.contains("too many requests")
-            {
-                Some("Rate limited by API")
-            } else if msg_lower.contains("503")
-                || msg_lower.contains("service unavailable")
-                || msg_lower.contains("high demand")
-            {
-                Some("High model load")
-            } else if msg_lower.contains("529") || msg_lower.contains("overloaded") {
-                Some("API overloaded")
-            } else if msg_lower.contains("502") {
-                Some("API gateway error")
-            } else if msg_lower.contains("timeout") || msg_lower.contains("timed out") {
-                Some("Request timed out")
-            } else if msg_lower.contains("connection") {
-                Some("Connection error")
-            } else if msg_lower.contains("temporarily") || msg_lower.contains("try again") {
-                Some("Temporary API error")
-            } else {
-                None
-            }
-        }
-        ProviderError::ParseError(_) => Some("Failed to parse LLM response"),
-        _ => None,
-    }
-}
-
-/// Compute the backoff duration for a retry attempt using exponential backoff.
-pub fn retry_backoff(attempt: u32) -> Duration {
-    let backoff = INITIAL_BACKOFF.saturating_mul(2u32.saturating_pow(attempt));
-    backoff.min(MAX_BACKOFF)
-}
-
-/// Parse the LLM response text into structured findings.
-///
-/// With `output_schema` enforcing the JSON schema at the provider level,
-/// the response is expected to be valid JSON. We still handle an empty
-/// response or a `{"findings": [...]}` wrapper gracefully.
-///
-/// Some providers may return JSON wrapped in markdown code fences
-/// (e.g. ```json ... ```), so we extract the inner content first.
-fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderError> {
-    let trimmed = response.trim();
-
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // Try the raw text first, then try extracting from markdown fences
-    let candidates = extract_json_candidates(trimmed);
-
-    for candidate in &candidates {
-        // Try parsing as a direct array of findings
-        if let Ok(findings) = serde_json::from_str::<Vec<Finding>>(candidate) {
-            return Ok(findings);
-        }
-
-        // Try parsing as {"findings": [...]}
-        if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(candidate) {
-            if let Some(findings_arr) = wrapper.get("findings") {
-                if let Ok(findings) = serde_json::from_value::<Vec<Finding>>(findings_arr.clone()) {
-                    return Ok(findings);
-                }
-            }
-        }
-    }
-
-    Err(ProviderError::ParseError(format!(
-        "could not parse LLM response as findings JSON. Response: {}",
-        &response[..response.len().min(PARSE_ERROR_PREVIEW_LEN)]
-    )))
-}
-
-/// Regex for extracting content inside markdown code fences.
-///
-/// The closing ``` must appear at the start of a line (`\n````) to avoid
-/// matching triple-backticks embedded inside JSON string values (e.g.
-/// suggestion fields containing ```rust code examples).
-static FENCE_RE: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)```(?:json)?\s*\n(.*?)\n```").unwrap());
-
-/// Extract candidate JSON strings from a response.
-///
-/// Returns the trimmed response itself plus any content inside markdown
-/// code fences (```json ... ``` or ``` ... ```).
-fn extract_json_candidates(text: &str) -> Vec<String> {
-    let mut candidates = Vec::new();
-
-    // First candidate: the raw text
-    candidates.push(text.to_string());
-
-    // Second: bracket extraction — find the first '[' and last ']'.
-    // This is the most robust strategy when the response contains
-    // nested code fences inside JSON string values.
-    if let (Some(start), Some(end)) = (text.find('['), text.rfind(']')) {
-        if start < end {
-            let slice = &text[start..=end];
-            candidates.push(slice.to_string());
-        }
-    }
-
-    // Third: extract content from markdown code fences.
-    for cap in FENCE_RE.captures_iter(text) {
-        if let Some(inner) = cap.get(1) {
-            let inner_trimmed = inner.as_str().trim();
-            if !inner_trimmed.is_empty() {
-                candidates.push(inner_trimmed.to_string());
-            }
-        }
-    }
-
-    candidates
-}
+/// Re-export response parsing and retry utilities for backward compatibility.
+pub use super::response::{classify_error, is_retryable, retry_backoff};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_json_array() {
-        let response = r#"[
-            {
-                "file": "src/main.rs",
-                "line": 42,
-                "severity": "error",
-                "title": "Bug found",
-                "message": "This is a bug",
-                "suggestion": "Fix it",
-                "agent": "backend"
-            }
-        ]"#;
-        let findings = parse_findings_response(response).unwrap();
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].file, "src/main.rs");
-    }
-
-    #[test]
-    fn parse_wrapped_json() {
-        let response = r#"{
-    "findings": [
-        {
-            "file": "test.rs",
-            "line": 1,
-            "severity": "warning",
-            "title": "Issue",
-            "message": "Problem here",
-            "agent": "test"
-        }
-    ]
-}"#;
-        let findings = parse_findings_response(response).unwrap();
-        assert_eq!(findings.len(), 1);
-    }
-
-    #[test]
-    fn parse_empty_response() {
-        let findings = parse_findings_response("").unwrap();
-        assert!(findings.is_empty());
-    }
-
-    #[test]
-    fn parse_whitespace_only() {
-        let findings = parse_findings_response("   \n\n  ").unwrap();
-        assert!(findings.is_empty());
-    }
-
-    #[test]
-    fn parse_unparseable_response() {
-        let result = parse_findings_response("This is random text with no JSON.");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("could not parse"));
-    }
-
-    #[test]
-    fn parse_empty_json_array() {
-        let findings = parse_findings_response("[]").unwrap();
-        assert!(findings.is_empty());
-    }
-
-    #[test]
-    fn parse_bare_json() {
-        let response = r#"[
-            {
-                "file": "lib.rs",
-                "line": 10,
-                "severity": "info",
-                "title": "Style",
-                "message": "Consider renaming",
-                "agent": "test"
-            }
-        ]"#;
-        let findings = parse_findings_response(response).unwrap();
-        assert_eq!(findings.len(), 1);
-    }
 
     #[test]
     fn new_provider_missing_api_key() {
@@ -984,71 +605,11 @@ mod tests {
     }
 
     #[test]
-    fn retryable_429_rate_limit() {
-        let err = ProviderError::ApiError(
-            "Gemini API error: HttpError: Invalid status code 429 Too Many Requests".into(),
-        );
-        assert!(is_retryable(&err));
-    }
-
-    #[test]
-    fn retryable_503_unavailable() {
-        let err = ProviderError::ApiError(
-            "Gemini API error: HttpError: Invalid status code 503 Service Unavailable".into(),
-        );
-        assert!(is_retryable(&err));
-    }
-
-    #[test]
-    fn retryable_overloaded_message() {
-        let err =
-            ProviderError::ApiError("Anthropic API error: overloaded — try again later".into());
-        assert!(is_retryable(&err));
-    }
-
-    #[test]
-    fn not_retryable_auth_error() {
-        let err = ProviderError::ApiError("Invalid API key: 401 Unauthorized".into());
-        assert!(!is_retryable(&err));
-    }
-
-    #[test]
-    fn not_retryable_parse_error() {
-        let err = ProviderError::ParseError("bad json".into());
-        assert!(!is_retryable(&err));
-    }
-
-    #[test]
-    fn not_retryable_not_configured() {
-        let err = ProviderError::NotConfigured("missing key".into());
-        assert!(!is_retryable(&err));
-    }
-
-    #[test]
-    fn backoff_is_exponential() {
-        let b0 = retry_backoff(0);
-        let b1 = retry_backoff(1);
-        let b2 = retry_backoff(2);
-        assert_eq!(b0, Duration::from_secs(10));
-        assert_eq!(b1, Duration::from_secs(20));
-        assert_eq!(b2, Duration::from_secs(40));
-    }
-
-    #[test]
-    fn backoff_capped_at_max() {
-        let b10 = retry_backoff(10);
-        assert_eq!(b10, MAX_BACKOFF);
-    }
-
-    #[test]
     fn agentic_system_prompt_includes_tool_instructions() {
         let base = "You are a backend reviewer.";
         let enhanced = build_agentic_system_prompt(base, &[], None);
 
-        // Preserves the original prompt
         assert!(enhanced.starts_with(base));
-
-        // Adds tool guidance
         assert!(enhanced.contains("Tool-Assisted Review"));
         assert!(enhanced.contains("read_file"));
         assert!(enhanced.contains("search_text"));
@@ -1083,7 +644,6 @@ mod tests {
 
         let enhanced = build_agentic_system_prompt("Base prompt.", &tools, None);
 
-        // Custom tools appear in the numbered guidance list
         assert!(
             enhanced.contains("Use `run_tests`"),
             "numbered list should include run_tests"
@@ -1092,8 +652,6 @@ mod tests {
             enhanced.contains("Use `lint`"),
             "numbered list should include lint"
         );
-
-        // Custom tools appear in the example calls section
         assert!(
             enhanced.contains("`run_tests` with"),
             "examples should include run_tests"
@@ -1102,119 +660,9 @@ mod tests {
             enhanced.contains("`lint` with"),
             "examples should include lint"
         );
-
-        // Tool with params shows param name in example
         assert!(
             enhanced.contains("\"filter\""),
             "run_tests example should reference filter param"
-        );
-    }
-
-    #[test]
-    fn parse_markdown_fenced_json() {
-        let response = r#"Here are the findings:
-```json
-[
-    {
-        "file": "src/lib.rs",
-        "line": 5,
-        "severity": "warning",
-        "title": "Unused import",
-        "message": "This import is unused",
-        "agent": "backend"
-    }
-]
-```
-"#;
-        let findings = parse_findings_response(response).unwrap();
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].file, "src/lib.rs");
-    }
-
-    #[test]
-    fn parse_fenced_without_json_label() {
-        let response = "Some preamble text\n```\n[]\n```\n";
-        let findings = parse_findings_response(response).unwrap();
-        assert!(findings.is_empty());
-    }
-
-    #[test]
-    fn parse_json_embedded_in_prose() {
-        // LLM returns prose with a JSON array buried in the middle.
-        let response = r#"I found one issue:
-[{"file":"a.rs","line":1,"severity":"info","title":"T","message":"M","agent":"a"}]
-That's all."#;
-        let findings = parse_findings_response(response).unwrap();
-        assert_eq!(findings.len(), 1);
-    }
-
-    #[test]
-    fn extract_json_candidates_returns_raw_first() {
-        let text = r#"[{"a":1}]"#;
-        let candidates = extract_json_candidates(text);
-        assert!(!candidates.is_empty());
-        assert_eq!(candidates[0], text);
-    }
-
-    #[test]
-    fn extract_json_candidates_no_brackets() {
-        let text = "no json here";
-        let candidates = extract_json_candidates(text);
-        // Should at least contain the raw text
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0], text);
-    }
-
-    #[test]
-    fn classify_error_502_gateway() {
-        let err = ProviderError::ApiError("HTTP 502 Bad Gateway".into());
-        assert_eq!(classify_error(&err), Some("API gateway error"));
-    }
-
-    #[test]
-    fn classify_error_timeout() {
-        let err = ProviderError::ApiError("request timed out after 30s".into());
-        assert_eq!(classify_error(&err), Some("Request timed out"));
-    }
-
-    #[test]
-    fn classify_error_connection() {
-        let err = ProviderError::ApiError("connection refused".into());
-        assert_eq!(classify_error(&err), Some("Connection error"));
-    }
-
-    #[test]
-    fn classify_error_try_again() {
-        let err = ProviderError::ApiError("please try again later".into());
-        assert_eq!(classify_error(&err), Some("Temporary API error"));
-    }
-
-    #[test]
-    fn classify_error_returns_none_for_unknown() {
-        let err = ProviderError::ApiError("some unknown error".into());
-        assert_eq!(classify_error(&err), None);
-    }
-
-    #[test]
-    fn classify_error_parse_error() {
-        let err = ProviderError::ParseError("could not parse JSON".into());
-        assert_eq!(classify_error(&err), Some("Failed to parse LLM response"));
-    }
-
-    #[test]
-    fn extract_json_candidates_nested_fences() {
-        // Simulate an LLM response where suggestion fields contain ```rust fences.
-        // The bracket extraction should produce a valid candidate even though
-        // the inner fences confuse the fence regex.
-        let response = "```json\n[\n  {\n    \"file\": \"db.rs\",\n    \"line\": 10,\n    \"severity\": \"error\",\n    \"title\": \"SQL Injection\",\n    \"message\": \"Vulnerable.\",\n    \"suggestion\": \"Use parameterized queries:\\n```\\nrust\\nquery(?)\\n```\",\n    \"agent\": \"backend\"\n  }\n]\n```";
-        let candidates = extract_json_candidates(response);
-        // At least one candidate should parse as valid JSON
-        let parsed = candidates
-            .iter()
-            .any(|c| serde_json::from_str::<Vec<Finding>>(c).is_ok());
-        assert!(
-            parsed,
-            "should find a parseable candidate despite nested fences"
         );
     }
 
@@ -1251,24 +699,6 @@ That's all."#;
     }
 
     #[test]
-    fn parse_findings_wrapper_with_empty_array() {
-        let response = r#"{"findings": []}"#;
-        let findings = parse_findings_response(response).unwrap();
-        assert!(findings.is_empty());
-    }
-
-    #[test]
-    fn backoff_attempt_zero_equals_initial() {
-        assert_eq!(retry_backoff(0), INITIAL_BACKOFF);
-    }
-
-    #[test]
-    fn retryable_rate_limit_message() {
-        let err = ProviderError::ApiError("rate limit exceeded".into());
-        assert!(is_retryable(&err));
-    }
-
-    #[test]
     fn agentic_prompt_includes_profile_tool_guidance() {
         let base = "You are a code reviewer.";
         let instructions = "Use search_text to trace data flow before flagging injection risks.";
@@ -1276,7 +706,6 @@ That's all."#;
 
         assert!(result.contains("Profile-Specific Tool Guidance"));
         assert!(result.contains(instructions));
-        // Should also contain the base prompt
         assert!(result.contains(base));
     }
 

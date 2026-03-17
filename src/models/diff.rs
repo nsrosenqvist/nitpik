@@ -1,5 +1,7 @@
 //! Diff-related types: file diffs, hunks, and diff lines.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 /// The type of a line in a diff.
@@ -15,11 +17,12 @@ pub enum DiffLineType {
 
 /// A single line in a diff hunk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiffLine {
+pub struct DiffLine<'a> {
     /// The type of change.
     pub line_type: DiffLineType,
     /// The content of the line (without the leading +/-/space).
-    pub content: String,
+    #[serde(borrow)]
+    pub content: Cow<'a, str>,
     /// Line number in the old file (None for added lines).
     pub old_line_no: Option<u32>,
     /// Line number in the new file (None for removed lines).
@@ -28,7 +31,7 @@ pub struct DiffLine {
 
 /// A contiguous hunk within a file diff.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Hunk {
+pub struct Hunk<'a> {
     /// Starting line in the old file.
     pub old_start: u32,
     /// Number of lines in the old file.
@@ -40,12 +43,13 @@ pub struct Hunk {
     /// Optional hunk header text (e.g., function name).
     pub header: Option<String>,
     /// The lines in this hunk.
-    pub lines: Vec<DiffLine>,
+    #[serde(borrow)]
+    pub lines: Vec<DiffLine<'a>>,
 }
 
 /// A diff for a single file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDiff {
+pub struct FileDiff<'a> {
     /// Path of the old file (may be `/dev/null` for new files).
     pub old_path: String,
     /// Path of the new file (may be `/dev/null` for deleted files).
@@ -59,10 +63,11 @@ pub struct FileDiff {
     /// Whether this is a binary file.
     pub is_binary: bool,
     /// The hunks in this diff.
-    pub hunks: Vec<Hunk>,
+    #[serde(borrow)]
+    pub hunks: Vec<Hunk<'a>>,
 }
 
-impl FileDiff {
+impl FileDiff<'_> {
     /// Returns the most relevant file path (new_path for non-deletes, old_path for deletes).
     pub fn path(&self) -> &str {
         if self.is_deleted {

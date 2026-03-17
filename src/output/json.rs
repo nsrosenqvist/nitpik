@@ -3,13 +3,13 @@
 //! Outputs `{"findings": [...], "summary": {...}}` format.
 
 use crate::models::finding::{Finding, Summary};
-use crate::output::OutputRenderer;
+use crate::output::OutputFormatter;
 
 /// JSON output renderer.
-pub struct JsonRenderer;
+pub struct JsonFormatter;
 
-impl OutputRenderer for JsonRenderer {
-    fn render(&self, findings: &[Finding]) -> String {
+impl OutputFormatter for JsonFormatter {
+    fn format(&self, findings: &[Finding]) -> String {
         let summary = Summary::from_findings(findings);
 
         let output = serde_json::json!({
@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn render_json() {
-        let renderer = JsonRenderer;
+        let renderer = JsonFormatter;
         let findings = vec![Finding {
             file: "test.rs".into(),
             line: 1,
@@ -44,7 +44,7 @@ mod tests {
             agent: "backend".into(),
         }];
 
-        let output = renderer.render(&findings);
+        let output = renderer.format(&findings);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
 
         assert_eq!(parsed["findings"].as_array().unwrap().len(), 1);
@@ -54,8 +54,8 @@ mod tests {
 
     #[test]
     fn render_empty_json() {
-        let renderer = JsonRenderer;
-        let output = renderer.render(&[]);
+        let renderer = JsonFormatter;
+        let output = renderer.format(&[]);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed["findings"].as_array().unwrap().len(), 0);
         assert_eq!(parsed["summary"]["total"], 0);

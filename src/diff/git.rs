@@ -56,13 +56,7 @@ pub async fn detect_branch(repo_root: &Path, env: &Env) -> String {
     }
 
     // CI env var fallback (detached HEAD is common in CI)
-    for var in &[
-        "GITHUB_HEAD_REF",
-        "CI_COMMIT_BRANCH",
-        "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME",
-        "BITBUCKET_BRANCH",
-        "CI_BRANCH",
-    ] {
+    for var in crate::ci::BRANCH_ENV_VARS {
         if let Ok(val) = env.var(var) {
             let val = val.trim().to_string();
             if !val.is_empty() {
