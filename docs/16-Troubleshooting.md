@@ -36,9 +36,9 @@ If you see out-of-scope findings in diff mode, please [report it](https://github
 
 ## Slow Secret Scanning
 
-**Symptom:** nitpik takes 20-30 seconds before starting the review.
+**Symptom:** nitpik takes a few extra seconds before starting the review.
 
-This is expected when `--scan-secrets` is enabled. The 200+ built-in regex rules take time to compile on the first invocation. The cost is paid once per run and does not scale with the number of files.
+This is expected when `--scan-secrets` is enabled. The 200+ built-in regex rules are compiled in parallel on the first invocation, typically taking 3–5 seconds. The cost is paid once per run and does not scale with the number of files.
 
 If you don't need secret scanning for a particular run, omit `--scan-secrets`.
 

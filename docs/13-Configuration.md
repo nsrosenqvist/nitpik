@@ -87,7 +87,7 @@ The project config overrides the global config, so teams can set project-level s
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `false` | Enable secret scanning by default. Equivalent to always passing `--scan-secrets`. Adds ~20-30s startup time. |
+| `enabled` | bool | `false` | Enable secret scanning by default. Equivalent to always passing `--scan-secrets`. Adds ~3-5s startup time. |
 
 ### `[license]`
 

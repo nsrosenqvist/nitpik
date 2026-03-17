@@ -169,8 +169,8 @@ pub struct ReviewArgs {
     // --- Security ---
     /// Enable secret detection and redaction before LLM calls.
     ///
-    /// Compiling the 200+ built-in rules adds roughly 20-30 seconds of
-    /// startup time on the first invocation.
+    /// Compiling the 200+ built-in rules adds roughly 3-5 seconds of
+    /// startup time on the first invocation (compiled in parallel).
     #[arg(long, default_value_t = false)]
     pub scan_secrets: bool,
 

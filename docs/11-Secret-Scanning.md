@@ -52,7 +52,7 @@ regex = '''INTERNAL_KEY_[A-Za-z0-9]{32}'''
 
 ## Performance
 
-Compiling the 200+ built-in regex rules adds roughly **20–30 seconds** of startup time on the first invocation. This cost is:
+Compiling the 200+ built-in regex rules adds roughly **3–5 seconds** of startup time on the first invocation (rules are compiled in parallel). This cost is:
 
 - Paid **once per run**, not per file
 - Only incurred when `--scan-secrets` is enabled
