@@ -213,6 +213,12 @@ pub struct ReviewArgs {
     /// Example: --exclude-doc AGENTS.md,CONVENTIONS.md
     #[arg(long, value_name = "FILENAME", value_delimiter = ',')]
     pub exclude_doc: Vec<String>,
+
+    /// Print the constructed prompts (system + user) for each task and exit
+    /// without calling the LLM. Only available in debug builds.
+    #[cfg(debug_assertions)]
+    #[arg(long, default_value_t = false, hide = true)]
+    pub debug_prompt: bool,
 }
 
 /// Output format options.
@@ -359,6 +365,8 @@ mod tests {
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: vec![],
+            #[cfg(debug_assertions)]
+            debug_prompt: false,
         }
     }
 

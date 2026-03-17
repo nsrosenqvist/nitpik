@@ -404,6 +404,41 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     .await;
 
     let agent_defs = resolve_agents(&args, &config, diffs, repo_root_path).await?;
+
+    // Debug-only: dump constructed prompts and exit without calling the LLM.
+    #[cfg(debug_assertions)]
+    if args.debug_prompt {
+        use nitpik::diff::chunker;
+        use nitpik::orchestrator::prompt::build_prompt;
+
+        let review_ctx = models::context::ReviewContext {
+            diffs: diffs.to_vec(),
+            baseline,
+            repo_root: repo_root.clone(),
+            is_path_scan: matches!(input_mode, models::InputMode::DirectPath(_)),
+        };
+
+        for agent in &agent_defs {
+            for d in diffs {
+                if d.is_binary {
+                    continue;
+                }
+                let chunks = chunker::chunk_diff(d, None);
+                for chunk in chunks {
+                    let user_prompt =
+                        build_prompt(&chunk, &review_ctx, agent, &agent_defs, None, use_agent);
+                    println!("═══ {} × {} ═══", chunk.path(), agent.profile.name);
+                    println!("── system prompt ──");
+                    println!("{}", agent.system_prompt);
+                    println!("── user prompt ──");
+                    println!("{user_prompt}");
+                    println!();
+                }
+            }
+        }
+        return Ok(());
+    }
+
     fire_telemetry(&config, diffs, &agent_defs, &license_claims, no_telemetry).await;
 
     let progress = setup_progress(&args, diffs, &agent_defs, &baseline, &license_claims);
