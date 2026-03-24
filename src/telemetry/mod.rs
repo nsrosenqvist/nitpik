@@ -70,10 +70,10 @@ pub fn is_debug() -> bool {
 
 /// Send the heartbeat payload.
 ///
-/// Returns a [`tokio::task::JoinHandle`] so the caller can optionally
-/// await it.  In normal mode you can just drop the handle (fire-and-forget).
-/// When `NITPIK_DEBUG=true` the caller should `.await` the handle so the
-/// debug output is printed before the process exits.
+/// Returns a [`tokio::task::JoinHandle`] so the caller can await it
+/// before the process exits.  The caller **must** await the handle to
+/// guarantee the POST completes — dropping without awaiting races
+/// against runtime shutdown and may silently cancel the request.
 pub fn send_heartbeat(payload: HeartbeatPayload) -> tokio::task::JoinHandle<()> {
     if is_debug() {
         tokio::spawn(async move {

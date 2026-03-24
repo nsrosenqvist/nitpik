@@ -27,10 +27,13 @@ fn main() {
     // Release builds (HEAD tagged `v{CARGO_PKG_VERSION}`): clean semver,
     //   e.g. "0.5.0"
     //
-    // Dev builds: derived from `git describe --tags --match 'v*'` which
-    //   gives e.g. "v0.5.0-12-g0208df1" (12 commits after v0.5.0).
+    // Dev builds: derived from `git describe --tags --match 'v*.*.*'`
+    //   which gives e.g. "v0.5.0-12-g0208df1" (12 commits after v0.5.0).
     //   We reformat to semver pre-release: "0.5.0-dev.12+0208df1".
     //   If there are no tags yet, falls back to "0.0.0-dev+{sha}".
+    //
+    //   The glob uses `v*.*.*` to skip floating tags like `v1` or `v1.2`
+    //   that aren't full semver and would produce invalid version strings.
     let cargo_version = std::env::var("CARGO_PKG_VERSION").unwrap();
     let is_release = std::process::Command::new("git")
         .args(["tag", "--points-at", "HEAD"])
@@ -48,8 +51,9 @@ fn main() {
         cargo_version
     } else {
         // Try `git describe` to get the distance from the last version tag.
+        // Match only full semver tags (v1.2.0) to avoid floating tags (v1, v1.2).
         let described = std::process::Command::new("git")
-            .args(["describe", "--tags", "--match", "v*", "--long"])
+            .args(["describe", "--tags", "--match", "v*.*.*", "--long"])
             .output()
             .ok()
             .filter(|o| o.status.success())

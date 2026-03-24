@@ -439,7 +439,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         return Ok(());
     }
 
-    fire_telemetry(&config, diffs, &agent_defs, &license_claims, no_telemetry).await;
+    let heartbeat = fire_telemetry(&config, diffs, &agent_defs, &license_claims, no_telemetry);
 
     let progress = setup_progress(&args, diffs, &agent_defs, &baseline, &license_claims);
     progress.start();
@@ -495,6 +495,12 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             .or(Some(Severity::Error))
     };
     render_and_output(&args.format, &findings, fail_on_severity).await;
+
+    // Ensure the telemetry POST completes before the runtime shuts down.
+    if let Some(h) = heartbeat {
+        let _ = h.await;
+    }
+
     determine_exit(
         &findings,
         fail_on_severity,
@@ -534,15 +540,20 @@ fn verify_license(config: &Config) -> Option<(license::LicenseClaims, Option<i64
 }
 
 /// Fire anonymous telemetry heartbeat (non-blocking, fails silently).
-async fn fire_telemetry(
+///
+/// Returns a [`tokio::task::JoinHandle`] that the caller should `.await`
+/// before the process exits to guarantee the POST completes. The handle
+/// is safe to await — it will never return an error that should halt the
+/// review.
+fn fire_telemetry(
     config: &Config,
     diffs: &[models::FileDiff<'_>],
     agents: &[models::AgentDefinition],
     license_claims: &Option<(license::LicenseClaims, Option<i64>)>,
     no_telemetry: bool,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     if !config.telemetry.enabled || no_telemetry {
-        return;
+        return None;
     }
     use models::diff::DiffLineType;
     let diff_lines: usize = diffs
@@ -557,10 +568,7 @@ async fn fire_telemetry(
         agents.len(),
         license_claims.is_some(),
     );
-    let handle = telemetry::send_heartbeat(payload);
-    if telemetry::is_debug() {
-        let _ = handle.await;
-    }
+    Some(telemetry::send_heartbeat(payload))
 }
 
 /// Build the progress tracker, print the banner and informational messages.
