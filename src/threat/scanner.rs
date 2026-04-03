@@ -5,6 +5,8 @@
 //! rules match against full baseline file contents with proximity
 //! weighting relative to changed lines.
 
+use std::sync::LazyLock;
+
 use indexmap::IndexMap;
 use regex::Regex;
 
@@ -13,6 +15,27 @@ use crate::models::finding::Severity;
 use crate::security::entropy;
 
 use super::rules::{RuleScope, ThreatCategory, ThreatRule};
+
+// ── Mixed-script detection regexes ──────────────────────────────────
+
+/// Identifier-like token: one or more Unicode letters, digits, or underscores.
+static IDENT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\p{L}\p{N}_]+").unwrap());
+
+/// Matches any Latin character.
+static LATIN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\p{Latin}").unwrap());
+
+/// Matches any Cyrillic character.
+static CYRILLIC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\p{Cyrillic}").unwrap());
+
+/// Matches any Greek character.
+static GREEK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\p{Greek}").unwrap());
+
+/// File extensions where mixed scripts are expected (localization files).
+const MIXED_SCRIPT_ALLOWLIST_EXTS: &[&str] = &["po", "pot", "properties", "xliff", "xlf"];
+
+/// Heuristic comment prefixes — lines starting with these (after trimming)
+/// are skipped for mixed-script detection.
+const COMMENT_PREFIXES: &[&str] = &["//", "#", "/*", "*", "<!--"];
 
 // ── Public types ────────────────────────────────────────────────────
 
@@ -48,6 +71,7 @@ pub fn scan_for_threats(
     let mut matches = Vec::new();
     matches.extend(scan_line_scope(diffs, rules));
     matches.extend(scan_file_scope(diffs, file_contents, rules));
+    matches.extend(scan_mixed_script(diffs));
     matches
 }
 
@@ -122,6 +146,90 @@ fn scan_line_scope(diffs: &[FileDiff<'_>], rules: &[ThreatRule]) -> Vec<ThreatMa
                             matched_text: matched_text.to_string(),
                         });
                     }
+                }
+            }
+        }
+    }
+
+    matches
+}
+
+// ── Mixed-script identifier detection ───────────────────────────────
+
+/// Check whether a line looks like a comment (heuristic).
+fn looks_like_comment(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    COMMENT_PREFIXES
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+}
+
+/// Detect identifier tokens that mix Latin with Cyrillic or Greek characters.
+///
+/// Returns `(byte_offset, token)` pairs for each flagged token on the line.
+fn detect_mixed_script_identifiers(line: &str) -> Vec<(usize, String)> {
+    let mut results = Vec::new();
+
+    for m in IDENT_RE.find_iter(line) {
+        let token = m.as_str();
+        // A single-char token can't be mixed-script
+        if token.chars().count() < 2 {
+            continue;
+        }
+
+        let has_latin = LATIN_RE.is_match(token);
+        if !has_latin {
+            continue; // Pure non-Latin identifiers are fine
+        }
+        let has_cyrillic = CYRILLIC_RE.is_match(token);
+        let has_greek = GREEK_RE.is_match(token);
+
+        if has_cyrillic || has_greek {
+            results.push((m.start(), token.to_string()));
+        }
+    }
+
+    results
+}
+
+/// Scan added lines for mixed-script identifiers (homoglyph attacks).
+fn scan_mixed_script(diffs: &[FileDiff<'_>]) -> Vec<ThreatMatch> {
+    let mut matches = Vec::new();
+
+    for diff in diffs {
+        if diff.is_binary || diff.is_deleted {
+            continue;
+        }
+        let path = diff.path();
+        let ext = file_extension(path);
+
+        // Skip localization files where mixed scripts are expected
+        if MIXED_SCRIPT_ALLOWLIST_EXTS.contains(&ext.as_str()) {
+            continue;
+        }
+
+        for hunk in &diff.hunks {
+            for line in &hunk.lines {
+                if line.line_type != DiffLineType::Added {
+                    continue;
+                }
+                if looks_like_comment(&line.content) {
+                    continue;
+                }
+                let line_no = line.new_line_no.unwrap_or(0);
+
+                for (_, token) in detect_mixed_script_identifiers(&line.content) {
+                    matches.push(ThreatMatch {
+                        rule_id: "mixed-script-identifier".to_string(),
+                        rule_description: "Identifier mixes Latin with Cyrillic/Greek characters \
+                                           (potential homoglyph attack)"
+                            .to_string(),
+                        category: ThreatCategory::Obfuscation,
+                        severity: Severity::Warning,
+                        file: path.to_string(),
+                        line_number: line_no,
+                        matched_text: token,
+                    });
                 }
             }
         }
@@ -458,7 +566,10 @@ mod tests {
         // so EVAL( does not match eval\(
         let diff2 = make_diff_with_added("app.js", &["EVAL(x)"]);
         let matches2 = scan_for_threats(&[diff2], &IndexMap::new(), &[rule]);
-        assert!(matches2.is_empty(), "case-sensitive regex should not match EVAL");
+        assert!(
+            matches2.is_empty(),
+            "case-sensitive regex should not match EVAL"
+        );
     }
 
     #[test]
@@ -661,5 +772,94 @@ mod tests {
         };
         let matches = scan_for_threats(&[diff], &IndexMap::new(), &[rule]);
         assert!(matches.is_empty());
+    }
+
+    // ── Mixed-script / homoglyph tests ──────────────────────────────
+
+    #[test]
+    fn mixed_cyrillic_latin_flagged() {
+        // "рaypal" — first char is Cyrillic р (U+0440), rest is Latin
+        let diff = make_diff_with_added("app.js", &["let x = \u{0440}aypal;"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].rule_id, "mixed-script-identifier");
+        assert_eq!(matches[0].matched_text, "\u{0440}aypal");
+        assert_eq!(matches[0].category, ThreatCategory::Obfuscation);
+    }
+
+    #[test]
+    fn mixed_greek_latin_flagged() {
+        // "Ηello" — first char is Greek Η (U+0397), rest is Latin
+        let diff = make_diff_with_added("app.py", &["print(\u{0397}ello)"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_text, "\u{0397}ello");
+    }
+
+    #[test]
+    fn pure_cyrillic_not_flagged() {
+        // Pure Cyrillic identifier — should not flag
+        let diff = make_diff_with_added("app.py", &["привет = 42"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert!(
+            matches.is_empty(),
+            "pure Cyrillic identifier should not flag"
+        );
+    }
+
+    #[test]
+    fn pure_latin_not_flagged() {
+        let diff = make_diff_with_added("app.js", &["let paypal = true;"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert!(matches.is_empty(), "pure Latin identifier should not flag");
+    }
+
+    #[test]
+    fn latin_cjk_not_flagged() {
+        // CJK + Latin should not flag — CJK is not a confusable script
+        let diff = make_diff_with_added("app.py", &["name = \"hello世界\""]);
+        let matches = scan_mixed_script(&[diff]);
+        assert!(matches.is_empty(), "Latin + CJK should not flag");
+    }
+
+    #[test]
+    fn comment_line_skipped() {
+        let diff = make_diff_with_added("app.js", &["// \u{0440}aypal is suspicious"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert!(matches.is_empty(), "comment lines should be skipped");
+    }
+
+    #[test]
+    fn hash_comment_skipped() {
+        let diff = make_diff_with_added("app.py", &["# \u{0440}aypal test"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert!(matches.is_empty(), "Python comment lines should be skipped");
+    }
+
+    #[test]
+    fn po_file_skipped() {
+        let diff = make_diff_with_added("messages.po", &["\u{0440}aypal test"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert!(matches.is_empty(), ".po files should be skipped");
+    }
+
+    #[test]
+    fn mixed_script_via_scan_for_threats() {
+        // Verify it's wired into the main entry point
+        let diff = make_diff_with_added("app.js", &["let x = \u{0440}aypal;"]);
+        let matches = scan_for_threats(&[diff], &IndexMap::new(), &[]);
+        let homoglyph_matches: Vec<_> = matches
+            .iter()
+            .filter(|m| m.rule_id == "mixed-script-identifier")
+            .collect();
+        assert_eq!(homoglyph_matches.len(), 1);
+    }
+
+    #[test]
+    fn single_char_not_flagged() {
+        // Single-char tokens can't be mixed-script
+        let diff = make_diff_with_added("app.js", &["let \u{0440} = 1;"]);
+        let matches = scan_mixed_script(&[diff]);
+        assert!(matches.is_empty(), "single-char token should not flag");
     }
 }
