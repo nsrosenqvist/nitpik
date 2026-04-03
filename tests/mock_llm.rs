@@ -3,12 +3,15 @@
 //! Validates the orchestrator pipeline end-to-end without making
 //! real API calls by using a mock implementation of ReviewProvider.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use indexmap::IndexMap;
 
 use nitpik::cache::CacheEngine;
 use nitpik::config::Config;
+use nitpik::constants::THREAT_SCANNER_AGENT;
 use nitpik::models::agent::{AgentDefinition, AgentProfile};
 use nitpik::models::context::{BaselineContext, ReviewContext};
 use nitpik::models::diff::{DiffLine, DiffLineType, FileDiff, Hunk};
@@ -1098,5 +1101,279 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
     assert!(
         !prompt.contains("`run_tests`"),
         "non-agentic prompt should not mention custom tools"
+    );
+}
+
+// ===========================================================================
+// Threat scanning integration tests
+// ===========================================================================
+
+/// Helper: build a diff with added lines for threat scanning tests.
+fn threat_test_diff(path: &str, lines: &[&str]) -> FileDiff<'static> {
+    let diff_lines: Vec<DiffLine<'static>> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, content)| DiffLine {
+            line_type: DiffLineType::Added,
+            content: Cow::Owned(content.to_string()),
+            old_line_no: None,
+            new_line_no: Some(i as u32 + 1),
+        })
+        .collect();
+
+    FileDiff {
+        old_path: "/dev/null".to_string(),
+        new_path: path.to_string(),
+        is_new: true,
+        is_deleted: false,
+        is_rename: false,
+        is_binary: false,
+        hunks: vec![Hunk {
+            old_start: 0,
+            old_count: 0,
+            new_start: 1,
+            new_count: diff_lines.len() as u32,
+            header: None,
+            lines: diff_lines,
+        }],
+    }
+}
+
+#[tokio::test]
+async fn threat_scanner_detects_eval_without_triage() {
+    let rules = nitpik::threat::rules::default_rules();
+    let diff = threat_test_diff("malicious.js", &["const x = eval(userInput);"]);
+    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+
+    assert!(!findings.is_empty(), "should detect eval() as a threat");
+    assert!(
+        findings.iter().all(|f| f.agent == THREAT_SCANNER_AGENT),
+        "all findings should come from the threat scanner agent"
+    );
+    assert!(
+        findings.iter().any(|f| f.title.contains("dangerous-api")),
+        "should flag eval as dangerous-api"
+    );
+}
+
+#[tokio::test]
+async fn threat_scanner_detects_multiple_patterns() {
+    let rules = nitpik::threat::rules::default_rules();
+    let diff = threat_test_diff(
+        "backdoor.py",
+        &[
+            "import subprocess",
+            "subprocess.Popen(cmd, shell=True)",
+            "exec(base64.b64decode(payload))",
+            "os.system('rm -rf /')",
+        ],
+    );
+    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+
+    assert!(
+        findings.len() >= 3,
+        "should detect multiple threat patterns, got {}",
+        findings.len()
+    );
+}
+
+/// Mock provider that returns a canned triage response to dismiss one finding.
+struct TriageMockProvider {
+    triage_response: String,
+}
+
+#[async_trait]
+impl ReviewProvider for TriageMockProvider {
+    async fn review(
+        &self,
+        _agent: &AgentDefinition,
+        _prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<Vec<Finding>, ProviderError> {
+        Ok(vec![])
+    }
+
+    async fn complete(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<String, ProviderError> {
+        Ok(self.triage_response.clone())
+    }
+}
+
+#[tokio::test]
+async fn threat_scanner_triage_dismisses_finding() {
+    let rules = nitpik::threat::rules::default_rules();
+    // Use two patterns we know will match
+    let diff = threat_test_diff(
+        "app.js",
+        &[
+            "const x = eval(input);",
+            "const y = require('child_process');",
+        ],
+    );
+    let file_contents = IndexMap::new();
+
+    // First, scan without triage to see what we get
+    let raw_findings =
+        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None).await;
+    assert!(
+        raw_findings.len() >= 2,
+        "should have at least 2 raw findings, got {}",
+        raw_findings.len()
+    );
+
+    // Now triage: dismiss finding #0, confirm finding #1
+    let triage_json = r#"[
+        {"index": 0, "classification": "dismissed", "rationale": "test use"},
+        {"index": 1, "classification": "confirmed", "rationale": "real threat"}
+    ]"#;
+    let provider = TriageMockProvider {
+        triage_response: triage_json.to_string(),
+    };
+
+    let triaged_findings = nitpik::threat::scan_for_threats(
+        &[diff],
+        &file_contents,
+        &rules,
+        Some(&provider as &dyn ReviewProvider),
+    )
+    .await;
+
+    assert!(
+        triaged_findings.len() < raw_findings.len(),
+        "triage should have dismissed at least one finding: raw={}, triaged={}",
+        raw_findings.len(),
+        triaged_findings.len()
+    );
+}
+
+#[tokio::test]
+async fn threat_scanner_triage_downgrades_severity() {
+    let rules = nitpik::threat::rules::default_rules();
+    let diff = threat_test_diff("script.py", &["exec(base64.b64decode(payload))"]);
+    let file_contents = IndexMap::new();
+
+    // Downgrade all findings
+    let triage_json = r#"[
+        {"index": 0, "classification": "downgraded", "rationale": "controlled input"},
+        {"index": 1, "classification": "downgraded", "rationale": "controlled input"},
+        {"index": 2, "classification": "downgraded", "rationale": "controlled input"},
+        {"index": 3, "classification": "downgraded", "rationale": "controlled input"}
+    ]"#;
+    let provider = TriageMockProvider {
+        triage_response: triage_json.to_string(),
+    };
+
+    let findings = nitpik::threat::scan_for_threats(
+        &[diff],
+        &file_contents,
+        &rules,
+        Some(&provider as &dyn ReviewProvider),
+    )
+    .await;
+
+    assert!(
+        !findings.is_empty(),
+        "downgraded findings should still appear"
+    );
+    for f in &findings {
+        assert_eq!(
+            f.severity,
+            Severity::Info,
+            "downgraded findings should have Info severity, got {:?} for '{}'",
+            f.severity,
+            f.title
+        );
+    }
+}
+
+#[tokio::test]
+async fn threat_scanner_triage_fail_open_on_provider_error() {
+    let rules = nitpik::threat::rules::default_rules();
+    let diff = threat_test_diff("exploit.js", &["eval(atob(payload));"]);
+    let file_contents = IndexMap::new();
+
+    // Provider that always errors
+    let provider = FailingProvider;
+
+    let with_error = nitpik::threat::scan_for_threats(
+        std::slice::from_ref(&diff),
+        &file_contents,
+        &rules,
+        Some(&provider as &dyn ReviewProvider),
+    )
+    .await;
+
+    let without_triage =
+        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None).await;
+
+    assert_eq!(
+        with_error.len(),
+        without_triage.len(),
+        "fail-open: provider errors should preserve all findings"
+    );
+}
+
+#[tokio::test]
+async fn threat_scanner_empty_diff_no_findings() {
+    let rules = nitpik::threat::rules::default_rules();
+    let findings = nitpik::threat::scan_for_threats(&[], &IndexMap::new(), &rules, None).await;
+    assert!(
+        findings.is_empty(),
+        "empty diffs should produce no findings"
+    );
+}
+
+#[tokio::test]
+async fn threat_scanner_clean_code_no_findings() {
+    let rules = nitpik::threat::rules::default_rules();
+    let diff = threat_test_diff(
+        "clean.py",
+        &[
+            "def add(a, b):",
+            "    return a + b",
+            "",
+            "result = add(1, 2)",
+            "print(result)",
+        ],
+    );
+    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+    assert!(
+        findings.is_empty(),
+        "clean code should produce no threat findings, got {}",
+        findings.len()
+    );
+}
+
+#[tokio::test]
+async fn threat_scanner_mixed_script_homoglyph() {
+    let rules = nitpik::threat::rules::default_rules();
+    // Cyrillic 'р' (U+0440) looks like Latin 'p'
+    let diff = threat_test_diff("spoof.py", &["р\u{0430}ypal_account = 'attacker@evil.com'"]);
+    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.title.contains("obfuscation") || f.title.contains("mixed")),
+        "should detect mixed-script homoglyph, findings: {:?}",
+        findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn threat_scanner_binary_diff_skipped() {
+    let rules = nitpik::threat::rules::default_rules();
+    let mut diff = threat_test_diff("image.png", &["eval(x)"]);
+    diff.is_binary = true;
+
+    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+    assert!(
+        findings.is_empty(),
+        "binary files should be skipped by threat scanner"
     );
 }
