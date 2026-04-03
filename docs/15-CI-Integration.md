@@ -279,6 +279,6 @@ nitpik review --diff-base main --format github --quiet
 ## Related Pages
 
 - [Output Formats](08-Output-Formats) — format details and `--fail-on` behavior
-- [Configuration](13-Configuration) — environment variables and config files
+- [Configuration](14-Configuration) — environment variables and config files
 - [Secret Scanning](11-Secret-Scanning) — enabling secret detection
 - [Caching](10-Caching) — how caching saves API cost

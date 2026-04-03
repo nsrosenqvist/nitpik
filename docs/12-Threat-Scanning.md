@@ -145,5 +145,5 @@ Built-in rules are compiled once per run using parallel regex compilation. The s
 
 - [Secret Scanning](11-Secret-Scanning) — credential detection and redaction
 - [How Reviews Work](09-How-Reviews-Work) — where threat scanning fits in the pipeline
-- [Configuration](13-Configuration) — full config reference
-- [CI/CD Integration](14-CI-Integration) — enabling threat scanning in pipelines
+- [Configuration](14-Configuration) — full config reference
+- [CI/CD Integration](15-CI-Integration) — enabling threat scanning in pipelines

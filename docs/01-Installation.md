@@ -114,4 +114,4 @@ sudo nitpik update
 
 - [Quick Start](02-Quick-Start) — run your first review
 - [LLM Providers](03-Providers) — connect an API key
-- [CI/CD Integration](14-CI-Integration) — set up nitpik in your pipeline
+- [CI/CD Integration](15-CI-Integration) — set up nitpik in your pipeline

@@ -18,14 +18,14 @@
 - [How Reviews Work](09-How-Reviews-Work)
 - [Caching & Prior Findings](10-Caching)
 - [Secret Scanning](11-Secret-Scanning)
-- [Threat Scanning](18-Threat-Scanning)
-- [Project Documentation](12-Project-Docs)
+- [Threat Scanning](12-Threat-Scanning)
+- [Project Documentation](13-Project-Docs)
 
 **Deployment**
-- [Configuration](13-Configuration)
-- [CI/CD Integration](14-CI-Integration)
+- [Configuration](14-Configuration)
+- [CI/CD Integration](15-CI-Integration)
 
 **Reference**
-- [CLI Reference](15-CLI-Reference)
-- [Troubleshooting](16-Troubleshooting)
-- [Licensing](17-Licensing)
+- [CLI Reference](16-CLI-Reference)
+- [Troubleshooting](17-Troubleshooting)
+- [Licensing](18-Licensing)

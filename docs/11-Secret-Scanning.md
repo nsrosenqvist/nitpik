@@ -62,7 +62,7 @@ Normal reviews without `--scan-secrets` have no extra startup cost.
 
 ## Related Pages
 
-- [Threat Scanning](18-Threat-Scanning) — malicious pattern detection (complementary to secret scanning)
+- [Threat Scanning](12-Threat-Scanning) — malicious pattern detection (complementary to secret scanning)
 - [How Reviews Work](09-How-Reviews-Work) — where secret scanning fits in the pipeline
-- [Configuration](13-Configuration) — secrets config section
-- [CI/CD Integration](14-CI-Integration) — enabling secret scanning in pipelines
+- [Configuration](14-Configuration) — secrets config section
+- [CI/CD Integration](15-CI-Integration) — enabling secret scanning in pipelines

@@ -154,5 +154,5 @@ nitpik checks for a provider-specific key first, then falls back to `NITPIK_API_
 ## Related Pages
 
 - [LLM Providers](03-Providers) — provider setup details
-- [CLI Reference](15-CLI-Reference) — every command and flag
-- [CI/CD Integration](14-CI-Integration) — configuration for CI environments
+- [CLI Reference](16-CLI-Reference) — every command and flag
+- [CI/CD Integration](15-CI-Integration) — configuration for CI environments

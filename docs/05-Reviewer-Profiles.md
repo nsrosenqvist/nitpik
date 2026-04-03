@@ -116,4 +116,4 @@ This shows each profile's name, description, and tags.
 - [Custom Profiles](06-Custom-Profiles) — create your own reviewers
 - [How Reviews Work](09-How-Reviews-Work) — multi-agent coordination
 - [Agentic Mode](07-Agentic-Mode) — give profiles access to tools
-- [CLI Reference](15-CLI-Reference) — all profile-related flags
+- [CLI Reference](16-CLI-Reference) — all profile-related flags

@@ -152,5 +152,5 @@ All other env vars are stripped unless explicitly listed in `environment`. Exact
 
 - [Reviewer Profiles](05-Reviewer-Profiles) — built-in profiles and selection
 - [Agentic Mode](07-Agentic-Mode) — using tools during reviews
-- [Project Documentation](12-Project-Docs) — teaching the reviewer your conventions via `REVIEW.md`
-- [Configuration](13-Configuration) — `--profile-dir` and related settings
+- [Project Documentation](13-Project-Docs) — teaching the reviewer your conventions via `REVIEW.md`
+- [Configuration](14-Configuration) — `--profile-dir` and related settings

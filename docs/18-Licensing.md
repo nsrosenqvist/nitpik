@@ -65,5 +65,5 @@ License verification is **fully offline**. nitpik validates the key's Ed25519 si
 ## Related Pages
 
 - [Installation](01-Installation) — getting started
-- [Configuration](13-Configuration) — license key in config and env vars
-- [CI/CD Integration](14-CI-Integration) — setting up the key in pipelines
+- [Configuration](14-Configuration) — license key in config and env vars
+- [CI/CD Integration](15-CI-Integration) — setting up the key in pipelines

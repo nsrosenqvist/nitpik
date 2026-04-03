@@ -130,10 +130,10 @@ model = "claude-sonnet-4-20250514"
 
 Or in your global config at `~/.config/nitpik/config.toml` to set a default for all repositories.
 
-See [Configuration](13-Configuration) for the full layering order.
+See [Configuration](14-Configuration) for the full layering order.
 
 ## Related Pages
 
 - [Quick Start](02-Quick-Start) — run your first review
-- [Configuration](13-Configuration) — all config options
+- [Configuration](14-Configuration) — all config options
 - [Custom Profiles](06-Custom-Profiles) — per-profile model overrides

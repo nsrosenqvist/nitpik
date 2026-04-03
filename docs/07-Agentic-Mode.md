@@ -110,4 +110,4 @@ If your custom profile includes an `agentic_instructions` field in its frontmatt
 - [Custom Profiles](06-Custom-Profiles) — define custom tools and agentic instructions
 - [Reviewer Profiles](05-Reviewer-Profiles) — choosing profiles
 - [How Reviews Work](09-How-Reviews-Work) — the full review pipeline
-- [Configuration](13-Configuration) — agentic config options
+- [Configuration](14-Configuration) — agentic config options

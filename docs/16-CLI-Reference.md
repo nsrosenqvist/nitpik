@@ -169,5 +169,5 @@ target:     x86_64-unknown-linux-gnu
 
 ## Related Pages
 
-- [Configuration](13-Configuration) — config files and environment variables
+- [Configuration](14-Configuration) — config files and environment variables
 - [Quick Start](02-Quick-Start) — get started quickly

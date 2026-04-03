@@ -70,10 +70,10 @@ Each finding includes:
 ## What's Next?
 
 - **Run multiple reviewers** — add `--profile backend,security` to get specialist perspectives. See [Reviewer Profiles](05-Reviewer-Profiles).
-- **Set up CI** — output findings as GitHub annotations, GitLab Code Quality, or Bitbucket Code Insights. See [CI/CD Integration](14-CI-Integration).
+- **Set up CI** — output findings as GitHub annotations, GitLab Code Quality, or Bitbucket Code Insights. See [CI/CD Integration](15-CI-Integration).
 - **Enable secret scanning** — add `--scan-secrets` to detect and redact secrets before they reach the LLM. See [Secret Scanning](11-Secret-Scanning).
 - **Explore agentic mode** — add `--agent` to let the LLM read files and search your codebase for deeper analysis. See [Agentic Mode](07-Agentic-Mode).
-- **Create team config** — drop a `.nitpik.toml` in your repo root. See [Configuration](13-Configuration).
+- **Create team config** — drop a `.nitpik.toml` in your repo root. See [Configuration](14-Configuration).
 
 ## Related Pages
 

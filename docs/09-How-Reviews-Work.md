@@ -10,7 +10,7 @@ When you run `nitpik review`, nitpik parses your diff, gathers relevant context 
 
 If `--scan-secrets` is enabled, secrets are detected and redacted **before** any code is sent to the LLM. See [Secret Scanning](11-Secret-Scanning) for details.
 
-If `--scan-threats` is enabled, nitpik also scans for malicious patterns (obfuscation, dangerous APIs, supply chain hooks, backdoors) and optionally triages them with the LLM. See [Threat Scanning](18-Threat-Scanning) for details.
+If `--scan-threats` is enabled, nitpik also scans for malicious patterns (obfuscation, dangerous APIs, supply chain hooks, backdoors) and optionally triages them with the LLM. See [Threat Scanning](12-Threat-Scanning) for details.
 
 ## Context
 
@@ -26,7 +26,7 @@ You can tune this with `max_file_lines` and `surrounding_lines` in your config.
 
 nitpik automatically includes your team's conventions and guidelines. If a `REVIEW.md` or `NITPIK.md` exists in your repo root, those are used as focused review context. Otherwise, nitpik falls back to common documentation files like `AGENTS.md`, `CONVENTIONS.md`, and `CONTRIBUTING.md`.
 
-See [Project Documentation](12-Project-Docs) for details on controlling this.
+See [Project Documentation](13-Project-Docs) for details on controlling this.
 
 ### Commit History
 
@@ -60,4 +60,4 @@ Before findings reach you, nitpik applies quality filters:
 - [Reviewer Profiles](05-Reviewer-Profiles) — choosing and combining profiles
 - [Agentic Mode](07-Agentic-Mode) — giving the LLM tools to explore your codebase
 - [Secret Scanning](11-Secret-Scanning) — how redaction works
-- [Threat Scanning](18-Threat-Scanning) — malicious pattern detection
+- [Threat Scanning](12-Threat-Scanning) — malicious pattern detection

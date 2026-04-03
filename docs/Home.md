@@ -25,19 +25,19 @@ New to nitpik? Start here:
 - **[How Reviews Work](09-How-Reviews-Work)** — context assembly, multi-agent coordination, and quality post-processing.
 - **[Caching & Prior Findings](10-Caching)** — content-hash caching and iterative review continuity.
 - **[Secret Scanning](11-Secret-Scanning)** — detect and redact secrets before code reaches the LLM.
-- **[Threat Scanning](18-Threat-Scanning)** — detect obfuscated payloads, dangerous APIs, supply chain attacks, and homoglyph tricks.
-- **[Project Documentation Context](12-Project-Docs)** — teach the reviewer your team's conventions.
+- **[Threat Scanning](12-Threat-Scanning)** — detect obfuscated payloads, dangerous APIs, supply chain attacks, and homoglyph tricks.
+- **[Project Documentation Context](13-Project-Docs)** — teach the reviewer your team's conventions.
 
 ## Deployment
 
-- **[Configuration Reference](13-Configuration)** — `.nitpik.toml`, environment variables, and CLI flags.
-- **[CI/CD Integration](14-CI-Integration)** — GitHub Actions, GitLab CI, Bitbucket Pipelines, Woodpecker/Forgejo.
+- **[Configuration Reference](14-Configuration)** — `.nitpik.toml`, environment variables, and CLI flags.
+- **[CI/CD Integration](15-CI-Integration)** — GitHub Actions, GitLab CI, Bitbucket Pipelines, Woodpecker/Forgejo.
 
 ## Reference
 
-- **[CLI Reference](15-CLI-Reference)** — every command and flag.
-- **[Troubleshooting](16-Troubleshooting)** — common issues and solutions.
-- **[Licensing](17-Licensing)** — free tier, commercial activation, and license management.
+- **[CLI Reference](16-CLI-Reference)** — every command and flag.
+- **[Troubleshooting](17-Troubleshooting)** — common issues and solutions.
+- **[Licensing](18-Licensing)** — free tier, commercial activation, and license management.
 
 ---
 
