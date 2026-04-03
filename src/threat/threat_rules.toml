@@ -85,6 +85,42 @@ keywords = ["\\u"]
 languages = []
 scope = "line"
 
+[[rules]]
+id = "invisible-unicode-chars"
+description = "Invisible Unicode characters in source code (zero-width spaces, fillers, soft hyphens)"
+category = "obfuscation"
+severity = "warning"
+regex = '''[\x{200B}\x{200C}\x{200D}\x{2060}\x{FEFF}\x{00AD}\x{034F}\x{180E}\x{2800}\x{17B4}\x{17B5}]'''
+keywords = []
+languages = []
+scope = "line"
+
+[rules.allowlist]
+paths = ["**/*.md", "**/*.txt", "**/*.rst"]
+
+[[rules]]
+id = "hangul-filler-payload"
+description = "Hangul filler/jamo character cluster (invisible payload encoding, e.g. Glassworm)"
+category = "obfuscation"
+severity = "error"
+regex = '''[\x{3164}\x{FFA0}\x{115F}\x{1160}-\x{11FF}]{8,}'''
+keywords = []
+languages = []
+scope = "line"
+
+[[rules]]
+id = "bidi-override-chars"
+description = "Unicode bidirectional override characters (Trojan Source attack, CVE-2021-42574)"
+category = "obfuscation"
+severity = "error"
+regex = '''[\x{202A}-\x{202E}\x{2066}-\x{2069}]'''
+keywords = []
+languages = []
+scope = "line"
+
+[rules.allowlist]
+paths = ["**/*.md", "**/*.txt", "**/*.rst", "**/*.po", "**/*.pot"]
+
 # ── Dangerous API ────────────────────────────────────────────────────
 
 [[rules]]
