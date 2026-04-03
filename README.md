@@ -17,6 +17,7 @@ AI-powered code reviews for your team. Bring your own model, bring your own API 
 - **Configurable reviewer agents** — built-in profiles or custom Markdown-defined reviewers with your team's conventions.
 - **Agentic mode** — let the LLM explore your codebase with built-in and custom tools.
 - **Secret scanning** — 200+ rules detect and redact secrets before code reaches the LLM.
+- **Threat scanning** — 44 rules plus structural heuristics detect obfuscated payloads, backdoors, supply chain attacks, invisible Unicode tricks, and homoglyph identifiers.
 - **Every major CI platform** — GitHub Actions, GitLab CI, Bitbucket Pipelines, Woodpecker/Forgejo/Gitea.
 
 ---
@@ -242,6 +243,9 @@ max_file_lines = 1000
 surrounding_lines = 100
 
 [secrets]
+enabled = false
+
+[threats]
 enabled = false
 ```
 
@@ -579,6 +583,38 @@ nitpik review --diff-base main --scan-secrets --secrets-rules ./custom-rules.tom
 
 ---
 
+## Threat Scanning
+
+nitpik detects potentially harmful code patterns — obfuscated payloads, dangerous API calls, supply chain hooks, backdoors, and data exfiltration — using 44 built-in rules plus structural heuristics. When an LLM provider is configured, flagged patterns are triaged by the model to reduce false positives.
+
+```bash
+nitpik review --diff-base main --scan-threats
+```
+
+Beyond regex rules, nitpik detects **invisible Unicode** characters (zero-width spaces, Hangul filler payloads used by Glassworm), **Trojan Source** bidi overrides (CVE-2021-42574), and **mixed-script homoglyph identifiers** — where Cyrillic or Greek lookalike characters are mixed into Latin identifiers to create visually identical but semantically different symbols.
+
+Enable both threat and secret scanning for maximum coverage:
+
+```bash
+nitpik review --diff-base main --scan-secrets --scan-threats
+```
+
+Always-on in CI:
+
+```toml
+# .nitpik.toml
+[threats]
+enabled = true
+```
+
+Bring your own rules:
+
+```bash
+nitpik review --diff-base main --scan-threats --threat-rules ./custom-threats.toml
+```
+
+---
+
 ## Project Documentation Context
 
 nitpik automatically detects documentation files in your repository root and includes them in the review prompt so the LLM understands your team's conventions.
@@ -678,6 +714,7 @@ nitpik uses third-party large language models (LLMs) to analyze code. **All find
 - **Always review AI suggestions with human judgment** before acting on them.
 - **Code diffs are sent to your configured LLM provider** (e.g. Anthropic, OpenAI, Gemini). nitpik does not store or retain your code, but the LLM provider's data policies apply. Choose a provider whose terms you trust.
 - **Enable `--scan-secrets`** to detect and redact secrets before code is sent to the LLM. Without this flag, secrets present in your diffs will be transmitted to the provider.
+- **Enable `--scan-threats`** to detect obfuscated payloads, backdoors, and other malicious patterns. Threat findings are advisory — always verify with human judgment.
 - **Provider integrations rely on a third-party open-source library.** LLM provider support may change, break, or be removed due to upstream updates outside of nitpik's control. If you plan to purchase a commercial license, **please verify that your provider and model work correctly using the free unlicensed version first.** No license key is required for this — just install and test with your own API key.
 - nitpik is a development aid, not a replacement for human code review, testing, or security auditing.
 

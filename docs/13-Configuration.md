@@ -40,6 +40,9 @@ surrounding_lines = 100
 [secrets]
 enabled = false
 
+[threats]
+enabled = false
+
 [telemetry]
 enabled = true
 ```
@@ -88,6 +91,13 @@ The project config overrides the global config, so teams can set project-level s
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `false` | Enable secret scanning by default. Equivalent to always passing `--scan-secrets`. Adds ~3-5s startup time. |
+
+### `[threats]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Enable threat scanning by default. Equivalent to always passing `--scan-threats`. |
+| `additional_rules` | string | *(none)* | Path to additional threat rules TOML file. Loaded alongside the 44 built-in rules. |
 
 ### `[license]`
 

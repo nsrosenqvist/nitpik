@@ -65,6 +65,13 @@ Run a code review.
 | `--scan-secrets` | `false` | Enable secret detection and redaction before LLM calls. |
 | `--secrets-rules <PATH>` | — | Additional gitleaks-format TOML rules file. |
 
+### Threat Scanning
+
+| Flag | Default | Description |
+|---|---|---|
+| `--scan-threats` | `false` | Enable threat pattern detection (obfuscation, dangerous APIs, supply chain, backdoors) with optional LLM triage. |
+| `--threat-rules <PATH>` | — | Additional threat rules file (TOML format). Loaded alongside the 44 built-in rules. |
+
 ### Caching
 
 | Flag | Default | Description |

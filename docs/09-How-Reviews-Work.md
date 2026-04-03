@@ -10,6 +10,8 @@ When you run `nitpik review`, nitpik parses your diff, gathers relevant context 
 
 If `--scan-secrets` is enabled, secrets are detected and redacted **before** any code is sent to the LLM. See [Secret Scanning](11-Secret-Scanning) for details.
 
+If `--scan-threats` is enabled, nitpik also scans for malicious patterns (obfuscation, dangerous APIs, supply chain hooks, backdoors) and optionally triages them with the LLM. See [Threat Scanning](18-Threat-Scanning) for details.
+
 ## Context
 
 nitpik doesn't just send raw diffs to the LLM — it includes surrounding file content and your project documentation so the reviewer understands what it's looking at.
@@ -58,3 +60,4 @@ Before findings reach you, nitpik applies quality filters:
 - [Reviewer Profiles](05-Reviewer-Profiles) — choosing and combining profiles
 - [Agentic Mode](07-Agentic-Mode) — giving the LLM tools to explore your codebase
 - [Secret Scanning](11-Secret-Scanning) — how redaction works
+- [Threat Scanning](18-Threat-Scanning) — malicious pattern detection
