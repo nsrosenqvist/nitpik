@@ -244,6 +244,7 @@ surrounding_lines = 100
 
 [secrets]
 enabled = false
+severity = "warning"
 
 [threats]
 enabled = false

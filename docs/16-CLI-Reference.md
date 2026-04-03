@@ -64,6 +64,7 @@ Run a code review.
 |---|---|---|
 | `--scan-secrets` | `false` | Enable secret detection and redaction before LLM calls. |
 | `--secrets-rules <PATH>` | — | Additional gitleaks-format TOML rules file. |
+| `--secrets-severity <LEVEL>` | `warning` | Severity level for detected secrets (`error`, `warning`, or `info`). Set `error` to block merges on secrets; set `info` for legacy codebases. |
 
 ### Threat Scanning
 

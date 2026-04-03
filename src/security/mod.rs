@@ -20,6 +20,7 @@ pub fn scan_and_redact(
     content: &str,
     file_path: &str,
     rules: &[rules::SecretRule],
+    severity: Severity,
 ) -> (String, Vec<Finding>) {
     let matches = scanner::scan_content(content, rules);
     let mut findings = Vec::new();
@@ -34,7 +35,7 @@ pub fn scan_and_redact(
             file: file_path.to_string(),
             line: m.line_number,
             end_line: None,
-            severity: Severity::Warning,
+            severity,
             title: format!("Potential secret detected: {}", m.rule_id),
             message: format!(
                 "A potential {} was found. The secret has been redacted before sending to the LLM.",
@@ -75,7 +76,8 @@ mod tests {
             r"API_KEY_[A-Z0-9]{10}",
             &["API_KEY"],
         )];
-        let (redacted, findings) = scan_and_redact("fn main() {}", "test.rs", &rules);
+        let (redacted, findings) =
+            scan_and_redact("fn main() {}", "test.rs", &rules, Severity::Warning);
         assert_eq!(redacted, "fn main() {}");
         assert!(findings.is_empty());
     }
@@ -88,7 +90,7 @@ mod tests {
             &["SECRETKEY"],
         )];
         let content = "let key = \"SECRETKEYAB12X\";";
-        let (redacted, findings) = scan_and_redact(content, "config.rs", &rules);
+        let (redacted, findings) = scan_and_redact(content, "config.rs", &rules, Severity::Warning);
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].agent, "secret-scanner");
@@ -101,7 +103,7 @@ mod tests {
     fn multiple_secrets_redacted() {
         let rules = vec![make_test_rule("tok", r"TOK_[A-Z]{4}", &["TOK_"])];
         let content = "a = TOK_AAAA\nb = TOK_BBBB";
-        let (redacted, findings) = scan_and_redact(content, "file.rs", &rules);
+        let (redacted, findings) = scan_and_redact(content, "file.rs", &rules, Severity::Warning);
 
         assert_eq!(findings.len(), 2);
         assert!(!redacted.contains("TOK_AAAA"));
@@ -113,12 +115,24 @@ mod tests {
     fn finding_has_correct_fields() {
         let rules = vec![make_test_rule("pw", r"PASSWORD=[^\s]+", &["PASSWORD"])];
         let content = "line1\nPASSWORD=hunter2\nline3";
-        let (_, findings) = scan_and_redact(content, "env.sh", &rules);
+        let (_, findings) = scan_and_redact(content, "env.sh", &rules, Severity::Warning);
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file, "env.sh");
         assert_eq!(findings[0].line, 2);
         assert_eq!(findings[0].severity, Severity::Warning);
         assert!(findings[0].suggestion.is_some());
+    }
+
+    #[test]
+    fn severity_is_configurable() {
+        let rules = vec![make_test_rule("tok", r"TOK_[A-Z]{4}", &["TOK_"])];
+        let content = "x = TOK_ABCD";
+
+        let (_, error_findings) = scan_and_redact(content, "a.rs", &rules, Severity::Error);
+        assert_eq!(error_findings[0].severity, Severity::Error);
+
+        let (_, info_findings) = scan_and_redact(content, "a.rs", &rules, Severity::Info);
+        assert_eq!(info_findings[0].severity, Severity::Info);
     }
 }

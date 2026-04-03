@@ -50,6 +50,24 @@ description = "Internal API key pattern"
 regex = '''INTERNAL_KEY_[A-Za-z0-9]{32}'''
 ```
 
+## Finding Severity
+
+Detected secrets are reported as findings alongside your review results. By default, each finding has **warning** severity. Override this with the `--secrets-severity` flag or the `severity` config key:
+
+```bash
+# Treat detected secrets as blocking errors
+nitpik review --diff-base main --scan-secrets --secrets-severity error
+```
+
+```toml
+# .nitpik.toml
+[secrets]
+enabled = true
+severity = "error"   # "error", "warning", or "info"
+```
+
+Set `error` when secrets should block merges. Set `info` for legacy codebases where known secrets exist and you don't want them to gate CI.
+
 ## Performance
 
 Compiling the 200+ built-in regex rules adds roughly **3–5 seconds** of startup time on the first invocation (rules are compiled in parallel). This cost is:

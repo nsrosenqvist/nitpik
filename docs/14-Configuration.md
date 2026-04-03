@@ -39,6 +39,7 @@ surrounding_lines = 100
 
 [secrets]
 enabled = false
+severity = "warning"
 
 [threats]
 enabled = false
@@ -91,6 +92,7 @@ The project config overrides the global config, so teams can set project-level s
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `false` | Enable secret scanning by default. Equivalent to always passing `--scan-secrets`. Adds ~3-5s startup time. |
+| `severity` | string | `"warning"` | Severity level for detected secrets. One of: `error`, `warning`, `info`. Set `error` to block merges; set `info` for legacy codebases. CLI flag: `--secrets-severity`. |
 
 ### `[threats]`
 

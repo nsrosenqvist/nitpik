@@ -850,11 +850,15 @@ fn build_review_context<'a>(
         rules.extend(extra);
     }
 
+    // Resolve secrets severity: CLI flag > config > default (warning)
+    let secrets_severity = args.secrets_severity.unwrap_or(config.secrets.severity);
+
     // Scan and redact baseline file contents
     let mut secret_findings = Vec::new();
     let mut redacted_contents = indexmap::IndexMap::new();
     for (path, content) in &baseline.file_contents {
-        let (redacted, findings) = security::scan_and_redact(content, path, &rules);
+        let (redacted, findings) =
+            security::scan_and_redact(content, path, &rules, secrets_severity);
         secret_findings.extend(findings);
         redacted_contents.insert(path.clone(), redacted);
     }

@@ -178,6 +178,10 @@ pub struct ReviewArgs {
     #[arg(long)]
     pub secrets_rules: Option<PathBuf>,
 
+    /// Severity level for detected secrets (default: warning).
+    #[arg(long)]
+    pub secrets_severity: Option<Severity>,
+
     // --- Threat scanning ---
     /// Enable threat detection in diffs (obfuscated code, dangerous APIs,
     /// supply chain patterns, backdoors).
@@ -367,6 +371,7 @@ mod tests {
             max_tool_calls: 10,
             scan_secrets: false,
             secrets_rules: None,
+            secrets_severity: None,
             scan_threats: false,
             threat_rules: None,
             max_concurrent: 5,

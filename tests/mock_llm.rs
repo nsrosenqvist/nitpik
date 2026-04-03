@@ -1219,7 +1219,8 @@ async fn threat_scanner_triage_dismisses_finding() {
 
     // First, scan without triage to see what we get
     let raw_findings =
-        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None).await;
+        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None)
+            .await;
     assert!(
         raw_findings.len() >= 2,
         "should have at least 2 raw findings, got {}",
@@ -1309,7 +1310,8 @@ async fn threat_scanner_triage_fail_open_on_provider_error() {
     .await;
 
     let without_triage =
-        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None).await;
+        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None)
+            .await;
 
     assert_eq!(
         with_error.len(),

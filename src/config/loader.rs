@@ -133,11 +133,23 @@ impl Default for ProviderConfig {
 }
 
 /// Secret scanning configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SecretsConfig {
     pub enabled: bool,
     pub additional_rules: Option<String>,
+    /// Severity assigned to detected secrets (default: warning).
+    pub severity: Severity,
+}
+
+impl Default for SecretsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            additional_rules: None,
+            severity: Severity::Warning,
+        }
+    }
 }
 
 /// Threat scanning configuration.
@@ -286,6 +298,8 @@ impl Config {
             self.secrets.additional_rules,
             other.secrets.additional_rules
         );
+        let ds = SecretsConfig::default();
+        merge_if_changed!(self.secrets.severity, other.secrets.severity, ds.severity);
 
         // Threat settings
         if other.threats.enabled {
