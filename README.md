@@ -712,7 +712,7 @@ Disable caching for a single run with `--no-cache`. Use `--no-prior-context` for
 nitpik uses third-party large language models (LLMs) to analyze code. **All findings are AI-generated and advisory.** They may be incorrect, incomplete, or hallucinated. nitpik does not guarantee code quality, security, or correctness.
 
 - **Always review AI suggestions with human judgment** before acting on them.
-- **Code diffs are sent to your configured LLM provider** (e.g. Anthropic, OpenAI, Gemini). nitpik does not store or retain your code, but the LLM provider's data policies apply. Choose a provider whose terms you trust.
+- **Code diffs are sent to your configured LLM provider** (e.g. Anthropic, OpenAI, Gemini). nitpik does not store or retain your code, but the LLM provider's data policies apply. Choose a provider whose terms you trust. See the [Privacy Policy](https://nitpik.dev/privacy) for details on what nitpik itself collects.
 - **Enable `--scan-secrets`** to detect and redact secrets before code is sent to the LLM. This is a best-effort safety net — unusual or custom secret formats may not be detected. Without this flag, secrets present in your diffs will be transmitted to the provider.
 - **Enable `--scan-threats`** to detect obfuscated payloads, backdoors, and other malicious patterns. This is a best-effort defense layer — novel attack techniques or sophisticated payloads may evade detection. Threat findings are advisory — always verify with human judgment.
 - **Neither secret scanning nor threat scanning guarantees detection of all issues.** Use them alongside dedicated security tools, dependency audits, and manual review.
@@ -825,3 +825,5 @@ Licensed under the [Business Source License 1.1](LICENSE).
 You bring your own LLM provider and API key — nitpik never proxies, stores, or meters your API calls.
 
 The code converts to [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) three years after each release.
+
+[Terms of Service](https://nitpik.dev/terms) · [Privacy Policy](https://nitpik.dev/privacy)
