@@ -43,19 +43,10 @@ pub async fn triage_findings(
 
 // ── Prompt construction ─────────────────────────────────────────────
 
+const TRIAGE_SYSTEM_PROMPT: &str = include_str!("triage_prompt.md");
+
 fn system_prompt() -> String {
-    "You are a security triage assistant. You will be given a list of \
-     potential threat findings from a static pattern scanner. For each \
-     finding, classify it as:\n\
-     - \"confirmed\" — genuinely suspicious, keep the finding\n\
-     - \"dismissed\" — clearly a false positive, remove the finding\n\
-     - \"downgraded\" — not clearly malicious but worth noting at info severity\n\n\
-     Respond with a JSON array. Each element must have:\n\
-     - \"index\": the 0-based finding index\n\
-     - \"classification\": one of \"confirmed\", \"dismissed\", \"downgraded\"\n\
-     - \"rationale\": brief explanation (one sentence)\n\n\
-     Respond ONLY with the JSON array, no markdown fences or extra text."
-        .to_string()
+    TRIAGE_SYSTEM_PROMPT.to_string()
 }
 
 fn build_triage_prompt(
