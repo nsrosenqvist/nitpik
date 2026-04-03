@@ -141,6 +141,14 @@ enabled = true
 
 Built-in rules are compiled once per run using parallel regex compilation. The startup cost is comparable to secret scanning (~3–5 seconds). LLM triage adds one additional API call when findings exist.
 
+## Limitations
+
+Threat scanning is a **best-effort defense layer**, not a guarantee. The built-in rules and heuristics cover common attack patterns, but determined attackers can craft payloads that evade regex-based detection. LLM triage reduces false positives but may also dismiss genuine threats.
+
+- **nitpik does not guarantee detection of all malicious code.** Novel obfuscation techniques, zero-day patterns, and sophisticated supply chain attacks may not be caught.
+- **Threat findings are advisory.** Always verify flagged patterns with human judgment before acting on them.
+- **nitpik is not a replacement for dedicated security tooling** — use it alongside SAST scanners, dependency audits, and manual security review.
+
 ## Related Pages
 
 - [Secret Scanning](11-Secret-Scanning) — credential detection and redaction

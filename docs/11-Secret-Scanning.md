@@ -60,6 +60,13 @@ Compiling the 200+ built-in regex rules adds roughly **3–5 seconds** of startu
 
 Normal reviews without `--scan-secrets` have no extra startup cost.
 
+## Limitations
+
+Secret scanning is a **best-effort safety net**, not a guarantee. The built-in rules cover 200+ common patterns, but custom or unusual secret formats may not be detected.
+
+- **nitpik does not guarantee detection of all secrets.** Unusual credential formats, dynamically constructed secrets, or secrets split across multiple lines may evade detection.
+- **Always treat `--scan-secrets` as a safety layer, not a substitute for proper secret management** — use environment variables, vault services, and `.gitignore` to keep secrets out of your repository in the first place.
+
 ## Related Pages
 
 - [Threat Scanning](12-Threat-Scanning) — malicious pattern detection (complementary to secret scanning)

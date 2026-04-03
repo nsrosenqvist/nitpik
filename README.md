@@ -713,8 +713,9 @@ nitpik uses third-party large language models (LLMs) to analyze code. **All find
 
 - **Always review AI suggestions with human judgment** before acting on them.
 - **Code diffs are sent to your configured LLM provider** (e.g. Anthropic, OpenAI, Gemini). nitpik does not store or retain your code, but the LLM provider's data policies apply. Choose a provider whose terms you trust.
-- **Enable `--scan-secrets`** to detect and redact secrets before code is sent to the LLM. Without this flag, secrets present in your diffs will be transmitted to the provider.
-- **Enable `--scan-threats`** to detect obfuscated payloads, backdoors, and other malicious patterns. Threat findings are advisory — always verify with human judgment.
+- **Enable `--scan-secrets`** to detect and redact secrets before code is sent to the LLM. This is a best-effort safety net — unusual or custom secret formats may not be detected. Without this flag, secrets present in your diffs will be transmitted to the provider.
+- **Enable `--scan-threats`** to detect obfuscated payloads, backdoors, and other malicious patterns. This is a best-effort defense layer — novel attack techniques or sophisticated payloads may evade detection. Threat findings are advisory — always verify with human judgment.
+- **Neither secret scanning nor threat scanning guarantees detection of all issues.** Use them alongside dedicated security tools, dependency audits, and manual review.
 - **Provider integrations rely on a third-party open-source library.** LLM provider support may change, break, or be removed due to upstream updates outside of nitpik's control. If you plan to purchase a commercial license, **please verify that your provider and model work correctly using the free unlicensed version first.** No license key is required for this — just install and test with your own API key.
 - nitpik is a development aid, not a replacement for human code review, testing, or security auditing.
 
