@@ -19,6 +19,7 @@ use nitpik::progress;
 use nitpik::providers;
 use nitpik::security;
 use nitpik::telemetry;
+use nitpik::threat;
 use nitpik::update;
 
 use std::io::IsTerminal;
@@ -372,6 +373,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     let use_agent = args.agent || config.review.agentic.enabled;
     let scan_secrets = args.scan_secrets || config.secrets.enabled;
+    let scan_threats = args.scan_threats || config.threats.enabled;
 
     // Get diff source — keeps raw content alive so parsed diffs
     // can borrow via Cow (zero-copy).
@@ -455,7 +457,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         is_path_scan,
     )?;
 
-    let (_provider, orchestrator) = create_orchestrator(
+    let (provider, orchestrator) = create_orchestrator(
         &config,
         repo_root_path,
         args.no_cache,
@@ -477,15 +479,104 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         .await
         .context("review failed")?;
 
+    // Finalize the live progress display before printing threat scanner status.
+    progress.finish();
+
+    // Threat scanning (pattern scan then optional LLM triage)
+    let threat_findings = if scan_threats {
+        let mut threat_rules = threat::rules::default_rules();
+        let config_threat_path: Option<std::path::PathBuf> = config
+            .threats
+            .additional_rules
+            .as_ref()
+            .map(std::path::PathBuf::from);
+        let threat_rules_path = args
+            .threat_rules
+            .as_deref()
+            .or(config_threat_path.as_deref());
+        if let Some(path) = threat_rules_path {
+            match threat::rules::load_rules_from_file(path) {
+                Ok(extra) => threat_rules.extend(extra),
+                Err(e) => eprintln!("Warning: failed to load threat rules: {e}"),
+            }
+        }
+
+        // Phase 1: fast pattern matching (regex + entropy)
+        let raw_matches = threat::scanner::scan_for_threats(
+            &review_context.diffs,
+            &review_context.baseline.file_contents,
+            &threat_rules,
+        );
+
+        if raw_matches.is_empty() {
+            vec![]
+        } else {
+            let show_progress = !args.quiet
+                && args.format == OutputFormat::Terminal
+                && std::io::stderr().is_terminal();
+
+            if show_progress {
+                use colored::Colorize;
+                use std::io::Write;
+                let stderr = std::io::stderr();
+                let mut handle = stderr.lock();
+                let _ = writeln!(
+                    handle,
+                    "  {} {}",
+                    "▸".cyan().bold(),
+                    format!(
+                        "Threat scanner: {} pattern match{} found, triaging with LLM…",
+                        raw_matches.len(),
+                        if raw_matches.len() == 1 { "" } else { "es" }
+                    )
+                    .dimmed(),
+                );
+                let _ = handle.flush();
+            }
+
+            // Phase 2: LLM triage (fail-open)
+            let triaged = threat::triage::triage_findings(
+                raw_matches,
+                &review_context.baseline.file_contents,
+                provider.as_ref(),
+            )
+            .await;
+
+            if show_progress {
+                use colored::Colorize;
+                use std::io::Write;
+                let stderr = std::io::stderr();
+                let mut handle = stderr.lock();
+                let _ = writeln!(
+                    handle,
+                    "  {} {}",
+                    "✔".green().bold(),
+                    format!(
+                        "Threat triage complete: {} finding{} after triage",
+                        triaged.len(),
+                        if triaged.len() == 1 { "" } else { "s" }
+                    )
+                    .dimmed(),
+                );
+                let _ = writeln!(handle);
+                let _ = handle.flush();
+            }
+
+            triaged.iter().map(threat::match_to_finding).collect()
+        }
+    } else {
+        vec![]
+    };
+
     let mut findings = review_result.findings;
     findings.extend(secret_findings);
+    findings.extend(threat_findings);
     findings.sort_by(|a, b| {
         b.severity
             .cmp(&a.severity)
             .then(a.file.cmp(&b.file))
             .then(a.line.cmp(&b.line))
     });
-    progress.finish();
 
     let fail_on_severity: Option<Severity> = if args.no_fail {
         None

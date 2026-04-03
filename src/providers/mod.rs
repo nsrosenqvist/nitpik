@@ -47,4 +47,14 @@ pub trait ReviewProvider: Send + Sync {
         max_turns: usize,
         max_tool_calls: usize,
     ) -> Result<Vec<Finding>, ProviderError>;
+
+    /// Perform a simple one-shot completion (non-agentic, no tool calls).
+    ///
+    /// Used for internal tasks like threat triage where the response is
+    /// not a findings array but a custom JSON format.
+    async fn complete(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, ProviderError>;
 }

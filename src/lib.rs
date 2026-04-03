@@ -19,5 +19,6 @@ pub mod progress;
 pub mod providers;
 pub mod security;
 pub mod telemetry;
+pub mod threat;
 pub mod tools;
 pub mod update;

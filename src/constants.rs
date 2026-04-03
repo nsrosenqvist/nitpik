@@ -158,3 +158,6 @@ pub const LARGE_FILE_CONTEXT_LINES: usize = 50;
 
 /// Maximum compiled regex DFA size for gitleaks rules (50 MB).
 pub const REGEX_SIZE_LIMIT: usize = 50 * 1024 * 1024;
+
+/// Agent name for threat scanner findings.
+pub const THREAT_SCANNER_AGENT: &str = "threat-scanner";

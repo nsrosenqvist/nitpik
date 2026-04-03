@@ -178,6 +178,16 @@ pub struct ReviewArgs {
     #[arg(long)]
     pub secrets_rules: Option<PathBuf>,
 
+    // --- Threat scanning ---
+    /// Enable threat detection in diffs (obfuscated code, dangerous APIs,
+    /// supply chain patterns, backdoors).
+    #[arg(long, default_value_t = false)]
+    pub scan_threats: bool,
+
+    /// Additional threat rules file (TOML format).
+    #[arg(long)]
+    pub threat_rules: Option<PathBuf>,
+
     // --- Performance ---
     /// Max concurrent LLM calls.
     #[arg(long, default_value_t = 5)]
@@ -357,6 +367,8 @@ mod tests {
             max_tool_calls: 10,
             scan_secrets: false,
             secrets_rules: None,
+            scan_threats: false,
+            threat_rules: None,
             max_concurrent: 5,
             no_cache: false,
             no_prior_context: false,

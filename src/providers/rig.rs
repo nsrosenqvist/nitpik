@@ -472,6 +472,22 @@ impl ReviewProvider for RigProvider {
             Err(e) => Err(e),
         }
     }
+
+    async fn complete(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, ProviderError> {
+        self.call(
+            &self.config.model,
+            system_prompt,
+            user_prompt,
+            false,
+            0,
+            Vec::new(),
+        )
+        .await
+    }
 }
 
 /// Enhance the system prompt for agentic mode.

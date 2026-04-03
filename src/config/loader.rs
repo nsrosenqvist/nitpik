@@ -38,6 +38,7 @@ pub struct Config {
     pub review: ReviewConfig,
     pub provider: ProviderConfig,
     pub secrets: SecretsConfig,
+    pub threats: ThreatConfig,
     pub license: LicenseConfig,
     pub telemetry: TelemetryConfig,
 }
@@ -135,6 +136,14 @@ impl Default for ProviderConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SecretsConfig {
+    pub enabled: bool,
+    pub additional_rules: Option<String>,
+}
+
+/// Threat scanning configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThreatConfig {
     pub enabled: bool,
     pub additional_rules: Option<String>,
 }
@@ -276,6 +285,15 @@ impl Config {
         merge_if_some!(
             self.secrets.additional_rules,
             other.secrets.additional_rules
+        );
+
+        // Threat settings
+        if other.threats.enabled {
+            self.threats.enabled = true;
+        }
+        merge_if_some!(
+            self.threats.additional_rules,
+            other.threats.additional_rules
         );
 
         // License settings

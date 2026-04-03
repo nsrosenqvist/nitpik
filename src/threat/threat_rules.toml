@@ -1,0 +1,457 @@
+# Threat scanning rules for nitpik.
+#
+# Format extends gitleaks TOML with threat-specific fields:
+#   category  — obfuscation | dangerous-api | supply-chain | exfiltration | backdoor
+#   languages — file extension filter (empty = all)
+#   scope     — "line" (per added line) or "file" (full baseline content)
+#   entropy   — minimum Shannon entropy for matched text (0 = disabled)
+#   min_match_length — minimum character length for matched text (0 = disabled)
+
+# ── Obfuscation ──────────────────────────────────────────────────────
+
+[[rules]]
+id = "obfuscated-base64-blob"
+description = "Long base64-encoded blob"
+category = "obfuscation"
+severity = "warning"
+regex = '''[A-Za-z0-9+/=]{40,}'''
+keywords = []
+languages = []
+scope = "line"
+entropy = 4.5
+min_match_length = 40
+
+[[rules]]
+id = "obfuscated-hex-blob"
+description = "Long hex-escaped string"
+category = "obfuscation"
+severity = "warning"
+regex = '''(\\x[0-9a-fA-F]{2}){20,}'''
+keywords = ["\\x"]
+languages = []
+scope = "line"
+
+[[rules]]
+id = "js-fromcharcode-chain"
+description = "String.fromCharCode with many arguments"
+category = "obfuscation"
+severity = "warning"
+regex = '''String\.fromCharCode\s*\([^)]{20,}\)'''
+keywords = ["fromCharCode"]
+languages = ["js", "ts", "jsx", "tsx"]
+scope = "line"
+
+[[rules]]
+id = "js-function-constructor"
+description = "Function constructor for dynamic code execution"
+category = "obfuscation"
+severity = "warning"
+regex = '''(?:new\s+)?Function\s*\([^)]*\)'''
+keywords = ["Function"]
+languages = ["js", "ts", "jsx", "tsx"]
+scope = "line"
+
+[rules.allowlist]
+regexes = ["// nosec", "test_", "_test\\."]
+paths = ["**/test/**", "**/*_test.*", "**/*.test.*"]
+
+[[rules]]
+id = "encoded-eval"
+description = "Base64 decoding near eval or Function constructor"
+category = "obfuscation"
+severity = "warning"
+regex = '''(?:atob|Buffer\.from)\s*\([^)]*\).*(?:eval|Function)\s*\(|(?:eval|Function)\s*\(.*(?:atob|Buffer\.from)\s*\('''
+keywords = ["atob", "Buffer.from"]
+languages = ["js", "ts", "jsx", "tsx"]
+scope = "line"
+
+[[rules]]
+id = "python-exec-encoded"
+description = "Executing decoded/decompiled content in Python"
+category = "obfuscation"
+severity = "warning"
+regex = '''exec\s*\(\s*(?:base64\.b64decode|codecs\.decode|zlib\.decompress|compile)\s*\('''
+keywords = ["exec"]
+languages = ["py"]
+scope = "line"
+
+[[rules]]
+id = "unicode-escape-chain"
+description = "Dense unicode escape sequences"
+category = "obfuscation"
+severity = "warning"
+regex = '''(?:\\u[0-9a-fA-F]{4}){10,}'''
+keywords = ["\\u"]
+languages = []
+scope = "line"
+
+# ── Dangerous API ────────────────────────────────────────────────────
+
+[[rules]]
+id = "js-eval"
+description = "Dynamic code execution via eval()"
+category = "dangerous-api"
+severity = "warning"
+regex = '''\beval\s*\('''
+keywords = ["eval"]
+languages = ["js", "ts", "jsx", "tsx"]
+scope = "line"
+
+[rules.allowlist]
+regexes = ["// nosec", "// safe", "eslint-disable"]
+paths = ["**/test/**", "**/*_test.*", "**/*.test.*", "**/*.spec.*"]
+
+[[rules]]
+id = "js-child-process-exec"
+description = "child_process exec/spawn usage"
+category = "dangerous-api"
+severity = "warning"
+regex = '''child_process.*(?:exec|spawn|execSync|execFile|fork)\s*\(|(?:exec|spawn|execSync|execFile|fork)\s*\(.*child_process'''
+keywords = ["child_process"]
+languages = ["js", "ts"]
+scope = "line"
+
+[[rules]]
+id = "js-require-child-process"
+description = "Requiring child_process module"
+category = "dangerous-api"
+severity = "info"
+regex = '''require\s*\(\s*['"]\s*child_process\s*['"]\s*\)'''
+keywords = ["child_process"]
+languages = ["js", "ts"]
+scope = "line"
+
+[[rules]]
+id = "python-eval"
+description = "Dynamic code execution via eval()"
+category = "dangerous-api"
+severity = "warning"
+regex = '''\beval\s*\('''
+keywords = ["eval"]
+languages = ["py"]
+scope = "line"
+
+[rules.allowlist]
+regexes = ["# nosec", "# safe", "# noqa"]
+paths = ["**/test/**", "**/test_*", "**/*_test.py"]
+
+[[rules]]
+id = "python-exec"
+description = "Dynamic code execution via exec()"
+category = "dangerous-api"
+severity = "warning"
+regex = '''\bexec\s*\('''
+keywords = ["exec"]
+languages = ["py"]
+scope = "line"
+
+[rules.allowlist]
+regexes = ["# nosec", "# safe", "# noqa"]
+paths = ["**/test/**", "**/test_*", "**/*_test.py"]
+
+[[rules]]
+id = "python-os-system"
+description = "Shell command via os.system()"
+category = "dangerous-api"
+severity = "warning"
+regex = '''os\.system\s*\('''
+keywords = ["os.system"]
+languages = ["py"]
+scope = "line"
+
+[[rules]]
+id = "python-subprocess-shell"
+description = "subprocess with shell=True"
+category = "dangerous-api"
+severity = "warning"
+regex = '''subprocess\.(?:call|Popen|run|check_call|check_output)\s*\([^)]*shell\s*=\s*True'''
+keywords = ["subprocess"]
+languages = ["py"]
+scope = "line"
+
+[[rules]]
+id = "python-pickle-loads"
+description = "Deserialization via pickle (arbitrary code execution risk)"
+category = "dangerous-api"
+severity = "warning"
+regex = '''pickle\.(?:loads?|Unpickler)\s*\('''
+keywords = ["pickle"]
+languages = ["py"]
+scope = "line"
+
+[[rules]]
+id = "python-dunder-import"
+description = "Dynamic import via __import__()"
+category = "dangerous-api"
+severity = "info"
+regex = '''__import__\s*\('''
+keywords = ["__import__"]
+languages = ["py"]
+scope = "line"
+
+[[rules]]
+id = "python-marshal-loads"
+description = "Deserialization via marshal.loads()"
+category = "dangerous-api"
+severity = "warning"
+regex = '''marshal\.loads?\s*\('''
+keywords = ["marshal"]
+languages = ["py"]
+scope = "line"
+
+[[rules]]
+id = "ruby-eval"
+description = "Dynamic code execution via eval()"
+category = "dangerous-api"
+severity = "warning"
+regex = '''\beval\s*\('''
+keywords = ["eval"]
+languages = ["rb"]
+scope = "line"
+
+[rules.allowlist]
+regexes = ["# nosec"]
+paths = ["**/test/**", "**/spec/**"]
+
+[[rules]]
+id = "ruby-system"
+description = "Shell command execution"
+category = "dangerous-api"
+severity = "warning"
+regex = '''\bsystem\s*\(|`[^`]+`'''
+keywords = ["system"]
+languages = ["rb"]
+scope = "line"
+
+[[rules]]
+id = "ruby-send-dynamic"
+description = "Dynamic method dispatch via send()"
+category = "dangerous-api"
+severity = "info"
+regex = '''\.send\s*\(\s*[^'"][^)]*\)'''
+keywords = ["send"]
+languages = ["rb"]
+scope = "line"
+
+[[rules]]
+id = "go-exec-command"
+description = "OS command execution"
+category = "dangerous-api"
+severity = "info"
+regex = '''exec\.Command\s*\('''
+keywords = ["exec.Command"]
+languages = ["go"]
+scope = "line"
+
+[[rules]]
+id = "go-unsafe-pointer"
+description = "Unsafe pointer usage"
+category = "dangerous-api"
+severity = "info"
+regex = '''unsafe\.Pointer'''
+keywords = ["unsafe.Pointer"]
+languages = ["go"]
+scope = "line"
+
+[[rules]]
+id = "php-eval"
+description = "Dynamic code execution via eval()"
+category = "dangerous-api"
+severity = "warning"
+regex = '''\beval\s*\('''
+keywords = ["eval"]
+languages = ["php"]
+scope = "line"
+
+[rules.allowlist]
+regexes = ["// nosec"]
+paths = ["**/test/**", "**/tests/**"]
+
+[[rules]]
+id = "php-exec"
+description = "Shell command execution"
+category = "dangerous-api"
+severity = "warning"
+regex = '''\b(?:exec|system|passthru|shell_exec|popen|proc_open)\s*\('''
+keywords = ["exec", "system", "passthru", "shell_exec", "popen", "proc_open"]
+languages = ["php"]
+scope = "line"
+
+[[rules]]
+id = "shell-pipe-to-exec"
+description = "Piping remote content to shell execution"
+category = "dangerous-api"
+severity = "warning"
+regex = '''(?:curl|wget)\s+[^\|]*\|\s*(?:ba)?sh\b|(?:curl|wget)\s+[^\|]*\|\s*eval\b'''
+keywords = ["curl", "wget"]
+languages = ["sh", "bash", "zsh"]
+scope = "line"
+
+# ── Supply Chain ─────────────────────────────────────────────────────
+
+[[rules]]
+id = "npm-install-script-network"
+description = "NPM install hook with network access"
+category = "supply-chain"
+severity = "warning"
+regex = '''(?:"(?:pre|post)install"\s*:\s*"[^"]*(?:curl|wget|http|node\s+-e|npx)[^"]*")'''
+keywords = ["install"]
+languages = ["json"]
+scope = "file"
+
+[[rules]]
+id = "pypi-setup-exec"
+description = "setup.py with code execution"
+category = "supply-chain"
+severity = "warning"
+regex = '''(?:os\.system|subprocess|exec|eval|__import__)\s*\('''
+keywords = ["setup"]
+languages = ["py"]
+scope = "file"
+
+[rules.allowlist]
+paths = ["**/test/**"]
+
+[[rules]]
+id = "makefile-remote-exec"
+description = "Makefile downloading and executing remote code"
+category = "supply-chain"
+severity = "warning"
+regex = '''(?:curl|wget)\s+[^\n]*\|\s*(?:ba)?sh'''
+keywords = ["curl", "wget"]
+languages = ["makefile", "mk"]
+scope = "line"
+
+[[rules]]
+id = "ci-workflow-remote-exec"
+description = "CI workflow piping remote content to shell"
+category = "supply-chain"
+severity = "warning"
+regex = '''(?:curl|wget)\s+[^\n]*\|\s*(?:ba)?sh'''
+keywords = ["curl", "wget"]
+languages = ["yml", "yaml"]
+scope = "line"
+
+[[rules]]
+id = "go-replace-directive"
+description = "Go module replace directive pointing to external path"
+category = "supply-chain"
+severity = "info"
+regex = '''replace\s+\S+\s+=>\s+(?:\.\.[\\/]|/)'''
+keywords = ["replace"]
+languages = ["mod"]
+scope = "line"
+
+[[rules]]
+id = "gemspec-install-hook"
+description = "Gemspec with install hook executing code"
+category = "supply-chain"
+severity = "warning"
+regex = '''(?:extensions|post_install_message).*(?:exec|system|`|%x)'''
+keywords = ["extensions", "post_install_message"]
+languages = ["gemspec"]
+scope = "file"
+
+# ── Exfiltration ─────────────────────────────────────────────────────
+
+[[rules]]
+id = "env-to-http"
+description = "Environment variables sent over HTTP"
+category = "exfiltration"
+severity = "warning"
+regex = '''(?:process\.env|os\.environ|ENV\[).*(?:fetch|http|request|axios|curl|urllib|requests\.)|(?:fetch|http|request|axios|curl|urllib|requests\.).*(?:process\.env|os\.environ|ENV\[)'''
+keywords = ["process.env", "os.environ", "ENV["]
+languages = []
+scope = "file"
+
+[[rules]]
+id = "env-base64-send"
+description = "Environment variable encoded and sent over network"
+category = "exfiltration"
+severity = "warning"
+regex = '''(?:process\.env|os\.environ|ENV\[).*(?:btoa|base64|Buffer\.from|b64encode).*(?:fetch|http|request|curl)|(?:fetch|http|request|curl).*(?:btoa|base64|Buffer\.from|b64encode).*(?:process\.env|os\.environ|ENV\[)'''
+keywords = ["process.env", "os.environ", "ENV["]
+languages = []
+scope = "file"
+
+[[rules]]
+id = "dns-exfil"
+description = "DNS exfiltration pattern"
+category = "exfiltration"
+severity = "warning"
+regex = '''(?:dns\.resolve|dig\s+|nslookup\s+|host\s+).*(?:\$\{|\$\(|`|process\.env|os\.environ)'''
+keywords = ["dns", "dig", "nslookup"]
+languages = []
+scope = "line"
+
+# ── Backdoor ─────────────────────────────────────────────────────────
+
+[[rules]]
+id = "reverse-shell-bash"
+description = "Bash reverse shell pattern"
+category = "backdoor"
+severity = "error"
+regex = '''bash\s+-i\s+>&\s*/dev/tcp/|nc\s+.*-e\s+/bin/(?:ba)?sh|\bncat\b.*-e\s+/bin/(?:ba)?sh'''
+keywords = ["bash", "nc", "ncat", "/dev/tcp"]
+languages = []
+scope = "line"
+
+[[rules]]
+id = "reverse-shell-python"
+description = "Python reverse shell pattern"
+category = "backdoor"
+severity = "error"
+regex = '''socket.*connect.*(?:dup2|subprocess|os\.dup2|exec|/bin/(?:ba)?sh)'''
+keywords = ["socket", "connect"]
+languages = ["py"]
+scope = "file"
+
+[[rules]]
+id = "reverse-shell-perl"
+description = "Perl reverse shell pattern"
+category = "backdoor"
+severity = "error"
+regex = '''IO::Socket::INET.*(?:exec|system|open\s*\()'''
+keywords = ["IO::Socket"]
+languages = ["pl", "perl"]
+scope = "file"
+
+[[rules]]
+id = "bind-shell"
+description = "Bind shell pattern (socket + bind + listen + exec)"
+category = "backdoor"
+severity = "error"
+regex = '''socket.*bind.*listen.*(?:exec|spawn|system|fork)'''
+keywords = ["socket", "bind"]
+languages = []
+scope = "file"
+
+[[rules]]
+id = "cron-manipulation"
+description = "Crontab manipulation"
+category = "backdoor"
+severity = "warning"
+regex = '''crontab\s+(?:-[lr]\s+)*|(?:>>?|tee)\s+/etc/cron'''
+keywords = ["crontab", "cron"]
+languages = []
+scope = "line"
+
+[[rules]]
+id = "ssh-key-injection"
+description = "Writing to SSH authorized_keys"
+category = "backdoor"
+severity = "warning"
+regex = '''(?:>>?|tee)\s+.*authorized_keys|\.ssh/authorized_keys'''
+keywords = ["authorized_keys"]
+languages = []
+scope = "line"
+
+[[rules]]
+id = "systemd-service-install"
+description = "Creating systemd service files"
+category = "backdoor"
+severity = "warning"
+regex = '''/etc/systemd/.*\.service|systemctl\s+(?:enable|start)\s+'''
+keywords = ["systemd", "systemctl"]
+languages = []
+scope = "line"

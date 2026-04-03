@@ -48,6 +48,14 @@ impl ReviewProvider for MockProvider {
     ) -> Result<Vec<Finding>, ProviderError> {
         Ok(self.canned_findings.clone())
     }
+
+    async fn complete(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<String, ProviderError> {
+        Ok(String::new())
+    }
 }
 
 /// Helper: build a simple file diff for testing.
@@ -351,6 +359,14 @@ impl ReviewProvider for FailingProvider {
     ) -> Result<Vec<Finding>, ProviderError> {
         Err(ProviderError::ApiError("mock API failure".to_string()))
     }
+
+    async fn complete(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<String, ProviderError> {
+        Err(ProviderError::ApiError("mock API failure".to_string()))
+    }
 }
 
 #[tokio::test]
@@ -412,6 +428,14 @@ async fn cache_prevents_duplicate_calls() {
         ) -> Result<Vec<Finding>, ProviderError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             Ok(self.findings.clone())
+        }
+
+        async fn complete(
+            &self,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> Result<String, ProviderError> {
+            Ok(String::new())
         }
     }
 
@@ -511,6 +535,14 @@ async fn prior_findings_injected_on_cache_invalidation() {
             } else {
                 Ok(self.initial_findings.clone())
             }
+        }
+
+        async fn complete(
+            &self,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> Result<String, ProviderError> {
+            Ok(String::new())
         }
     }
 
@@ -722,6 +754,14 @@ async fn no_prior_context_flag_suppresses_injection() {
                 .push(prompt.to_string());
             Ok(vec![])
         }
+
+        async fn complete(
+            &self,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> Result<String, ProviderError> {
+            Ok(String::new())
+        }
     }
 
     let initial_findings = vec![Finding {
@@ -866,6 +906,14 @@ async fn custom_tools_appear_in_agentic_prompt() {
                 agent: "tool-agent".to_string(),
             }])
         }
+
+        async fn complete(
+            &self,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> Result<String, ProviderError> {
+            Ok(String::new())
+        }
     }
 
     let tools = vec![
@@ -979,6 +1027,14 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
                 suggestion: None,
                 agent: "tool-agent".to_string(),
             }])
+        }
+
+        async fn complete(
+            &self,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> Result<String, ProviderError> {
+            Ok(String::new())
         }
     }
 
