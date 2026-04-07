@@ -48,7 +48,7 @@ export NITPIK_API_KEY=sk-ant-...       # works for any provider
 
 ## Choosing a Model
 
-By default, nitpik uses a sensible model for each provider. Override it with `NITPIK_MODEL`:
+By default, nitpik picks a sensible model for each provider — you only need to set `NITPIK_PROVIDER` and an API key to get started. Override the default with `NITPIK_MODEL`:
 
 ```bash
 export NITPIK_MODEL=claude-sonnet-4-20250514
@@ -61,6 +61,30 @@ Or in your `.nitpik.toml`:
 name = "anthropic"
 model = "claude-sonnet-4-20250514"
 ```
+
+### Default Models
+
+| Provider | Default model |
+|---|---|
+| Anthropic | `claude-sonnet-4-20250514` |
+| Azure OpenAI | `gpt-4o` |
+| Cohere | `command-r-plus` |
+| DeepSeek | `deepseek-chat` |
+| Galadriel | `llama3.1-70b` |
+| Google Gemini | `gemini-2.5-flash` |
+| Groq | `llama-3.3-70b-versatile` |
+| HuggingFace | `meta-llama/Llama-3.1-70B-Instruct` |
+| Hyperbolic | `meta-llama/Llama-3.1-70B-Instruct` |
+| Mira | `llama3.1-70b` |
+| Mistral | `mistral-large-latest` |
+| Moonshot | `moonshot-v1-32k` |
+| Ollama | `llama3` |
+| OpenAI | `gpt-4o` |
+| OpenRouter | `anthropic/claude-sonnet-4-20250514` |
+| Perplexity | `sonar-pro` |
+| Together | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| xAI (Grok) | `grok-3` |
+| OpenAI-compatible | `gpt-4o` |
 
 > **Tip:** Code review benefits from strong reasoning capabilities. Models like Claude Sonnet, GPT-4o, and Gemini 2.5 Flash tend to produce the most precise findings. Smaller or faster models work fine for quick feedback but may miss subtle issues.
 

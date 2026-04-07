@@ -105,9 +105,21 @@ impl Default for ContextConfig {
 #[serde(default)]
 pub struct ProviderConfig {
     pub name: ProviderName,
-    pub model: String,
+    pub model: Option<String>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
+}
+
+impl ProviderConfig {
+    /// Returns the effective model name.
+    ///
+    /// If an explicit model was configured (via config file, env var, or CLI flag),
+    /// that value is used. Otherwise, falls back to the provider's default model.
+    pub fn resolved_model(&self) -> &str {
+        self.model
+            .as_deref()
+            .unwrap_or_else(|| self.name.default_model())
+    }
 }
 
 impl std::fmt::Debug for ProviderConfig {
@@ -125,7 +137,7 @@ impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
             name: ProviderName::Anthropic,
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: None,
             base_url: None,
             api_key: None,
         }
@@ -286,7 +298,7 @@ impl Config {
         // Provider settings
         let dp = ProviderConfig::default();
         merge_if_changed!(self.provider.name, other.provider.name, dp.name);
-        merge_if_changed!(self.provider.model, other.provider.model, dp.model);
+        merge_if_some!(self.provider.model, other.provider.model);
         merge_if_some!(self.provider.base_url, other.provider.base_url);
         merge_if_some!(self.provider.api_key, other.provider.api_key);
 
@@ -332,7 +344,7 @@ impl Config {
             }
         }
         if let Ok(val) = env.var(crate::constants::ENV_MODEL) {
-            self.provider.model = val;
+            self.provider.model = Some(val);
         }
         if let Ok(val) = env.var(crate::constants::ENV_BASE_URL) {
             self.provider.base_url = Some(val);
@@ -374,7 +386,8 @@ mod tests {
     fn default_config() {
         let config = Config::default();
         assert_eq!(config.provider.name, ProviderName::Anthropic);
-        assert_eq!(config.provider.model, "claude-sonnet-4-20250514");
+        assert!(config.provider.model.is_none());
+        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-20250514");
         assert_eq!(config.review.default_profiles, vec!["backend"]);
         assert_eq!(config.review.agentic.max_turns, 10);
         assert!(!config.secrets.enabled);
@@ -400,7 +413,7 @@ enabled = true
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.provider.name, ProviderName::OpenAI);
-        assert_eq!(config.provider.model, "gpt-4o");
+        assert_eq!(config.provider.model.as_deref(), Some("gpt-4o"));
         assert_eq!(config.review.default_profiles, vec!["security", "backend"]);
         assert!(config.review.agentic.enabled);
         assert_eq!(config.review.agentic.max_turns, 5);
@@ -413,7 +426,7 @@ enabled = true
         let mut other = Config::default();
 
         other.provider.name = ProviderName::OpenAI;
-        other.provider.model = "gpt-4o".to_string();
+        other.provider.model = Some("gpt-4o".to_string());
         other.review.fail_on = Some(Severity::Error);
         other.review.agentic.enabled = true;
         other.review.agentic.max_turns = 5;
@@ -429,7 +442,7 @@ enabled = true
         base.merge(other);
 
         assert_eq!(base.provider.name, ProviderName::OpenAI);
-        assert_eq!(base.provider.model, "gpt-4o");
+        assert_eq!(base.provider.model.as_deref(), Some("gpt-4o"));
         assert_eq!(base.review.fail_on, Some(Severity::Error));
         assert!(base.review.agentic.enabled);
         assert_eq!(base.review.agentic.max_turns, 5);
@@ -453,7 +466,7 @@ enabled = true
     fn merge_keeps_base_when_other_is_default() {
         let mut base = Config::default();
         base.provider.name = ProviderName::OpenAI;
-        base.provider.model = "gpt-4o".to_string();
+        base.provider.model = Some("gpt-4o".to_string());
         base.review.fail_on = Some(Severity::Warning);
 
         let other = Config::default();
@@ -461,7 +474,7 @@ enabled = true
 
         // Base values should be preserved since other has defaults
         assert_eq!(base.provider.name, ProviderName::OpenAI);
-        assert_eq!(base.provider.model, "gpt-4o");
+        assert_eq!(base.provider.model.as_deref(), Some("gpt-4o"));
         assert_eq!(base.review.fail_on, Some(Severity::Warning));
     }
 
@@ -481,7 +494,7 @@ model = "gpt-4o"
 
         let config = Config::load_file(&path).unwrap();
         assert_eq!(config.provider.name, ProviderName::OpenAI);
-        assert_eq!(config.provider.model, "gpt-4o");
+        assert_eq!(config.provider.model.as_deref(), Some("gpt-4o"));
     }
 
     #[test]
@@ -519,7 +532,7 @@ model = "gpt-4o"
 
         let config = Config::load(Some(dir.path()), &env).unwrap();
         assert_eq!(config.provider.name, ProviderName::OpenAI);
-        assert_eq!(config.provider.model, "gpt-4o");
+        assert_eq!(config.provider.model.as_deref(), Some("gpt-4o"));
     }
 
     #[test]
@@ -562,7 +575,7 @@ model = "gpt-4o"
         ]);
         let mut config = Config::default();
         config.apply_env_vars(&env);
-        assert_eq!(config.provider.model, "gpt-4-turbo");
+        assert_eq!(config.provider.model.as_deref(), Some("gpt-4-turbo"));
         assert_eq!(
             config.provider.base_url,
             Some("https://custom.api/v1".to_string())
@@ -586,5 +599,37 @@ model = "gpt-4o"
             config.provider.api_key,
             Some("sk-anthropic-test".to_string())
         );
+    }
+
+    #[test]
+    fn resolved_model_uses_provider_default_when_no_model_set() {
+        let mut config = Config::default();
+        // No explicit model set — resolved_model() should use provider default
+        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-20250514");
+
+        // Switch provider without setting model — should get new provider's default
+        config.provider.name = ProviderName::Gemini;
+        assert_eq!(config.provider.resolved_model(), "gemini-2.5-flash");
+
+        config.provider.name = ProviderName::OpenAI;
+        assert_eq!(config.provider.resolved_model(), "gpt-4o");
+    }
+
+    #[test]
+    fn resolved_model_prefers_explicit_model() {
+        let mut config = Config::default();
+        config.provider.name = ProviderName::Gemini;
+        config.provider.model = Some("gemini-2.0-flash".to_string());
+        assert_eq!(config.provider.resolved_model(), "gemini-2.0-flash");
+    }
+
+    #[test]
+    fn provider_env_var_without_model_gets_provider_default() {
+        let env = Env::mock([("NITPIK_PROVIDER", "gemini")]);
+        let mut config = Config::default();
+        config.apply_env_vars(&env);
+        assert_eq!(config.provider.name, ProviderName::Gemini);
+        assert!(config.provider.model.is_none());
+        assert_eq!(config.provider.resolved_model(), "gemini-2.5-flash");
     }
 }

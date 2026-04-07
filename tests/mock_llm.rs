@@ -614,7 +614,8 @@ async fn prior_findings_injected_on_cache_invalidation() {
          ## Instructions\n\nReview the diff above for file `src/app.rs`. \
          You are the **prior-agent** reviewer: Test agent: prior-agent\n\n"
     );
-    let cache_key1 = nitpik::cache::cache_key(&prompt1, "prior-agent", &config.provider.model);
+    let cache_key1 =
+        nitpik::cache::cache_key(&prompt1, "prior-agent", config.provider.resolved_model());
 
     // Store findings + sidecar for run 1
     store.put(&cache_key1, &initial_findings).await;
@@ -622,7 +623,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         .put_sidecar(
             "src/app.rs",
             "prior-agent",
-            &config.provider.model,
+            config.provider.resolved_model(),
             &cache_key1,
             "",
         )
@@ -633,7 +634,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         .get_previous(
             "src/app.rs",
             "prior-agent",
-            &config.provider.model,
+            config.provider.resolved_model(),
             "different-key",
             "",
         )
@@ -666,7 +667,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         .put_sidecar(
             "src/app.rs",
             "prior-agent",
-            &config.provider.model,
+            config.provider.resolved_model(),
             &cache_key1,
             "",
         )
@@ -787,13 +788,14 @@ async fn no_prior_context_flag_suppresses_injection() {
 
     let seed_content = format!("let seed_npc_{} = 1;", std::process::id());
     let seed_prompt = format!("seed-prompt-{seed_content}");
-    let seed_key = nitpik::cache::cache_key(&seed_prompt, "sec-agent", &config.provider.model);
+    let seed_key =
+        nitpik::cache::cache_key(&seed_prompt, "sec-agent", config.provider.resolved_model());
     seeded_store.put(&seed_key, &initial_findings).await;
     seeded_store
         .put_sidecar(
             "src/lib.rs",
             "sec-agent",
-            &config.provider.model,
+            config.provider.resolved_model(),
             &seed_key,
             "",
         )

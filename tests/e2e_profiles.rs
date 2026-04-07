@@ -978,7 +978,7 @@ async fn e2e_cache_prior_findings() {
 
     // Reconstruct the v1 cache key by building the same prompt the orchestrator would.
     // We need the model name from config.
-    let model = config.provider.model.clone();
+    let model = config.provider.resolved_model().to_string();
 
     // Seed v1 findings + sidecar for calculator.rs × backend × model
     // We don't know the exact prompt, but we can use a sentinel key.

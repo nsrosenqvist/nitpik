@@ -428,7 +428,11 @@ impl ReviewProvider for RigProvider {
         max_turns: usize,
         _max_tool_calls: usize,
     ) -> Result<Vec<Finding>, ProviderError> {
-        let model = agent.profile.model.as_deref().unwrap_or(&self.config.model);
+        let model = agent
+            .profile
+            .model
+            .as_deref()
+            .unwrap_or_else(|| self.config.resolved_model());
 
         let result = if agentic {
             // Build custom command tools from the agent profile
@@ -479,7 +483,7 @@ impl ReviewProvider for RigProvider {
         user_prompt: &str,
     ) -> Result<String, ProviderError> {
         self.call(
-            &self.config.model,
+            self.config.resolved_model(),
             system_prompt,
             user_prompt,
             false,
@@ -584,7 +588,7 @@ mod tests {
     fn new_provider_missing_api_key() {
         let config = ProviderConfig {
             name: ProviderName::Anthropic,
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: Some("claude-sonnet-4-20250514".to_string()),
             base_url: None,
             api_key: None,
         };
@@ -599,7 +603,7 @@ mod tests {
     fn new_provider_with_api_key() {
         let config = ProviderConfig {
             name: ProviderName::Anthropic,
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: Some("claude-sonnet-4-20250514".to_string()),
             base_url: None,
             api_key: Some("sk-test-key".to_string()),
         };
@@ -610,7 +614,7 @@ mod tests {
     fn new_provider_ollama_no_api_key() {
         let config = ProviderConfig {
             name: ProviderName::Ollama,
-            model: "llama3".to_string(),
+            model: Some("llama3".to_string()),
             base_url: None,
             api_key: None,
         };
@@ -686,7 +690,7 @@ mod tests {
     fn require_base_url_missing() {
         let config = ProviderConfig {
             name: ProviderName::OpenAICompatible,
-            model: "custom-model".to_string(),
+            model: Some("custom-model".to_string()),
             base_url: None,
             api_key: Some("key".to_string()),
         };
@@ -703,7 +707,7 @@ mod tests {
     fn require_base_url_present() {
         let config = ProviderConfig {
             name: ProviderName::OpenAICompatible,
-            model: "custom-model".to_string(),
+            model: Some("custom-model".to_string()),
             base_url: Some("https://my-api.example.com".to_string()),
             api_key: Some("key".to_string()),
         };

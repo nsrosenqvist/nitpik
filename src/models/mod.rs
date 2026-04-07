@@ -85,6 +85,33 @@ pub enum ProviderName {
 }
 
 impl ProviderName {
+    /// Returns a sensible default model for this provider.
+    ///
+    /// Used when no explicit model is configured via CLI flags, env vars,
+    /// config files, or profile frontmatter.
+    pub fn default_model(self) -> &'static str {
+        match self {
+            ProviderName::Anthropic => "claude-sonnet-4-20250514",
+            ProviderName::Azure => "gpt-4o",
+            ProviderName::Cohere => "command-r-plus",
+            ProviderName::DeepSeek => "deepseek-chat",
+            ProviderName::Galadriel => "llama3.1-70b",
+            ProviderName::Gemini => "gemini-2.5-flash",
+            ProviderName::Groq => "llama-3.3-70b-versatile",
+            ProviderName::HuggingFace => "meta-llama/Llama-3.1-70B-Instruct",
+            ProviderName::Hyperbolic => "meta-llama/Llama-3.1-70B-Instruct",
+            ProviderName::Mira => "llama3.1-70b",
+            ProviderName::Mistral => "mistral-large-latest",
+            ProviderName::Moonshot => "moonshot-v1-32k",
+            ProviderName::Ollama => "llama3",
+            ProviderName::OpenAI | ProviderName::OpenAICompatible => "gpt-4o",
+            ProviderName::OpenRouter => "anthropic/claude-sonnet-4-20250514",
+            ProviderName::Perplexity => "sonar-pro",
+            ProviderName::Together => "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            ProviderName::XAI => "grok-3",
+        }
+    }
+
     /// Returns the provider-specific environment variable name for the API key.
     ///
     /// These match the env var names used by rig-core's `from_env()` implementations.

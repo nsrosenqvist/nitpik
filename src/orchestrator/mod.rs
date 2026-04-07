@@ -148,7 +148,7 @@ impl ReviewOrchestrator {
                 .profile
                 .model
                 .as_deref()
-                .unwrap_or(&self.config.provider.model)
+                .unwrap_or_else(|| self.config.provider.resolved_model())
                 .to_string();
             let file_path = chunk.path().to_string();
 

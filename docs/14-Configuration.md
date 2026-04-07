@@ -61,7 +61,7 @@ The project config overrides the global config, so teams can set project-level s
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | `"anthropic"` | LLM provider. One of: `anthropic`, `openai`, `gemini`, `cohere`, `deepseek`, `xai`, `groq`, `perplexity`, `openai-compatible`. |
-| `model` | string | `"claude-sonnet-4-20250514"` | Model identifier passed to the provider. |
+| `model` | string | *(per-provider)* | Model identifier passed to the provider. If omitted, nitpik uses a [sensible default for each provider](03-Providers#default-models). |
 | `base_url` | string | *(none)* | Custom API endpoint. Required for `openai-compatible`, optional for others. |
 | `api_key` | string | *(none)* | API key. Prefer env vars over config files for secrets. |
 
