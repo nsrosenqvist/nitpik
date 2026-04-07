@@ -38,8 +38,8 @@ pub fn scan_and_redact(
             severity,
             title: format!("Potential secret detected: {}", m.rule_id),
             message: format!(
-                "A potential {} was found. The secret has been redacted before sending to the LLM.",
-                m.rule_description
+                "{}. The secret has been redacted before sending to the LLM.",
+                m.rule_description.trim_end_matches('.')
             ),
             suggestion: Some("Remove the hardcoded secret and use environment variables or a secrets manager instead.".to_string()),
             agent: "secret-scanner".to_string(),
