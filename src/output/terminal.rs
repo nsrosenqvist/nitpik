@@ -27,9 +27,6 @@ impl OutputFormatter for TerminalFormatter {
         for finding in &sorted {
             // Group by file
             if finding.file != current_file {
-                if !current_file.is_empty() {
-                    output.push('\n');
-                }
                 current_file = &finding.file;
             }
 
@@ -134,5 +131,37 @@ mod tests {
         assert!(output.contains("Bug found"));
         assert!(output.contains("Fix it"));
         assert!(output.contains("findings"));
+    }
+
+    #[test]
+    fn no_double_blank_lines_between_files() {
+        let renderer = TerminalFormatter;
+        let findings = vec![
+            Finding {
+                file: "src/a.rs".into(),
+                line: 1,
+                end_line: None,
+                severity: Severity::Error,
+                title: "Issue A".into(),
+                message: "Problem in A".into(),
+                suggestion: None,
+                agent: "test".into(),
+            },
+            Finding {
+                file: "src/b.rs".into(),
+                line: 1,
+                end_line: None,
+                severity: Severity::Warning,
+                title: "Issue B".into(),
+                message: "Problem in B".into(),
+                suggestion: None,
+                agent: "test".into(),
+            },
+        ];
+        let output = renderer.format(&findings);
+        assert!(
+            !output.contains("\n\n\n"),
+            "should not contain double blank lines between findings"
+        );
     }
 }

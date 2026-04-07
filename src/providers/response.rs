@@ -89,14 +89,14 @@ pub fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderE
     for candidate in &candidates {
         // Try parsing as a direct array of findings
         if let Ok(findings) = serde_json::from_str::<Vec<Finding>>(candidate) {
-            return Ok(findings);
+            return Ok(trim_finding_fields(findings));
         }
 
         // Try parsing as {"findings": [...]}
         if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(candidate) {
             if let Some(findings_arr) = wrapper.get("findings") {
                 if let Ok(findings) = serde_json::from_value::<Vec<Finding>>(findings_arr.clone()) {
-                    return Ok(findings);
+                    return Ok(trim_finding_fields(findings));
                 }
             }
         }
@@ -106,6 +106,22 @@ pub fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderE
         "could not parse LLM response as findings JSON. Response: {}",
         &response[..response.len().min(PARSE_ERROR_PREVIEW_LEN)]
     )))
+}
+
+/// Trim trailing whitespace from LLM-generated string fields.
+///
+/// LLMs occasionally include trailing newlines in finding fields, which
+/// causes extra blank lines in rendered output.
+fn trim_finding_fields(findings: Vec<Finding>) -> Vec<Finding> {
+    findings
+        .into_iter()
+        .map(|mut f| {
+            f.title = f.title.trim().to_string();
+            f.message = f.message.trim().to_string();
+            f.suggestion = f.suggestion.map(|s| s.trim().to_string());
+            f
+        })
+        .collect()
 }
 
 /// Regex for extracting content inside markdown code fences.
@@ -405,5 +421,24 @@ That's all."#;
     fn retryable_rate_limit_message() {
         let err = ProviderError::ApiError("rate limit exceeded".into());
         assert!(is_retryable(&err));
+    }
+
+    #[test]
+    fn parse_trims_trailing_newlines_from_fields() {
+        let response = r#"[
+            {
+                "file": "src/main.rs",
+                "line": 1,
+                "severity": "error",
+                "title": "Bug found\n",
+                "message": "Description with trailing newline\n",
+                "suggestion": "Fix it\n",
+                "agent": "test"
+            }
+        ]"#;
+        let findings = parse_findings_response(response).unwrap();
+        assert_eq!(findings[0].title, "Bug found");
+        assert_eq!(findings[0].message, "Description with trailing newline");
+        assert_eq!(findings[0].suggestion.as_deref(), Some("Fix it"));
     }
 }
