@@ -400,11 +400,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
-          save-always: true
       - uses: nsrosenqvist/nitpik@v1
         with:
           profiles: backend,security
@@ -414,6 +413,11 @@ jobs:
           NITPIK_PROVIDER: anthropic
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.config/nitpik/cache
+          key: nitpik-${{ github.repository }}
 ```
 
 The action auto-detects the PR target branch, downloads the binary, and outputs findings as inline annotations.
@@ -433,11 +437,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
-          save-always: true
       - name: Install nitpik
         run: curl -sSfL https://raw.githubusercontent.com/nsrosenqvist/nitpik/main/install.sh | bash
       - name: AI Code Review
@@ -452,6 +455,11 @@ jobs:
           NITPIK_PROVIDER: anthropic
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.config/nitpik/cache
+          key: nitpik-${{ github.repository }}
 ```
 
 </details>

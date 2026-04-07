@@ -39,11 +39,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
-          save-always: true
       - uses: nsrosenqvist/nitpik@v1
         with:
           profiles: backend,security
@@ -53,6 +52,11 @@ jobs:
           NITPIK_PROVIDER: anthropic
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.config/nitpik/cache
+          key: nitpik-${{ github.repository }}
 ```
 
 The action auto-detects the PR target branch, downloads the binary, and outputs findings as inline annotations on the pull request.
@@ -71,11 +75,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
-          save-always: true
       - name: Install nitpik
         run: curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
       - name: AI Code Review
@@ -90,13 +93,18 @@ jobs:
           NITPIK_PROVIDER: anthropic
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.config/nitpik/cache
+          key: nitpik-${{ github.repository }}
 ```
 
 **Key details:**
 - `fetch-depth: 0` is required for `--diff-base` to have access to the full git history.
 - `--format github` outputs findings as workflow commands that appear as inline PR annotations.
 - `--fail-on warning` causes the step to fail if any warning or error is found.
-- `save-always: true` ensures the cache is persisted even when `--fail-on` causes the step to exit non-zero. Without it, `actions/cache` only saves on job success and the cache is never populated.
+- `actions/cache/restore` and `actions/cache/save` are used as separate steps so the cache is always persisted — even when `--fail-on` causes the review step to exit non-zero.
 
 > **Security:** Always pass API keys via `${{ secrets.* }}` — never hardcode them in workflow files.
 
