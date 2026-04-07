@@ -61,10 +61,11 @@ runs:
       run: |
         set -euo pipefail
         VERSION="${{ inputs.version }}"
+        REPO="nsrosenqvist/nitpik"
         if [ "$VERSION" = "latest" ]; then
-          DOWNLOAD_URL="https://github.com/${{ github.action_repository }}/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz"
+          DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz"
         else
-          DOWNLOAD_URL="https://github.com/${{ github.action_repository }}/releases/download/${VERSION}/nitpik-x86_64-unknown-linux-gnu.tar.gz"
+          DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/nitpik-x86_64-unknown-linux-gnu.tar.gz"
         fi
         curl -sSfL "$DOWNLOAD_URL" | tar xz -C /usr/local/bin
         chmod +x /usr/local/bin/nitpik
