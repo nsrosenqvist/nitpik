@@ -13,7 +13,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Sync to wiki
         uses: Andrew-Chen-Wang/github-wiki-action@v4

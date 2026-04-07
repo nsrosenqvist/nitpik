@@ -49,8 +49,9 @@ jobs:
           fail_on: warning
           scan_secrets: "true"
         env:
-          NITPIK_PROVIDER: anthropic
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NITPIK_PROVIDER: ${{ vars.NITPIK_PROVIDER }}
+          NITPIK_MODEL: ${{ vars.NITPIK_MODEL }}
+          NITPIK_API_KEY: ${{ secrets.NITPIK_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
       - uses: actions/cache/save@v4
         if: always()
@@ -60,6 +61,8 @@ jobs:
 ```
 
 The action auto-detects the PR target branch, downloads the binary, and outputs findings as inline annotations on the pull request.
+
+> **Tip:** Store `NITPIK_PROVIDER` and `NITPIK_MODEL` as **repository variables** (Settings → Secrets and variables → Actions → Variables) and `NITPIK_API_KEY` as a **repository secret**. Repository variables are not automatically available as environment variables — reference them with `${{ vars.* }}` in your workflow.
 
 ### Manual Setup
 
@@ -90,8 +93,9 @@ jobs:
             --fail-on warning \
             --scan-secrets
         env:
-          NITPIK_PROVIDER: anthropic
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NITPIK_PROVIDER: ${{ vars.NITPIK_PROVIDER }}
+          NITPIK_MODEL: ${{ vars.NITPIK_MODEL }}
+          NITPIK_API_KEY: ${{ secrets.NITPIK_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
       - uses: actions/cache/save@v4
         if: always()

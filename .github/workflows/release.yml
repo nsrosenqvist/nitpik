@@ -25,7 +25,7 @@ jobs:
       is_prerelease: ${{ steps.detect.outputs.is_prerelease }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -77,14 +77,14 @@ jobs:
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: nitpik-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
 
       - name: Upload patched manifest
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: patched-manifest
           path: Cargo.toml
@@ -93,11 +93,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
           merge-multiple: true
@@ -147,10 +147,10 @@ jobs:
     if: needs.build.outputs.is_prerelease != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download patched manifest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: patched-manifest
 
@@ -166,7 +166,7 @@ jobs:
     if: needs.build.outputs.is_prerelease != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: nsrosenqvist/homebrew-nitpik
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -223,7 +223,7 @@ jobs:
     if: needs.build.outputs.is_prerelease != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

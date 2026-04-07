@@ -410,8 +410,9 @@ jobs:
           fail_on: warning
           scan_secrets: "true"
         env:
-          NITPIK_PROVIDER: anthropic
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NITPIK_PROVIDER: ${{ vars.NITPIK_PROVIDER }}
+          NITPIK_MODEL: ${{ vars.NITPIK_MODEL }}
+          NITPIK_API_KEY: ${{ secrets.NITPIK_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
       - uses: actions/cache/save@v4
         if: always()
@@ -421,6 +422,8 @@ jobs:
 ```
 
 The action auto-detects the PR target branch, downloads the binary, and outputs findings as inline annotations.
+
+> **Tip:** Store `NITPIK_PROVIDER` and `NITPIK_MODEL` as [repository variables](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables) and API keys as [repository secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions). You can also use provider-specific key variables like `ANTHROPIC_API_KEY` instead of `NITPIK_API_KEY`.
 
 > **Security:** Always pass API keys via `${{ secrets.* }}` — never hardcode them in workflow files.
 
@@ -452,8 +455,9 @@ jobs:
             --fail-on warning \
             --scan-secrets
         env:
-          NITPIK_PROVIDER: anthropic
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NITPIK_PROVIDER: ${{ vars.NITPIK_PROVIDER }}
+          NITPIK_MODEL: ${{ vars.NITPIK_MODEL }}
+          NITPIK_API_KEY: ${{ secrets.NITPIK_API_KEY }}
           NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
       - uses: actions/cache/save@v4
         if: always()
