@@ -98,5 +98,25 @@ runs:
         fi
 
         echo "::group::nitpik review"
-        eval $CMD
+        EXIT_CODE=0
+        eval $CMD || EXIT_CODE=$?
         echo "::endgroup::"
+
+        if [ "$EXIT_CODE" -ne 0 ]; then
+          {
+            echo "## :x: nitpik review failed"
+            echo ""
+            echo "The review step exited with code **${EXIT_CODE}**. Check the workflow logs for details."
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| Provider | \`${NITPIK_PROVIDER:-not set}\` |"
+            echo "| Model | \`${NITPIK_MODEL:-not set}\` |"
+            echo ""
+            echo "Common causes:"
+            echo "- LLM provider returned an error (invalid API key, rate limit, model not found)"
+            echo "- All review tasks failed after retries"
+            echo "- \`--fail-on\` threshold was exceeded by findings"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$EXIT_CODE"
+        fi
