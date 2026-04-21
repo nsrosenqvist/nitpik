@@ -55,7 +55,10 @@ async fn dispatch_review<C: CompletionClient>(
     repo_root: &Path,
     max_turns: usize,
     custom_tools: Vec<CustomCommandTool>,
-) -> Result<String, ProviderError> {
+) -> Result<String, ProviderError>
+where
+    <C as CompletionClient>::CompletionModel: 'static,
+{
     if agentic {
         let mut builder = client
             .agent(model)
