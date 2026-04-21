@@ -1361,7 +1361,7 @@ dependencies = [
  "indexmap",
  "md5",
  "pretty_assertions",
- "rand 0.8.6",
+ "rand 0.9.3",
  "rayon",
  "regex",
  "reqwest 0.12.28",
