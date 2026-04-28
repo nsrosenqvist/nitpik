@@ -6,7 +6,7 @@ Profiles are specialist reviewers — each with its own focus areas, system prom
 
 ## Built-in Profiles
 
-nitpik ships with four profiles:
+nitpik ships with five profiles:
 
 ### `backend`
 
@@ -48,6 +48,16 @@ Reports findings only when the vulnerability path can be verified — no specula
 nitpik review --diff-base main --profile security
 ```
 
+### `general`
+
+A broad, language-agnostic catch-all reviewer. Focuses on universals: correctness, clarity, error handling, configuration mistakes, broken references, and obvious anti-patterns across any file type — documentation, shell scripts, Markdown, configuration formats, and languages without a dedicated specialist.
+
+Used by `auto` mode as the catch-all when no language specialist (`backend` or `frontend`) is selected for the diff. Defers deep domain analysis to specialist reviewers when they run alongside it.
+
+```bash
+nitpik review --diff-base main --profile general
+```
+
 ## Combining Profiles
 
 Run multiple profiles in parallel:
@@ -72,7 +82,9 @@ Auto-selection examines three layers of signals to choose profiles:
 2. **Project root markers** — when JS/TS path signals are absent or one-sided, nitpik checks the repo root for `package.json` dependencies (Express, React, etc.) and config files (`nest-cli.json`, `wrangler.toml`, etc.) to fill in the gaps.
 3. **Architect triggers** — the `architect` profile is added when the diff touches cross-cutting files (CI configs, Dockerfiles, IaC, dependency manifests, API definitions, database migrations) or when the diff is large (many files or many distinct directories).
 
-The `security` profile is always included because its frontmatter sets `always_include: true`. Any custom profile in your `--profile-dir` with the same flag is appended too — see [Always-On Profiles](06-Custom-Profiles#always-on-profiles). If nothing matches frontend specifically, `backend` is used as the default.
+The `security` profile is always included because its frontmatter sets `always_include: true`. Any custom profile in your `--profile-dir` with the same flag is appended too — see [Always-On Profiles](06-Custom-Profiles#always-on-profiles).
+
+When neither `frontend` nor `backend` signals fire (for example a docs-only, infra-only, or shell-only diff), the `general` profile is used as the catch-all. `general` and the language specialists are mutually exclusive: a strictly-backend or strictly-frontend diff never pulls `general` in alongside the specialist. JS/TS files with no clear signal still default to `frontend` rather than `general`.
 
 ## Tag-Based Selection
 

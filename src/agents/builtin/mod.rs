@@ -9,9 +9,10 @@ const BACKEND_MD: &str = include_str!("backend.md");
 const FRONTEND_MD: &str = include_str!("frontend.md");
 const ARCHITECT_MD: &str = include_str!("architect.md");
 const SECURITY_MD: &str = include_str!("security.md");
+const GENERAL_MD: &str = include_str!("general.md");
 
 /// List of all built-in profile names.
-const BUILTIN_NAMES: &[&str] = &["backend", "frontend", "architect", "security"];
+const BUILTIN_NAMES: &[&str] = &["backend", "frontend", "architect", "security", "general"];
 
 /// Get a built-in agent definition by name.
 pub fn get_builtin(name: &str) -> Option<AgentDefinition> {
@@ -20,6 +21,7 @@ pub fn get_builtin(name: &str) -> Option<AgentDefinition> {
         "frontend" => FRONTEND_MD,
         "architect" => ARCHITECT_MD,
         "security" => SECURITY_MD,
+        "general" => GENERAL_MD,
         _ => return None,
     };
 
@@ -68,7 +70,7 @@ mod tests {
 
     #[test]
     fn other_builtins_are_not_always_include() {
-        for name in ["backend", "frontend", "architect"] {
+        for name in ["backend", "frontend", "architect", "general"] {
             let agent = get_builtin(name).unwrap();
             assert!(
                 !agent.profile.always_include,

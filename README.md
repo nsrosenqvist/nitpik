@@ -139,7 +139,7 @@ git diff main | nitpik review --diff-stdin  # piped from another tool
 
 ### Reviewer Profiles
 
-Profiles are specialist reviewers with their own system prompts and focus areas. Four ship built-in:
+Profiles are specialist reviewers with their own system prompts and focus areas. Five ship built-in:
 
 | Profile | Focus |
 |---|---|
@@ -147,6 +147,7 @@ Profiles are specialist reviewers with their own system prompts and focus areas.
 | `frontend` | Accessibility, rendering, state management, UX |
 | `architect` | System design, coupling, abstractions, scalability |
 | `security` | Vulnerabilities, injection, auth, data exposure |
+| `general` | Broad catch-all: correctness, clarity, configuration, docs |
 
 Use one or combine several:
 
@@ -154,7 +155,7 @@ Use one or combine several:
 nitpik review --diff-base main --profile backend,security
 ```
 
-Auto-select profiles based on what changed — nitpik looks at file extensions, directory structure, and project root files (like `package.json`) to pick the right combination of `frontend`, `backend`, and `architect`. Profiles flagged `always_include` (the built-in `security` reviewer, plus any custom profiles you mark) are added to every auto run:
+Auto-select profiles based on what changed — nitpik looks at file extensions, directory structure, and project root files (like `package.json`) to pick the right combination of `frontend`, `backend`, and `architect`. When no language specialist matches (docs-only, infra-only, shell-only diffs), the broad `general` reviewer is used as the catch-all. Profiles flagged `always_include` (the built-in `security` reviewer, plus any custom profiles you mark) are added to every auto run:
 
 ```bash
 nitpik review --diff-base main --profile auto
@@ -308,7 +309,7 @@ nitpik review --diff-base main --profile ./team-conventions.md
 nitpik review --diff-base main --profile-dir ./agents --profile team-conventions
 ```
 
-A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`) replaces that built-in when `--profile-dir` is set — useful for tuning the shipped reviewers to your team without forking the project. Set `always_include: true` in a profile's frontmatter to include it in every `auto` review (the built-in `security` profile uses this; you can opt out by overriding it). See [Custom Profiles → Overriding Built-In Profiles](docs/06-Custom-Profiles.md#overriding-built-in-profiles) and [Always-On Profiles](docs/06-Custom-Profiles.md#always-on-profiles) for details.
+A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`, `general`) replaces that built-in when `--profile-dir` is set — useful for tuning the shipped reviewers to your team without forking the project. Set `always_include: true` in a profile's frontmatter to include it in every `auto` review (the built-in `security` profile uses this; you can opt out by overriding it). See [Custom Profiles → Overriding Built-In Profiles](docs/06-Custom-Profiles.md#overriding-built-in-profiles) and [Always-On Profiles](docs/06-Custom-Profiles.md#always-on-profiles) for details.
 
 Validate a profile before using it:
 

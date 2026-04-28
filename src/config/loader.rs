@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(config.provider.name, ProviderName::Anthropic);
         assert!(config.provider.model.is_none());
         assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-20250514");
-        assert_eq!(config.review.default_profiles, vec!["backend"]);
+        assert_eq!(config.review.default_profiles, vec!["general"]);
         assert_eq!(config.review.agentic.max_turns, 10);
         assert!(!config.secrets.enabled);
     }

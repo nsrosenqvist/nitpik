@@ -37,7 +37,7 @@ Run a code review.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--profile <NAMES>` | `backend` | Comma-separated list of profile names, file paths, or `auto`. Built-in: `backend`, `frontend`, `architect`, `security`. |
+| `--profile <NAMES>` | `general` | Comma-separated list of profile names, file paths, or `auto`. Built-in: `backend`, `frontend`, `architect`, `security`, `general`. |
 | `--profile-dir <DIR>` | — | Directory to resolve bare profile names from. |
 | `--tag <TAGS>` | — | Comma-separated tags. All profiles (built-in and custom) whose tags match are included. Combines with `--profile`. |
 

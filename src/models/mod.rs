@@ -22,7 +22,7 @@ pub use diff::FileDiff;
 pub use finding::Severity;
 
 /// Default agent profile name used when no profile is specified.
-pub const DEFAULT_PROFILE: &str = "backend";
+pub const DEFAULT_PROFILE: &str = "general";
 
 /// The resolved input mode for the review.
 #[derive(Debug, Clone)]

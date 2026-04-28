@@ -127,7 +127,7 @@ pub struct ReviewArgs {
 
     // --- Profile ---
     /// Comma-separated profiles: built-in names, file paths, or "auto".
-    /// Built-in: frontend, backend, architect, security
+    /// Built-in: frontend, backend, architect, security, general
     #[arg(long, default_value = DEFAULT_PROFILE, value_delimiter = ',')]
     pub profile: Vec<String>,
 

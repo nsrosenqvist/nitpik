@@ -58,7 +58,7 @@ nitpik review --diff-base main --profile-dir ./agents --profile backend,team-con
 
 ## Overriding Built-In Profiles
 
-A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`) replaces the built-in when `--profile-dir` is set. This lets you tune the shipped profiles to your team's needs without forking the project.
+A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`, `general`) replaces the built-in when `--profile-dir` is set. This lets you tune the shipped profiles to your team's needs without forking the project.
 
 For example, drop a file at `./agents/backend.md`:
 

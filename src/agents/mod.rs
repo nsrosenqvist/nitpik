@@ -310,7 +310,8 @@ mod tests {
         assert!(names.contains(&"frontend"));
         assert!(names.contains(&"architect"));
         assert!(names.contains(&"security"));
-        assert_eq!(agents.len(), 4);
+        assert!(names.contains(&"general"));
+        assert_eq!(agents.len(), 5);
     }
 
     #[tokio::test]
@@ -328,7 +329,7 @@ mod tests {
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
         assert!(names.contains(&"backend"));
         assert!(names.contains(&"custom"));
-        assert_eq!(agents.len(), 5);
+        assert_eq!(agents.len(), 6);
     }
 
     #[tokio::test]
@@ -338,7 +339,7 @@ mod tests {
 
         let agents = list_all_profiles(Some(dir.path())).await.unwrap();
         // Only built-ins, bad.md skipped with warning
-        assert_eq!(agents.len(), 4);
+        assert_eq!(agents.len(), 5);
     }
 
     #[tokio::test]
@@ -347,7 +348,7 @@ mod tests {
             list_all_profiles(Some(std::path::Path::new("/tmp/nitpik_no_such_dir_xyz"))).await;
         // Non-existent dir is not an error — it's just not a directory, so skip
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 4); // just built-ins
+        assert_eq!(result.unwrap().len(), 5); // just built-ins
     }
 
     // -----------------------------------------------------------------------
@@ -474,7 +475,8 @@ mod tests {
         assert!(names.contains(&"frontend"));
         assert!(names.contains(&"architect"));
         assert!(names.contains(&"security"));
-        assert_eq!(agents.len(), 4);
+        assert!(names.contains(&"general"));
+        assert_eq!(agents.len(), 5);
     }
 
     #[tokio::test]

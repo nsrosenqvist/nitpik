@@ -58,14 +58,18 @@
 //! # Final profile assembly
 //!
 //! ```text
-//! if has_frontend           → add "frontend"
-//! if has_backend OR
-//!    !has_frontend           → add "backend" (default profile)
+//! if has_backend             → add "backend"
+//! if has_frontend            → add "frontend"
+//! if !has_backend && !has_frontend → add "general"
 //! if has_architect           → add "architect"
 //! ```
 //!
-//! `backend` serves as the catch-all default when nothing matched
-//! frontend (e.g. a `README.md`-only diff).
+//! `backend` and `frontend` are mutually exclusive with `general`:
+//! a strictly-backend or strictly-frontend diff never pulls in the
+//! catch-all. `general` runs only when classification produced no
+//! language-specialist signal at all (e.g. a `README.md`-only diff,
+//! a Terraform-only diff, a shell script). `architect` remains
+//! orthogonal and additive.
 //!
 //! Profiles whose frontmatter declares `always_include: true` (such
 //! as the built-in `security` reviewer) are appended later by the
@@ -73,7 +77,6 @@
 
 use std::path::Path;
 
-use crate::models::DEFAULT_PROFILE;
 use crate::models::diff::FileDiff;
 
 /// Backend-indicating path segments for JS/TS files.
@@ -461,11 +464,16 @@ pub fn auto_select_profiles(diffs: &[FileDiff<'_>], repo_root: &Path) -> Vec<Str
 
     // ── Build profile list ────────────────────────────────────────────
     let mut profiles = Vec::new();
+    if c.has_backend {
+        profiles.push("backend".to_string());
+    }
     if c.has_frontend {
         profiles.push("frontend".to_string());
     }
-    if c.has_backend || !c.has_frontend {
-        profiles.push(DEFAULT_PROFILE.to_string());
+    // `general` is the catch-all only when no language-specialist
+    // signal fired. Mutually exclusive with `backend` and `frontend`.
+    if !c.has_backend && !c.has_frontend {
+        profiles.push("general".to_string());
     }
     if has_architect {
         profiles.push("architect".to_string());
@@ -615,11 +623,96 @@ mod tests {
     }
 
     #[test]
-    fn defaults_to_backend_for_unknown() {
+    fn defaults_to_general_for_unknown() {
+        // README-only diff: no language specialist signal \u2192 general catch-all.
         let (_dir, root) = bare_root();
         let diffs = vec![make_diff("README.md")];
         let profiles = auto_select_profiles(&diffs, &root);
+        assert!(
+            profiles.contains(&"general".to_string()),
+            "expected `general`; got: {profiles:?}"
+        );
+        assert!(
+            !profiles.contains(&"backend".to_string()),
+            "`backend` must not be the catch-all anymore; got: {profiles:?}"
+        );
+        assert!(!profiles.contains(&"frontend".to_string()));
+    }
+
+    #[test]
+    fn strictly_backend_does_not_pull_in_general() {
+        // Pure Rust diff: backend specialist runs, general must NOT.
+        let (_dir, root) = bare_root();
+        let diffs = vec![make_diff("src/handler.rs"), make_diff("src/main.rs")];
+        let profiles = auto_select_profiles(&diffs, &root);
         assert!(profiles.contains(&"backend".to_string()));
+        assert!(
+            !profiles.contains(&"general".to_string()),
+            "general must not appear alongside a strictly-backend diff; got: {profiles:?}"
+        );
+        assert!(!profiles.contains(&"frontend".to_string()));
+    }
+
+    #[test]
+    fn strictly_frontend_does_not_pull_in_general() {
+        let (_dir, root) = bare_root();
+        let diffs = vec![make_diff("src/App.vue"), make_diff("src/styles/main.css")];
+        let profiles = auto_select_profiles(&diffs, &root);
+        assert!(profiles.contains(&"frontend".to_string()));
+        assert!(
+            !profiles.contains(&"general".to_string()),
+            "general must not appear alongside a strictly-frontend diff; got: {profiles:?}"
+        );
+        assert!(!profiles.contains(&"backend".to_string()));
+    }
+
+    #[test]
+    fn mixed_backend_and_frontend_does_not_pull_in_general() {
+        let (_dir, root) = bare_root();
+        let diffs = vec![make_diff("src/handler.rs"), make_diff("src/App.vue")];
+        let profiles = auto_select_profiles(&diffs, &root);
+        assert!(profiles.contains(&"backend".to_string()));
+        assert!(profiles.contains(&"frontend".to_string()));
+        assert!(
+            !profiles.contains(&"general".to_string()),
+            "general must not appear when both specialists run; got: {profiles:?}"
+        );
+    }
+
+    #[test]
+    fn terraform_only_uses_general_not_backend() {
+        let (_dir, root) = bare_root();
+        let diffs = vec![make_diff("infra/main.tf")];
+        let profiles = auto_select_profiles(&diffs, &root);
+        assert!(
+            profiles.contains(&"general".to_string()),
+            "expected general for non-code diff; got: {profiles:?}"
+        );
+        assert!(profiles.contains(&"architect".to_string()));
+        assert!(
+            !profiles.contains(&"backend".to_string()),
+            "backend must not appear; got: {profiles:?}"
+        );
+    }
+
+    #[test]
+    fn dockerfile_only_uses_general_not_backend() {
+        let (_dir, root) = bare_root();
+        let diffs = vec![make_diff("Dockerfile")];
+        let profiles = auto_select_profiles(&diffs, &root);
+        assert!(profiles.contains(&"general".to_string()));
+        assert!(profiles.contains(&"architect".to_string()));
+        assert!(!profiles.contains(&"backend".to_string()));
+    }
+
+    #[test]
+    fn shell_script_only_uses_general() {
+        let (_dir, root) = bare_root();
+        let diffs = vec![make_diff("scripts/build.sh")];
+        let profiles = auto_select_profiles(&diffs, &root);
+        assert!(profiles.contains(&"general".to_string()));
+        assert!(!profiles.contains(&"backend".to_string()));
+        assert!(!profiles.contains(&"frontend".to_string()));
     }
 
     #[test]

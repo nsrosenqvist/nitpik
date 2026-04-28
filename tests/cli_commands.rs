@@ -42,7 +42,7 @@ async fn profiles_empty_agent_dir() {
     let dir = tempfile::tempdir().unwrap();
     let agents = agents::list_all_profiles(Some(dir.path())).await.unwrap();
     // Only built-ins
-    assert_eq!(agents.len(), 4);
+    assert_eq!(agents.len(), 5);
 }
 
 // ---------------------------------------------------------------------------
