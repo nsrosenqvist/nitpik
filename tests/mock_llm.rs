@@ -105,6 +105,7 @@ fn test_agent(name: &str) -> AgentDefinition {
             tools: vec![],
             agentic_instructions: None,
             environment: vec![],
+            always_include: false,
         },
         system_prompt: "You are a test reviewer.".to_string(),
     }
@@ -873,6 +874,7 @@ fn test_agent_with_tools(
             tools,
             agentic_instructions: None,
             environment: vec![],
+            always_include: false,
         },
         system_prompt: "You are a test reviewer with tools.".to_string(),
     }

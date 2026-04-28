@@ -62,12 +62,14 @@
 //! if has_backend OR
 //!    !has_frontend           → add "backend" (default profile)
 //! if has_architect           → add "architect"
-//! always                     → add "security"
 //! ```
 //!
-//! The `security` profile is unconditional — every review gets it.
-//! `backend` also serves as the catch-all default when nothing matched
+//! `backend` serves as the catch-all default when nothing matched
 //! frontend (e.g. a `README.md`-only diff).
+//!
+//! Profiles whose frontmatter declares `always_include: true` (such
+//! as the built-in `security` reviewer) are appended later by the
+//! orchestrator, not here — see [`crate::agents::list_always_include_profiles`].
 
 use std::path::Path;
 
@@ -293,7 +295,7 @@ const BROAD_DIFF_DIR_THRESHOLD: usize = 8;
 ///
 /// # Returns
 ///
-/// A non-empty list of profile name strings (e.g. `["frontend", "security"]`)
+/// A non-empty list of profile name strings (e.g. `["frontend", "backend"]`)
 /// suitable for passing to [`crate::agents::resolve_profiles`].
 /// Accumulated classification signals from analyzing changed files.
 struct FileClassification {
@@ -469,9 +471,6 @@ pub fn auto_select_profiles(diffs: &[FileDiff<'_>], repo_root: &Path) -> Vec<Str
         profiles.push("architect".to_string());
     }
 
-    // Always include security for comprehensive reviews
-    profiles.push("security".to_string());
-
     profiles
 }
 
@@ -624,11 +623,17 @@ mod tests {
     }
 
     #[test]
-    fn always_includes_security() {
+    fn auto_no_longer_unconditionally_adds_security() {
+        // `security` is now an `always_include` profile resolved by the
+        // orchestrator, not appended here. Auto-selection should not
+        // mention it directly.
         let (_dir, root) = bare_root();
         let diffs = vec![make_diff("anything.txt")];
         let profiles = auto_select_profiles(&diffs, &root);
-        assert!(profiles.contains(&"security".to_string()));
+        assert!(
+            !profiles.contains(&"security".to_string()),
+            "auto_select_profiles should not include 'security' directly; got: {profiles:?}"
+        );
     }
 
     // ── JS/TS path-based heuristics ──────────────────────────────────

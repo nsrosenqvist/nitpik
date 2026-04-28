@@ -33,6 +33,7 @@ Check for:
 | `model` | No | Override the global model for this profile. Useful for using a more capable model on security reviews or a cheaper one for style checks. |
 | `agentic_instructions` | No | Additional instructions injected only in `--agent` mode. Use this to tell the LLM how to use tools effectively for this profile's focus. Not included in standard (non-agentic) reviews. |
 | `environment` | No | List of env var names (or prefix globs like `AWS_*`) that custom command tools are allowed to inherit. See [Environment Passthrough](#environment-passthrough). |
+| `always_include` | No | When `true`, the profile is added to every `auto` review regardless of file heuristics. Defaults to `false`. See [Always-On Profiles](#always-on-profiles). |
 | `tools` | No | Custom CLI tools the LLM can invoke in agentic mode. See [Custom Agentic Tools](#custom-agentic-tools). |
 
 ## Using Custom Profiles
@@ -102,6 +103,63 @@ The body of your profile is the system prompt — it shapes everything the LLM f
 5. **Be specific to your team.** Reference your actual conventions, libraries, and patterns. "Use `anyhow` for error handling in CLI code" is better than "use proper error handling."
 
 See the [built-in profiles](https://github.com/nsrosenqvist/nitpik/tree/main/src/agents/builtin) for real examples.
+
+## Always-On Profiles
+
+Some reviewers should run on every change, regardless of which files were touched — security is the obvious example, but teams often want similar coverage for documentation drift, license headers, telemetry conventions, or other cross-cutting concerns.
+
+Set `always_include: true` in a profile's frontmatter to make it part of every `auto` review:
+
+```markdown
+---
+name: docs-drift
+description: Flags changes that may invalidate existing documentation
+tags: [docs, drift]
+always_include: true
+---
+
+You are a documentation accuracy reviewer.
+
+When a code change modifies a public API, configuration option, CLI flag, or
+documented behavior, check whether existing documentation still matches:
+
+1. **Scan related docs.** If the change is in `src/api/`, search `docs/api/`,
+   `README.md`, and any inline rustdoc for references to the changed symbol.
+2. **Flag drift, don't rewrite it.** Report stale paragraphs as findings —
+   tell the author which doc section is now inaccurate and what changed.
+   Don't suggest the new wording; that's a separate task.
+3. **Severity guidance.**
+   - `error` — public API contract changed and docs still describe the old behavior.
+   - `warning` — internal behavior changed in a way users would notice (defaults, error messages, output format).
+   - `info` — minor changes that may warrant a doc refresh but won't mislead users.
+
+Don't report on changes to test files, internal helpers, or undocumented code.
+```
+
+Use it like any other profile — drop the file in your `--profile-dir` and `auto` picks it up automatically:
+
+```bash
+nitpik review --diff-base main --profile-dir ./agents --profile auto
+```
+
+> **Note:** `always_include` only applies to `auto` mode. Explicit `--profile` and `--tag` selections stay literal — if you list profiles by name, only those run.
+
+### Disabling a Built-In Always-On Profile
+
+The shipped `security` profile sets `always_include: true` so every `auto` review gets a security pass. To opt out (or replace it with your own version), drop a `security.md` override into your `--profile-dir` and set `always_include: false`:
+
+```markdown
+---
+name: security
+description: Security review handled by our external scanner
+tags: []
+always_include: false
+---
+
+You are a security reviewer. Only flag issues not already caught by our SAST pipeline.
+```
+
+The override replaces the built-in entirely (see [Overriding Built-In Profiles](#overriding-built-in-profiles)), so the always-on inclusion is removed along with the built-in's prompt.
 
 ## Custom Agentic Tools
 

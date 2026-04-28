@@ -56,4 +56,24 @@ mod tests {
         assert!(names.contains(&"backend"));
         assert!(names.contains(&"security"));
     }
+
+    #[test]
+    fn security_is_always_include() {
+        let security = get_builtin("security").unwrap();
+        assert!(
+            security.profile.always_include,
+            "built-in security must opt into always_include"
+        );
+    }
+
+    #[test]
+    fn other_builtins_are_not_always_include() {
+        for name in ["backend", "frontend", "architect"] {
+            let agent = get_builtin(name).unwrap();
+            assert!(
+                !agent.profile.always_include,
+                "{name} should not be always-on by default"
+            );
+        }
+    }
 }

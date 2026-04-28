@@ -783,7 +783,8 @@ async fn resolve_agents(
         args.profile.clone()
     };
 
-    let profiles = if profile_names.iter().any(|p| p == "auto") {
+    let used_auto = profile_names.iter().any(|p| p == "auto");
+    let profiles = if used_auto {
         agents::auto::auto_select_profiles(diffs, repo_root_path)
     } else {
         profile_names
@@ -792,6 +793,23 @@ async fn resolve_agents(
     let mut agent_defs = agents::resolve_profiles(&profiles, args.profile_dir.as_deref())
         .await
         .context("failed to resolve agent profiles")?;
+
+    // Auto mode: splice in any profile that opted into `always_include`
+    // (built-in `security`, or custom always-on reviewers from
+    // `--profile-dir`). Skipped for explicit `--profile`/`--tag`
+    // selections, where the user has already chosen.
+    if used_auto {
+        let always_on = agents::list_always_include_profiles(args.profile_dir.as_deref())
+            .await
+            .context("failed to load always-include profiles")?;
+        let existing: std::collections::HashSet<String> =
+            agent_defs.iter().map(|a| a.profile.name.clone()).collect();
+        for agent in always_on {
+            if !existing.contains(&agent.profile.name) {
+                agent_defs.push(agent);
+            }
+        }
+    }
 
     // --tag: add any profiles that match the requested tags
     if !args.tag.is_empty() {

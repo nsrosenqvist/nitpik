@@ -2,6 +2,7 @@
 name: security
 description: Focuses on security vulnerabilities, injection risks, and auth issues
 tags: [security, auth, injection, xss, csrf, cryptography]
+always_include: true
 agentic_instructions: >
   Use `search_text` to trace tainted data flow from input sources to sinks —
   follow the chain through function calls, middleware, and utility modules.

@@ -145,6 +145,27 @@ pub async fn resolve_profiles_by_tags(
     Ok(matched)
 }
 
+/// List profiles whose frontmatter declares `always_include: true`.
+///
+/// Loads all available profiles (built-in + custom from `agent_dir`,
+/// with custom profiles overriding built-ins of the same name) and
+/// returns those marked `always_include`. Used by the orchestrator to
+/// append cross-cutting reviewers (e.g. the built-in `security`
+/// profile, or a team's documentation-drift reviewer) to every `auto`
+/// review.
+///
+/// A user can disable a built-in always-on profile by shipping an
+/// override in `agent_dir` that sets `always_include: false`.
+pub async fn list_always_include_profiles(
+    agent_dir: Option<&Path>,
+) -> Result<Vec<AgentDefinition>, AgentError> {
+    let all = list_all_profiles(agent_dir).await?;
+    Ok(all
+        .into_iter()
+        .filter(|a| a.profile.always_include)
+        .collect())
+}
+
 /// Resolve a single profile name or path.
 async fn resolve_single_profile(
     profile: &str,
@@ -509,5 +530,96 @@ mod tests {
             names.contains(&"design-system"),
             "custom has css tag; got: {names:?}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // list_always_include_profiles
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn always_include_returns_builtin_security() {
+        // The built-in `security` profile ships with `always_include: true`.
+        let agents = list_always_include_profiles(None).await.unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(
+            names.contains(&"security"),
+            "built-in security should opt in; got: {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn always_include_other_builtins_do_not_opt_in() {
+        // backend/frontend/architect should NOT be always-on by default.
+        let agents = list_always_include_profiles(None).await.unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(!names.contains(&"backend"));
+        assert!(!names.contains(&"frontend"));
+        assert!(!names.contains(&"architect"));
+    }
+
+    #[tokio::test]
+    async fn always_include_picks_up_custom_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("docs-drift.md"),
+            "---\nname: docs-drift\ndescription: Flags doc drift\ntags: [docs]\nalways_include: true\n---\nReview prompt.",
+        )
+        .unwrap();
+        // A regular (non-always) custom profile should NOT be returned.
+        std::fs::write(
+            dir.path().join("style.md"),
+            "---\nname: style\ndescription: Style\ntags: []\n---\nPrompt.",
+        )
+        .unwrap();
+
+        let agents = list_always_include_profiles(Some(dir.path()))
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(names.contains(&"docs-drift"), "got: {names:?}");
+        assert!(
+            names.contains(&"security"),
+            "still includes built-in security; got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"style"),
+            "non-always profile excluded; got: {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn always_include_user_override_can_disable_builtin_security() {
+        // User ships a security.md override that opts OUT of always_include.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("security.md"),
+            "---\nname: security\ndescription: Custom security\ntags: []\nalways_include: false\n---\nPrompt.",
+        )
+        .unwrap();
+
+        let agents = list_always_include_profiles(Some(dir.path()))
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(
+            !names.contains(&"security"),
+            "user override disabled built-in always-on; got: {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn always_include_defaults_to_false_when_field_omitted() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("plain.md"),
+            "---\nname: plain\ndescription: No flag\ntags: []\n---\nPrompt.",
+        )
+        .unwrap();
+
+        let agents = list_always_include_profiles(Some(dir.path()))
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(!names.contains(&"plain"), "got: {names:?}");
     }
 }

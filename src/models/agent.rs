@@ -53,6 +53,21 @@ pub struct AgentProfile {
     /// ```
     #[serde(default)]
     pub environment: Vec<String>,
+    /// Whether this profile is automatically included in every `auto`
+    /// review, regardless of the file-classification heuristics.
+    ///
+    /// Use this for cross-cutting reviewers that should always run —
+    /// for example a security reviewer or a documentation-drift
+    /// reviewer. Has no effect when the user selects profiles
+    /// explicitly via `--profile` or `--tag`.
+    ///
+    /// A custom profile in `--profile-dir` whose `name` matches a
+    /// built-in replaces the built-in entirely (see
+    /// [`agents::resolve_profiles`](crate::agents::resolve_profiles)),
+    /// so a user can disable a built-in always-on profile by shipping
+    /// an override with `always_include: false`.
+    #[serde(default)]
+    pub always_include: bool,
 }
 
 /// A custom tool defined in agent profile frontmatter.

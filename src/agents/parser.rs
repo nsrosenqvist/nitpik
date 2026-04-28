@@ -257,4 +257,43 @@ Review this code."#;
         let agent = parse_agent_definition(content).unwrap();
         assert!(agent.profile.environment.is_empty());
     }
+
+    #[test]
+    fn parse_agent_with_always_include_true() {
+        let content = r#"---
+name: docs-drift
+description: Flags doc drift
+always_include: true
+---
+
+Review docs."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert!(agent.profile.always_include);
+    }
+
+    #[test]
+    fn parse_agent_always_include_defaults_to_false() {
+        let content = r#"---
+name: basic
+description: Basic reviewer
+---
+
+Review."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert!(!agent.profile.always_include);
+    }
+
+    #[test]
+    fn parse_agent_with_always_include_false() {
+        // Used to opt OUT when overriding a built-in always-on profile.
+        let content = r#"---
+name: security
+description: Custom security override
+always_include: false
+---
+
+Custom prompt."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert!(!agent.profile.always_include);
+    }
 }
