@@ -111,6 +111,7 @@ nitpik review --diff-base main --profile backend --tag css
 | `frontend` | `frontend`, `ui`, `ux`, `accessibility`, `css`, `javascript`, `typescript` |
 | `architect` | `architecture`, `design`, `patterns`, `maintainability`, `coupling` |
 | `security` | `security`, `auth`, `injection`, `xss`, `csrf`, `cryptography` |
+| `general` | `docs`, `config`, `shell`, `scripts`, `prose`, `cross-cutting` |
 
 ## Listing Profiles
 

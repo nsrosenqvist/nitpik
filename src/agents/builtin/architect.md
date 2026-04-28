@@ -37,3 +37,4 @@ First, determine whether the change introduces new API surface, modifies module 
 - Single-line style or formatting issues — only flag naming/organization issues when they indicate structural confusion
 - Implementation-level bugs (off-by-one, null handling) — leave those to other specialized reviewers
 - Security vulnerabilities — leave those to other specialized reviewers
+- Minor documentation, configuration, or script issues without architectural impact — leave those to a generalist reviewer when one is running. Structural configuration (Dockerfiles, CI workflows, IaC topology, dependency direction) remains in scope.
