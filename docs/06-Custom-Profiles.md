@@ -55,6 +55,32 @@ Combine custom profiles with built-in ones:
 nitpik review --diff-base main --profile-dir ./agents --profile backend,team-conventions
 ```
 
+## Overriding Built-In Profiles
+
+A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`) replaces the built-in when `--profile-dir` is set. This lets you tune the shipped profiles to your team's needs without forking the project.
+
+For example, drop a file at `./agents/backend.md`:
+
+```markdown
+---
+name: backend
+description: Backend review tuned for our Rust services
+tags: [backend, rust, performance]
+---
+
+You are reviewing backend Rust code for our team...
+```
+
+Then run:
+
+```bash
+nitpik review --diff-base main --profile-dir ./agents --profile backend
+```
+
+nitpik loads your `backend.md` instead of the built-in. The override applies everywhere the profile is referenced — `--profile backend`, `--tag backend`, auto-selection, and `nitpik profiles` all use your version.
+
+> **Tip:** Use `nitpik profiles --profile-dir ./agents` to confirm which version of a profile will be used. Overridden built-ins appear once, with your custom description.
+
 ## Validating Profiles
 
 Check a profile for syntax errors before using it:

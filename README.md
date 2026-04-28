@@ -308,6 +308,8 @@ nitpik review --diff-base main --profile ./team-conventions.md
 nitpik review --diff-base main --profile-dir ./agents --profile team-conventions
 ```
 
+A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`) replaces that built-in when `--profile-dir` is set — useful for tuning the shipped reviewers to your team without forking the project. See [Custom Profiles → Overriding Built-In Profiles](docs/06-Custom-Profiles.md#overriding-built-in-profiles) for details.
+
 Validate a profile before using it:
 
 ```bash

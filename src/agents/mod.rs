@@ -35,8 +35,9 @@ pub enum AgentError {
 /// Resolve a list of profile names/paths into agent definitions.
 ///
 /// Resolution order for each value:
-/// 1. If it matches a built-in name → use embedded profile
-/// 2. If `agent_dir` is set and `{agent_dir}/{value}.md` exists → load it
+/// 1. If `agent_dir` is set and `{agent_dir}/{value}.md` exists → load it
+///    (custom profiles override built-ins with the same name)
+/// 2. If it matches a built-in name → use embedded profile
 /// 3. If it's a file path (contains `/` or `.md`) → load it directly
 /// 4. Otherwise → error with suggestions
 pub async fn resolve_profiles(
@@ -54,19 +55,16 @@ pub async fn resolve_profiles(
 }
 
 /// List all available profiles: built-ins plus any custom ones from `agent_dir`.
+///
+/// Custom profiles whose `name` matches a built-in replace the built-in entry.
 pub async fn list_all_profiles(
     agent_dir: Option<&Path>,
 ) -> Result<Vec<AgentDefinition>, AgentError> {
     let mut agents: Vec<AgentDefinition> = Vec::new();
 
-    // Built-in profiles
-    for name in builtin::list_builtin_names() {
-        if let Some(agent) = builtin::get_builtin(name) {
-            agents.push(agent);
-        }
-    }
-
-    // Custom profiles from agent_dir
+    // Custom profiles from agent_dir take precedence — load them first
+    // so we know which built-in names to skip.
+    let mut custom_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     if let Some(dir) = agent_dir {
         if dir.is_dir() {
             let mut entries =
@@ -95,13 +93,26 @@ pub async fn list_all_profiles(
                         }
                     })?;
                     match parser::parse_agent_definition(&content) {
-                        Ok(agent) => agents.push(agent),
+                        Ok(agent) => {
+                            custom_names.insert(agent.profile.name.clone());
+                            agents.push(agent);
+                        }
                         Err(e) => {
                             eprintln!("Warning: skipping {}: {e}", path.display());
                         }
                     }
                 }
             }
+        }
+    }
+
+    // Built-in profiles, skipping any overridden by a custom profile of the same name.
+    for name in builtin::list_builtin_names() {
+        if custom_names.contains(name) {
+            continue;
+        }
+        if let Some(agent) = builtin::get_builtin(name) {
+            agents.push(agent);
         }
     }
 
@@ -139,12 +150,7 @@ async fn resolve_single_profile(
     profile: &str,
     agent_dir: Option<&Path>,
 ) -> Result<AgentDefinition, AgentError> {
-    // 1. Check built-in profiles
-    if let Some(agent) = builtin::get_builtin(profile) {
-        return Ok(agent);
-    }
-
-    // 2. Check agent_dir
+    // 1. Check agent_dir first so custom profiles can override built-ins
     if let Some(dir) = agent_dir {
         let path = dir.join(format!("{profile}.md"));
         if path.exists() {
@@ -158,6 +164,11 @@ async fn resolve_single_profile(
             return parser::parse_agent_definition(&content)
                 .map_err(|e| AgentError::ParseError(e.to_string()));
         }
+    }
+
+    // 2. Check built-in profiles
+    if let Some(agent) = builtin::get_builtin(profile) {
+        return Ok(agent);
     }
 
     // 3. Check if it's a direct file path
@@ -388,6 +399,92 @@ mod tests {
             vec!["custom"],
             "only custom has my-tag; got: {names:?}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Custom profile overrides built-in
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn resolve_custom_overrides_builtin() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("backend.md"),
+            "---\nname: backend\ndescription: My override\ntags: [custom-tag]\n---\nOverridden prompt body.",
+        )
+        .unwrap();
+
+        let agents = resolve_profiles(&["backend".to_string()], Some(dir.path()))
+            .await
+            .unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].profile.name, "backend");
+        assert_eq!(
+            agents[0].profile.description, "My override",
+            "should load custom profile, not built-in"
+        );
+        assert_eq!(agents[0].profile.tags, vec!["custom-tag".to_string()]);
+        assert!(agents[0].system_prompt.contains("Overridden prompt body"));
+    }
+
+    #[tokio::test]
+    async fn list_all_custom_replaces_builtin_with_same_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("backend.md"),
+            "---\nname: backend\ndescription: My override\ntags: []\n---\nOverridden prompt.",
+        )
+        .unwrap();
+
+        let agents = list_all_profiles(Some(dir.path())).await.unwrap();
+        // No duplicate "backend" entry
+        let backend_entries: Vec<_> = agents
+            .iter()
+            .filter(|a| a.profile.name == "backend")
+            .collect();
+        assert_eq!(
+            backend_entries.len(),
+            1,
+            "should not duplicate overridden profile"
+        );
+        assert_eq!(backend_entries[0].profile.description, "My override");
+        // Other built-ins still present
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(names.contains(&"frontend"));
+        assert!(names.contains(&"architect"));
+        assert!(names.contains(&"security"));
+        assert_eq!(agents.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn resolve_by_tag_uses_overridden_profile_tags() {
+        // Built-in `backend` has tags like "backend", "performance".
+        // Override removes those tags, so the built-in's tags should NOT match.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("backend.md"),
+            "---\nname: backend\ndescription: Override\ntags: [only-mine]\n---\nPrompt.",
+        )
+        .unwrap();
+
+        // The built-in's "performance" tag should no longer match because
+        // the overridden profile replaces it.
+        let agents = resolve_profiles_by_tags(&["performance".to_string()], Some(dir.path()))
+            .await
+            .unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(
+            !names.contains(&"backend"),
+            "overridden backend lost 'performance' tag; got: {names:?}"
+        );
+
+        // The new tag matches and selects the override.
+        let agents = resolve_profiles_by_tags(&["only-mine".to_string()], Some(dir.path()))
+            .await
+            .unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].profile.name, "backend");
+        assert_eq!(agents[0].profile.description, "Override");
     }
 
     #[tokio::test]
