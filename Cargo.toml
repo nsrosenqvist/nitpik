@@ -25,6 +25,10 @@ toml = "0.8"
 
 # HTTP
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Pin minimum patch level of transitive dep (via reqwest/rustls) to ensure
+# the fix for GHSA-82j2-j2ch-gfr8 (panic in BorrowedCertRevocationList::from_der)
+# is always picked up by cargo's resolver. Not used directly.
+rustls-webpki = "0.103.13"
 
 # LLM (multi-provider support)
 rig-core = { version = "0.35", features = ["derive"] }
