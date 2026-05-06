@@ -214,6 +214,12 @@ pub struct ReviewArgs {
     #[arg(long, short = 'q', default_value_t = false)]
     pub quiet: bool,
 
+    /// Suppress the per-run token usage summary printed after the review.
+    /// The summary is only shown for terminal output, so this flag is a
+    /// no-op for non-terminal formats and when `--quiet` is set.
+    #[arg(long, default_value_t = false)]
+    pub no_tokens: bool,
+
     // --- Context ---
     /// Skip auto-detected project documentation files (AGENTS.md, CONVENTIONS.md, etc.).
     #[arg(long, default_value_t = false)]
@@ -379,6 +385,7 @@ mod tests {
             no_prior_context: false,
             max_prior_findings: None,
             quiet: false,
+            no_tokens: false,
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: vec![],

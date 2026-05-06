@@ -8,6 +8,7 @@
 
 use indexmap::IndexMap;
 
+use crate::models::TokenUsage;
 use crate::models::finding::Severity;
 use crate::providers::{ReviewProvider, TriageVerdict as RawVerdict};
 
@@ -17,27 +18,29 @@ use super::scanner::ThreatMatch;
 
 /// Triage raw threat matches using the LLM.
 ///
-/// Returns the filtered/reclassified matches. On LLM failure, returns
-/// the original matches unchanged (fail-open).
+/// Returns the filtered/reclassified matches alongside the token usage
+/// consumed by the triage call. On LLM failure, returns the original
+/// matches unchanged (fail-open) and zero token usage.
 pub async fn triage_findings(
     matches: Vec<ThreatMatch>,
     file_contents: &IndexMap<String, String>,
     provider: &dyn ReviewProvider,
-) -> Vec<ThreatMatch> {
+) -> (Vec<ThreatMatch>, TokenUsage) {
     let prompt = build_triage_prompt(&matches, file_contents);
     let system = system_prompt();
 
-    let raw = match provider.triage(&system, &prompt).await {
+    let outcome = match provider.triage(&system, &prompt).await {
         Ok(v) => v,
-        Err(_) => return matches, // fail-open
+        Err(_) => return (matches, TokenUsage::default()), // fail-open
     };
 
-    let verdicts = normalize_verdicts(raw);
+    let tokens = outcome.tokens;
+    let verdicts = normalize_verdicts(outcome.verdicts);
     if verdicts.is_empty() {
-        return matches; // fail-open on unparseable response
+        return (matches, tokens); // fail-open on unparseable response
     }
 
-    apply_verdicts(matches, &verdicts)
+    (apply_verdicts(matches, &verdicts), tokens)
 }
 
 // ── Prompt construction ─────────────────────────────────────────────

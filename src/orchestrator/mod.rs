@@ -23,6 +23,7 @@ use crate::cache::{self, CacheEngine};
 use crate::config::Config;
 use crate::diff::chunker;
 use crate::models::AgentDefinition;
+use crate::models::TokenUsage;
 use crate::models::context::ReviewContext;
 use crate::models::finding::Finding;
 use crate::progress::{ProgressReporter, TaskStatus};
@@ -51,6 +52,9 @@ pub struct ReviewResult {
     pub findings: Vec<Finding>,
     /// Number of file×agent tasks that failed after retries.
     pub failed_tasks: usize,
+    /// Aggregated token usage across every file×agent task that
+    /// reached the provider (cache hits contribute zero).
+    pub tokens: TokenUsage,
 }
 
 /// Orchestrates parallel review execution across agents and files.
@@ -182,10 +186,12 @@ impl ReviewOrchestrator {
         // Collect results from all tasks
         let mut all_findings: Vec<Finding> = Vec::new();
         let mut failed_count: usize = 0;
+        let mut total_tokens = TokenUsage::default();
         while let Some(result) = join_set.join_next().await {
             match result {
-                Ok((findings, failed)) => {
+                Ok((findings, failed, tokens)) => {
                     all_findings.extend(findings);
+                    total_tokens += tokens;
                     if failed {
                         failed_count += 1;
                     }
@@ -211,6 +217,7 @@ impl ReviewOrchestrator {
         Ok(ReviewResult {
             findings: scoped,
             failed_tasks: failed_count,
+            tokens: total_tokens,
         })
     }
 }
@@ -235,7 +242,7 @@ struct ReviewTaskParams {
 }
 
 /// Execute a single file×agent review task with caching and retries.
-async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool) {
+async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, TokenUsage) {
     let ReviewTaskParams {
         provider,
         cache,
@@ -265,7 +272,7 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool) {
             )
             .await;
         progress.update(&file_path, TaskStatus::Done);
-        return (cached, false);
+        return (cached, false, TokenUsage::default());
     }
 
     // Cache miss — resolve prior findings for the prompt
@@ -308,7 +315,7 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool) {
     )
     .await
     {
-        Ok(findings) => {
+        Ok((findings, tokens)) => {
             cache.put(&cache_key, &findings).await;
             cache
                 .put_sidecar(
@@ -320,18 +327,18 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool) {
                 )
                 .await;
             progress.update(&file_path, TaskStatus::Done);
-            (findings, false)
+            (findings, false, tokens)
         }
         Err(err_msg) => {
             progress.update(&file_path, TaskStatus::Failed(err_msg));
-            (Vec::new(), true)
+            (Vec::new(), true, TokenUsage::default())
         }
     }
 }
 
 /// Retry a provider review call with exponential backoff.
 ///
-/// Returns `Ok(findings)` on success or `Err(message)` when retries
+/// Returns `Ok((findings, tokens))` on success or `Err(message)` when retries
 /// are exhausted or a non-retryable error is encountered.
 #[allow(clippy::too_many_arguments)] // Thin extraction from spawn closure; a one-shot struct adds noise.
 async fn with_retry(
@@ -343,7 +350,7 @@ async fn with_retry(
     max_tool_calls: usize,
     progress: &Arc<dyn ProgressReporter>,
     file_path: &str,
-) -> Result<Vec<Finding>, String> {
+) -> Result<(Vec<Finding>, TokenUsage), String> {
     let mut last_err = None;
 
     for attempt in 0..=MAX_RETRIES {
@@ -351,7 +358,7 @@ async fn with_retry(
             .review(agent, prompt, agentic, max_turns, max_tool_calls)
             .await
         {
-            Ok(findings) => return Ok(findings),
+            Ok(outcome) => return Ok((outcome.findings, outcome.tokens)),
             Err(ref e) if is_retryable(e) && attempt < MAX_RETRIES => {
                 let backoff = retry_backoff(attempt);
                 let reason = classify_error(e).unwrap_or("Transient error").to_string();

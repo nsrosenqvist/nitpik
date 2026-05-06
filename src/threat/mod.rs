@@ -84,7 +84,9 @@ pub async fn scan_for_threats(
     }
 
     let triaged = if let Some(provider) = provider {
-        triage::triage_findings(raw_matches, file_contents, provider).await
+        let (matches, _tokens) =
+            triage::triage_findings(raw_matches, file_contents, provider).await;
+        matches
     } else {
         raw_matches
     };

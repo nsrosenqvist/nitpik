@@ -483,7 +483,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     progress.finish();
 
     // Threat scanning (pattern scan then optional LLM triage)
-    let threat_findings = if scan_threats {
+    let (threat_findings, triage_tokens) = if scan_threats {
         let mut threat_rules = threat::rules::default_rules();
         let config_threat_path: Option<std::path::PathBuf> = config
             .threats
@@ -509,7 +509,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         );
 
         if raw_matches.is_empty() {
-            vec![]
+            (vec![], nitpik::models::TokenUsage::default())
         } else {
             let show_progress = !args.quiet
                 && args.format == OutputFormat::Terminal
@@ -535,7 +535,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             }
 
             // Phase 2: LLM triage (fail-open)
-            let triaged = threat::triage::triage_findings(
+            let (triaged, triage_tokens) = threat::triage::triage_findings(
                 raw_matches,
                 &review_context.baseline.file_contents,
                 provider.as_ref(),
@@ -562,10 +562,16 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
                 let _ = handle.flush();
             }
 
-            triaged.iter().map(threat::match_to_finding).collect()
+            (
+                triaged
+                    .iter()
+                    .map(threat::match_to_finding)
+                    .collect::<Vec<_>>(),
+                triage_tokens,
+            )
         }
     } else {
-        vec![]
+        (vec![], nitpik::models::TokenUsage::default())
     };
 
     let mut findings = review_result.findings;
@@ -577,6 +583,15 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             .then(a.file.cmp(&b.file))
             .then(a.line.cmp(&b.line))
     });
+
+    let total_tokens = review_result.tokens + triage_tokens;
+    let show_tokens = !args.quiet
+        && !args.no_tokens
+        && args.format == OutputFormat::Terminal
+        && std::io::stderr().is_terminal();
+    if show_tokens && total_tokens.total() > 0 {
+        print_token_summary(total_tokens);
+    }
 
     let fail_on_severity: Option<Severity> = if args.no_fail {
         None
@@ -598,6 +613,51 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         &args.format,
         review_result.failed_tasks,
     )
+}
+
+/// Print a one-line token usage summary to stderr.
+///
+/// Format: `▸ Tokens: <input>↑ <output>↓ [<cached> cached] [<created> cache-created]`
+/// where the cached/created suffixes are omitted when zero.
+fn print_token_summary(usage: nitpik::models::TokenUsage) {
+    use colored::Colorize;
+    use std::io::Write;
+
+    let mut line = format!(
+        "Tokens: {}↑ in, {}↓ out",
+        format_count(usage.input),
+        format_count(usage.output),
+    );
+    if usage.cached_input > 0 {
+        line.push_str(&format!(
+            " ({} cached, {:.0}% hit)",
+            format_count(usage.cached_input),
+            usage.cache_hit_ratio() * 100.0,
+        ));
+    }
+    if usage.cache_creation > 0 {
+        line.push_str(&format!(
+            " (+{} cache write)",
+            format_count(usage.cache_creation)
+        ));
+    }
+
+    let stderr = std::io::stderr();
+    let mut handle = stderr.lock();
+    let _ = writeln!(handle, "  {} {}", "▸".cyan().bold(), line.dimmed());
+    let _ = writeln!(handle);
+    let _ = handle.flush();
+}
+
+/// Render a token count compactly: `1234` → `1.2K`, `1234567` → `1.2M`.
+fn format_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
 }
 
 /// Verify the license key from config, returning claims and optional

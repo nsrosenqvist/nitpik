@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::models::AgentDefinition;
+use crate::models::TokenUsage;
 use crate::models::finding::Finding;
 
 /// Errors from the review provider.
@@ -48,6 +49,27 @@ pub struct TriageVerdict {
     pub rationale: Option<String>,
 }
 
+/// Outcome of a single `ReviewProvider::review` call: the parsed
+/// findings plus the token usage consumed by the underlying LLM
+/// round trips (one round in non-agentic mode, multiple in
+/// agentic mode).
+#[derive(Debug, Clone, Default)]
+pub struct ReviewOutcome {
+    /// Findings the LLM produced (may be empty).
+    pub findings: Vec<Finding>,
+    /// Token usage aggregated across every LLM round.
+    pub tokens: TokenUsage,
+}
+
+/// Outcome of a single `ReviewProvider::triage` call.
+#[derive(Debug, Clone, Default)]
+pub struct TriageOutcome {
+    /// Verdicts the LLM produced (may be empty).
+    pub verdicts: Vec<TriageVerdict>,
+    /// Token usage for the triage call.
+    pub tokens: TokenUsage,
+}
+
 /// Trait for LLM-backed code review.
 ///
 /// Implementations handle agent construction, prompt building,
@@ -65,7 +87,7 @@ pub trait ReviewProvider: Send + Sync {
         agentic: bool,
         max_turns: usize,
         max_tool_calls: usize,
-    ) -> Result<Vec<Finding>, ProviderError>;
+    ) -> Result<ReviewOutcome, ProviderError>;
 
     /// Classify threat findings via a single-turn structured-output call.
     ///
@@ -75,5 +97,5 @@ pub trait ReviewProvider: Send + Sync {
         &self,
         system_prompt: &str,
         user_prompt: &str,
-    ) -> Result<Vec<TriageVerdict>, ProviderError>;
+    ) -> Result<TriageOutcome, ProviderError>;
 }

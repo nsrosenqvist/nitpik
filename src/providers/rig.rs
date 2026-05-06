@@ -13,11 +13,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rig::client::CompletionClient;
-use rig::completion::Prompt;
+use rig::completion::{CompletionModel, message::AssistantContent};
 use rig::providers;
-use schemars::JsonSchema;
+use schemars::{JsonSchema, schema_for};
 
 use crate::config::ProviderConfig;
+use crate::models::TokenUsage;
 use crate::models::agent::CustomToolDefinition;
 use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
@@ -28,7 +29,7 @@ use crate::tools::{
     SubmitFindingsTool,
 };
 
-use super::{ProviderError, ReviewProvider, TriageVerdict};
+use super::{ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict};
 
 /// Maximum tokens per LLM completion response.
 ///
@@ -89,7 +90,7 @@ struct CallArgs<'a> {
 async fn dispatch_review<C: CompletionClient, T: JsonSchema>(
     client: &C,
     args: CallArgs<'_>,
-) -> Result<String, ProviderError>
+) -> Result<(String, TokenUsage), ProviderError>
 where
     <C as CompletionClient>::CompletionModel: 'static,
 {
@@ -142,34 +143,57 @@ where
         .await
         .map_err(|e| ProviderError::ApiError(format!("{label} agentic error: {e}")))?;
 
+        let tokens: TokenUsage = outcome.usage.into();
+
         // If the LLM called submit_findings, return its captured
         // structured payload as JSON so the existing parser takes the
         // happy path without falling back to text scraping.
         let captured = findings_sink.lock().expect("findings sink poisoned").take();
         if let Some(findings) = captured {
-            return serde_json::to_string(&findings).map_err(|e| {
+            let json = serde_json::to_string(&findings).map_err(|e| {
                 ProviderError::ApiError(format!(
                     "{label} failed to serialize submitted findings: {e}"
                 ))
-            });
+            })?;
+            return Ok((json, tokens));
         }
 
         // No terminal tool call. Fall back to whatever text the model
         // produced; the caller's parser can still rescue JSON the
         // model emitted as prose.
-        Ok(outcome.final_text)
+        Ok((outcome.final_text, tokens))
     } else {
-        let agent = client
-            .agent(model)
-            .preamble(system_prompt)
+        // Non-agentic path: drive `completion_request` directly so we
+        // can read `CompletionResponse::usage`. Equivalent to the
+        // previous `agent.prompt()` flow but with token accounting.
+        let model_handle = client.completion_model(model);
+        let request = model_handle
+            .completion_request(user_prompt.to_string())
+            .preamble(system_prompt.to_string())
             .temperature(0.0)
             .max_tokens(max_tokens)
-            .output_schema::<T>()
-            .build();
-        agent
-            .prompt(user_prompt)
+            .output_schema(schema_for!(T));
+
+        let response = request
+            .send()
             .await
-            .map_err(|e| ProviderError::ApiError(format!("{label} API error: {e}")))
+            .map_err(|e| ProviderError::ApiError(format!("{label} API error: {e}")))?;
+
+        let tokens: TokenUsage = response.usage.into();
+
+        // Concatenate every text fragment in the assistant's choice.
+        // Tool calls are ignored here — non-agentic mode does not
+        // register any tools — but we tolerate them defensively.
+        let mut text = String::new();
+        for piece in response.choice.iter() {
+            if let AssistantContent::Text(t) = piece {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&t.text);
+            }
+        }
+        Ok((text, tokens))
     }
 }
 
@@ -239,7 +263,10 @@ impl RigProvider {
     /// final response (e.g. `Vec<Finding>` for review,
     /// `Vec<TriageVerdict>` for triage). Each match arm constructs the
     /// concrete provider client and forwards to [`dispatch_review`].
-    async fn call<T: JsonSchema>(&self, args: CallArgs<'_>) -> Result<String, ProviderError> {
+    async fn call<T: JsonSchema>(
+        &self,
+        args: CallArgs<'_>,
+    ) -> Result<(String, TokenUsage), ProviderError> {
         // Ollama does not require an API key; all other providers do.
         let api_key = if self.config.name == ProviderName::Ollama {
             self.config.api_key.as_deref().unwrap_or("")
@@ -377,7 +404,7 @@ impl ReviewProvider for RigProvider {
         agentic: bool,
         max_turns: usize,
         max_tool_calls: usize,
-    ) -> Result<Vec<Finding>, ProviderError> {
+    ) -> Result<ReviewOutcome, ProviderError> {
         let model = agent
             .profile
             .model
@@ -418,7 +445,7 @@ impl ReviewProvider for RigProvider {
             (agent.system_prompt.as_str(), None)
         };
 
-        let response = self
+        let (response, tokens) = self
             .call::<Vec<Finding>>(CallArgs {
                 model,
                 system_prompt,
@@ -429,15 +456,16 @@ impl ReviewProvider for RigProvider {
             })
             .await?;
 
-        parse_findings_response(&response)
+        let findings = parse_findings_response(&response)?;
+        Ok(ReviewOutcome { findings, tokens })
     }
 
     async fn triage(
         &self,
         system_prompt: &str,
         user_prompt: &str,
-    ) -> Result<Vec<TriageVerdict>, ProviderError> {
-        let response = self
+    ) -> Result<TriageOutcome, ProviderError> {
+        let (response, tokens) = self
             .call::<Vec<TriageVerdict>>(CallArgs {
                 model: self.config.resolved_model(),
                 system_prompt,
@@ -449,10 +477,14 @@ impl ReviewProvider for RigProvider {
             .await?;
 
         if response.trim().is_empty() {
-            return Ok(Vec::new());
+            return Ok(TriageOutcome {
+                verdicts: Vec::new(),
+                tokens,
+            });
         }
 
-        parse_with_fallbacks::<Vec<TriageVerdict>>(&response)
+        let verdicts = parse_with_fallbacks::<Vec<TriageVerdict>>(&response)?;
+        Ok(TriageOutcome { verdicts, tokens })
     }
 }
 

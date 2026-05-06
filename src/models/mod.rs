@@ -11,6 +11,7 @@ pub mod agent;
 pub mod context;
 pub mod diff;
 pub mod finding;
+pub mod usage;
 
 use std::path::PathBuf;
 
@@ -20,6 +21,7 @@ pub use agent::AgentDefinition;
 pub use context::{BaselineContext, ReviewContext};
 pub use diff::FileDiff;
 pub use finding::Severity;
+pub use usage::TokenUsage;
 
 /// Default agent profile name used when no profile is specified.
 pub const DEFAULT_PROFILE: &str = "general";

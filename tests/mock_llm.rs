@@ -18,7 +18,9 @@ use nitpik::models::diff::{DiffLine, DiffLineType, FileDiff, Hunk};
 use nitpik::models::finding::{Finding, Severity};
 use nitpik::orchestrator::ReviewOrchestrator;
 use nitpik::progress::ProgressTracker;
-use nitpik::providers::{ProviderError, ReviewProvider, TriageVerdict};
+use nitpik::providers::{
+    ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict,
+};
 
 /// A mock review provider that returns canned findings.
 struct MockProvider {
@@ -48,16 +50,51 @@ impl ReviewProvider for MockProvider {
         _agentic: bool,
         _max_turns: usize,
         _max_tool_calls: usize,
-    ) -> Result<Vec<Finding>, ProviderError> {
-        Ok(self.canned_findings.clone())
+    ) -> Result<ReviewOutcome, ProviderError> {
+        Ok(ReviewOutcome {
+            findings: self.canned_findings.clone(),
+            tokens: Default::default(),
+        })
     }
 
     async fn triage(
         &self,
         _system_prompt: &str,
         _user_prompt: &str,
-    ) -> Result<Vec<TriageVerdict>, ProviderError> {
-        Ok(Vec::new())
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(TriageOutcome::default())
+    }
+}
+
+/// A mock review provider that returns canned findings AND a fixed token usage
+/// per call, so the orchestrator's per-run aggregation can be observed.
+struct UsageMockProvider {
+    findings: Vec<Finding>,
+    tokens_per_call: nitpik::models::TokenUsage,
+}
+
+#[async_trait]
+impl ReviewProvider for UsageMockProvider {
+    async fn review(
+        &self,
+        _agent: &AgentDefinition,
+        _prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<ReviewOutcome, ProviderError> {
+        Ok(ReviewOutcome {
+            findings: self.findings.clone(),
+            tokens: self.tokens_per_call,
+        })
+    }
+
+    async fn triage(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(TriageOutcome::default())
     }
 }
 
@@ -217,6 +254,108 @@ async fn orchestrator_returns_empty_for_no_issues() {
 }
 
 #[tokio::test]
+async fn orchestrator_aggregates_token_usage_across_tasks() {
+    use nitpik::models::TokenUsage;
+
+    // Two files × two agents = 4 tasks. Each task should add the same
+    // per-call usage to the accumulator.
+    let per_call = TokenUsage {
+        input: 100,
+        output: 25,
+        cached_input: 40,
+        cache_creation: 10,
+    };
+    let provider = Arc::new(UsageMockProvider {
+        findings: Vec::new(),
+        tokens_per_call: per_call,
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/a.rs".to_string(), "src/b.rs".to_string()],
+        &["agent-1".to_string(), "agent-2".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
+
+    let context = ReviewContext {
+        diffs: vec![
+            test_diff("src/a.rs", "let x = 1;"),
+            test_diff("src/b.rs", "let y = 2;"),
+        ],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("agent-1"), test_agent("agent-2")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(result.failed_tasks, 0);
+    // 2 files × 2 agents = 4 tasks, each contributing `per_call`.
+    let expected = TokenUsage {
+        input: 400,
+        output: 100,
+        cached_input: 160,
+        cache_creation: 40,
+    };
+    assert_eq!(result.tokens, expected);
+    // Sanity: total() and cache_hit_ratio() reflect the sum.
+    assert_eq!(result.tokens.total(), 500);
+    assert!((result.tokens.cache_hit_ratio() - 0.4).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn orchestrator_zero_tokens_when_all_failed() {
+    // FailingProvider always returns Err; each task records a failure
+    // and contributes zero tokens to the accumulator.
+    let provider = Arc::new(FailingProvider);
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/a.rs".to_string()],
+        &["agent-1".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/a.rs", "let x = 1;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("agent-1")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(result.failed_tasks, 1);
+    assert_eq!(result.tokens, nitpik::models::TokenUsage::default());
+}
+
+#[tokio::test]
 async fn orchestrator_errors_on_empty_diffs() {
     let provider = Arc::new(MockProvider::empty());
     let config = Config::default();
@@ -360,7 +499,7 @@ impl ReviewProvider for FailingProvider {
         _agentic: bool,
         _max_turns: usize,
         _max_tool_calls: usize,
-    ) -> Result<Vec<Finding>, ProviderError> {
+    ) -> Result<ReviewOutcome, ProviderError> {
         Err(ProviderError::ApiError("mock API failure".to_string()))
     }
 
@@ -368,7 +507,7 @@ impl ReviewProvider for FailingProvider {
         &self,
         _system_prompt: &str,
         _user_prompt: &str,
-    ) -> Result<Vec<TriageVerdict>, ProviderError> {
+    ) -> Result<TriageOutcome, ProviderError> {
         Err(ProviderError::ApiError("mock API failure".to_string()))
     }
 }
@@ -429,17 +568,20 @@ async fn cache_prevents_duplicate_calls() {
             _agentic: bool,
             _max_turns: usize,
             _max_tool_calls: usize,
-        ) -> Result<Vec<Finding>, ProviderError> {
+        ) -> Result<ReviewOutcome, ProviderError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
-            Ok(self.findings.clone())
+            Ok(ReviewOutcome {
+                findings: self.findings.clone(),
+                tokens: Default::default(),
+            })
         }
 
         async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<Vec<TriageVerdict>, ProviderError> {
-            Ok(Vec::new())
+        ) -> Result<TriageOutcome, ProviderError> {
+            Ok(TriageOutcome::default())
         }
     }
 
@@ -527,7 +669,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
             _agentic: bool,
             _max_turns: usize,
             _max_tool_calls: usize,
-        ) -> Result<Vec<Finding>, ProviderError> {
+        ) -> Result<ReviewOutcome, ProviderError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             self.captured_prompts
                 .lock()
@@ -535,9 +677,15 @@ async fn prior_findings_injected_on_cache_invalidation() {
                 .push(prompt.to_string());
 
             if prompt.contains("Previous Review Findings") {
-                Ok(self.followup_findings.clone())
+                Ok(ReviewOutcome {
+                    findings: self.followup_findings.clone(),
+                    tokens: Default::default(),
+                })
             } else {
-                Ok(self.initial_findings.clone())
+                Ok(ReviewOutcome {
+                    findings: self.initial_findings.clone(),
+                    tokens: Default::default(),
+                })
             }
         }
 
@@ -545,8 +693,8 @@ async fn prior_findings_injected_on_cache_invalidation() {
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<Vec<TriageVerdict>, ProviderError> {
-            Ok(Vec::new())
+        ) -> Result<TriageOutcome, ProviderError> {
+            Ok(TriageOutcome::default())
         }
     }
 
@@ -751,21 +899,24 @@ async fn no_prior_context_flag_suppresses_injection() {
             _agentic: bool,
             _max_turns: usize,
             _max_tool_calls: usize,
-        ) -> Result<Vec<Finding>, ProviderError> {
+        ) -> Result<ReviewOutcome, ProviderError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             self.captured_prompts
                 .lock()
                 .unwrap()
                 .push(prompt.to_string());
-            Ok(vec![])
+            Ok(ReviewOutcome {
+                findings: vec![],
+                tokens: Default::default(),
+            })
         }
 
         async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<Vec<TriageVerdict>, ProviderError> {
-            Ok(Vec::new())
+        ) -> Result<TriageOutcome, ProviderError> {
+            Ok(TriageOutcome::default())
         }
     }
 
@@ -900,26 +1051,29 @@ async fn custom_tools_appear_in_agentic_prompt() {
             _agentic: bool,
             _max_turns: usize,
             _max_tool_calls: usize,
-        ) -> Result<Vec<Finding>, ProviderError> {
+        ) -> Result<ReviewOutcome, ProviderError> {
             self.prompts.lock().unwrap().push(prompt.to_string());
-            Ok(vec![Finding {
-                file: "src/app.rs".to_string(),
-                line: 2,
-                end_line: None,
-                severity: Severity::Info,
-                title: "Style nit".to_string(),
-                message: "Minor style issue.".to_string(),
-                suggestion: None,
-                agent: "tool-agent".to_string(),
-            }])
+            Ok(ReviewOutcome {
+                findings: vec![Finding {
+                    file: "src/app.rs".to_string(),
+                    line: 2,
+                    end_line: None,
+                    severity: Severity::Info,
+                    title: "Style nit".to_string(),
+                    message: "Minor style issue.".to_string(),
+                    suggestion: None,
+                    agent: "tool-agent".to_string(),
+                }],
+                tokens: Default::default(),
+            })
         }
 
         async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<Vec<TriageVerdict>, ProviderError> {
-            Ok(Vec::new())
+        ) -> Result<TriageOutcome, ProviderError> {
+            Ok(TriageOutcome::default())
         }
     }
 
@@ -1022,26 +1176,29 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
             _agentic: bool,
             _max_turns: usize,
             _max_tool_calls: usize,
-        ) -> Result<Vec<Finding>, ProviderError> {
+        ) -> Result<ReviewOutcome, ProviderError> {
             self.prompts.lock().unwrap().push(prompt.to_string());
-            Ok(vec![Finding {
-                file: "src/app.rs".to_string(),
-                line: 2,
-                end_line: None,
-                severity: Severity::Info,
-                title: "Style nit".to_string(),
-                message: "Minor.".to_string(),
-                suggestion: None,
-                agent: "tool-agent".to_string(),
-            }])
+            Ok(ReviewOutcome {
+                findings: vec![Finding {
+                    file: "src/app.rs".to_string(),
+                    line: 2,
+                    end_line: None,
+                    severity: Severity::Info,
+                    title: "Style nit".to_string(),
+                    message: "Minor.".to_string(),
+                    suggestion: None,
+                    agent: "tool-agent".to_string(),
+                }],
+                tokens: Default::default(),
+            })
         }
 
         async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<Vec<TriageVerdict>, ProviderError> {
-            Ok(Vec::new())
+        ) -> Result<TriageOutcome, ProviderError> {
+            Ok(TriageOutcome::default())
         }
     }
 
@@ -1210,16 +1367,22 @@ impl ReviewProvider for TriageMockProvider {
         _agentic: bool,
         _max_turns: usize,
         _max_tool_calls: usize,
-    ) -> Result<Vec<Finding>, ProviderError> {
-        Ok(vec![])
+    ) -> Result<ReviewOutcome, ProviderError> {
+        Ok(ReviewOutcome {
+            findings: vec![],
+            tokens: Default::default(),
+        })
     }
 
     async fn triage(
         &self,
         _system_prompt: &str,
         _user_prompt: &str,
-    ) -> Result<Vec<TriageVerdict>, ProviderError> {
-        Ok(self.verdicts.clone())
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(TriageOutcome {
+            verdicts: self.verdicts.clone(),
+            tokens: Default::default(),
+        })
     }
 }
 
