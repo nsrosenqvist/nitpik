@@ -128,6 +128,7 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 
 ### Git
 
+- Conventional commits
 - Imperative mood, <72 char subject line.
 - One logical change per commit.
 

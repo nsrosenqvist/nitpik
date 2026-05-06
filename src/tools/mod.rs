@@ -17,6 +17,7 @@
 //! summary can show what the LLM explored. Tools call
 //! [`ToolCallLog::record`] at the start of their `call()` method.
 
+pub mod budget;
 pub mod custom_command;
 pub mod format;
 pub mod list_directory;

@@ -200,6 +200,9 @@ impl Tool for CustomCommandTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if let Err(msg) = crate::tools::budget::try_consume(&self.tool_name) {
+            return Err(CustomCommandError(msg));
+        }
         let unknown_params = self.validate_params(&args.params)?;
 
         let full_command = self.build_command(&args.params);

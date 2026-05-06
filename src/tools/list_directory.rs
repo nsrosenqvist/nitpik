@@ -89,6 +89,9 @@ impl Tool for ListDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if let Err(msg) = crate::tools::budget::try_consume("list_directory") {
+            return Err(ListDirectoryError(msg));
+        }
         let start = crate::tools::start_tool_call();
         let listing = list_directory(&self.repo_root, &args.path)
             .await

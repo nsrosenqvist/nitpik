@@ -9,6 +9,7 @@
 //! multi-turn codebase exploration via rig-core's native tool calling.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use rig::client::CompletionClient;
@@ -21,6 +22,7 @@ use crate::models::agent::CustomToolDefinition;
 use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
 use crate::providers::response::{parse_findings_response, parse_with_fallbacks};
+use crate::tools::budget::ToolBudget;
 use crate::tools::{CustomCommandTool, ListDirectoryTool, ReadFileTool, SearchTextTool};
 
 use super::{ProviderError, ReviewProvider, TriageVerdict};
@@ -44,6 +46,10 @@ struct AgenticConfig {
     repo_root: PathBuf,
     max_turns: usize,
     custom_tools: Vec<CustomCommandTool>,
+    /// Hard cap on tool calls scoped to this single review task.
+    /// `0` disables enforcement (the budget is still installed so
+    /// observers like the audit log can read `used()`).
+    tool_budget: Arc<ToolBudget>,
 }
 
 /// Per-call inputs for [`dispatch_review`].
@@ -111,7 +117,11 @@ where
         }
 
         let agent = builder.default_max_turns(cfg.max_turns).build();
-        ("agentic error", agent.prompt(user_prompt).await)
+        let budget = cfg.tool_budget.clone();
+        let response =
+            crate::tools::budget::scope(budget, async move { agent.prompt(user_prompt).await })
+                .await;
+        ("agentic error", response)
     } else {
         let agent = client
             .agent(model)
@@ -329,7 +339,7 @@ impl ReviewProvider for RigProvider {
         prompt: &str,
         agentic: bool,
         max_turns: usize,
-        _max_tool_calls: usize,
+        max_tool_calls: usize,
     ) -> Result<Vec<Finding>, ProviderError> {
         let model = agent
             .profile
@@ -364,6 +374,7 @@ impl ReviewProvider for RigProvider {
                     repo_root: self.repo_root.clone(),
                     max_turns,
                     custom_tools,
+                    tool_budget: ToolBudget::new(max_tool_calls),
                 }),
             )
         } else {

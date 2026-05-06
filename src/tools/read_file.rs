@@ -113,6 +113,9 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if let Err(msg) = crate::tools::budget::try_consume("read_file") {
+            return Err(ReadFileError(msg));
+        }
         let start = crate::tools::start_tool_call();
         let result = read_file(&self.repo_root, &args.path, args.start_line, args.end_line).await;
         let range_suffix = match (args.start_line, args.end_line) {
@@ -539,5 +542,53 @@ mod tests {
         fn fits_for_test(&self) -> bool {
             !self.truncated
         }
+    }
+
+    #[tokio::test]
+    async fn tool_call_respects_budget() {
+        use crate::tools::budget::{ToolBudget, scope};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
+        let tool = ReadFileTool::new(dir.path().to_path_buf());
+
+        let budget = ToolBudget::new(2);
+        scope(budget, async move {
+            // First two calls succeed.
+            let _ = Tool::call(
+                &tool,
+                ReadFileArgs {
+                    path: "a.txt".to_string(),
+                    start_line: None,
+                    end_line: None,
+                },
+            )
+            .await
+            .unwrap();
+            let _ = Tool::call(
+                &tool,
+                ReadFileArgs {
+                    path: "a.txt".to_string(),
+                    start_line: None,
+                    end_line: None,
+                },
+            )
+            .await
+            .unwrap();
+
+            // Third call rejected.
+            let err = Tool::call(
+                &tool,
+                ReadFileArgs {
+                    path: "a.txt".to_string(),
+                    start_line: None,
+                    end_line: None,
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(format!("{err}").contains("tool budget exhausted"));
+        })
+        .await;
     }
 }

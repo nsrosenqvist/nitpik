@@ -125,6 +125,9 @@ impl Tool for SearchTextTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if let Err(msg) = crate::tools::budget::try_consume("search_text") {
+            return Err(SearchTextError(msg));
+        }
         let start = crate::tools::start_tool_call();
         let outcome = search_text(&self.repo_root, &args.pattern, args.is_regex)
             .await
