@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::models::agent::CustomToolDefinition;
+use crate::tools::format::format_byte_size;
 
 /// Maximum output size from a custom command (256KB).
 const MAX_OUTPUT_SIZE: usize = 256 * 1024;
@@ -280,24 +281,19 @@ impl CustomCommandTool {
             );
         }
 
-        // Truncate very large outputs
+        // Truncate very large outputs and tell the LLM exactly what
+        // happened so it can re-run with a narrower invocation.
         if result.len() > MAX_OUTPUT_SIZE {
+            let original_len = result.len();
             result.truncate(MAX_OUTPUT_SIZE);
-            result.push_str("\n... [output truncated]");
+            result.push_str(&format!(
+                "\n... [output truncated: showing {} of {}; re-run with a narrower scope to see more]",
+                format_byte_size(MAX_OUTPUT_SIZE),
+                format_byte_size(original_len),
+            ));
         }
 
         result
-    }
-}
-
-/// Format a byte count as a human-readable size string.
-fn format_byte_size(bytes: usize) -> String {
-    if bytes < 1024 {
-        format!("{bytes}B")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1}KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }
 

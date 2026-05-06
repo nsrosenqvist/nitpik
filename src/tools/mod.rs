@@ -18,6 +18,7 @@
 //! [`ToolCallLog::record`] at the start of their `call()` method.
 
 pub mod custom_command;
+pub mod format;
 pub mod list_directory;
 pub mod read_file;
 pub mod search_text;

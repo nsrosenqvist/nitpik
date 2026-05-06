@@ -9,6 +9,16 @@ use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::tools::format::format_byte_size;
+
+/// Maximum number of entries returned in a single listing.
+///
+/// Large directories (e.g. `node_modules`) would otherwise dump
+/// thousands of names into the LLM's context. The cap keeps responses
+/// predictable; the truncation footer tells the model exactly how
+/// many were dropped.
+const MAX_ENTRIES: usize = 200;
+
 /// Arguments for the list_directory tool.
 #[derive(Debug, Deserialize)]
 pub struct ListDirectoryArgs {
@@ -27,7 +37,7 @@ fn default_path() -> String {
 pub struct ListDirectoryError(pub String);
 
 /// A directory entry.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DirEntry {
     pub name: String,
     pub is_dir: bool,
@@ -56,10 +66,15 @@ impl Tool for ListDirectoryTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "list_directory".to_string(),
-            description: "List the contents of a directory in the repository. \
-                Returns file and subdirectory names with sizes. \
-                Useful for understanding project structure."
-                .to_string(),
+            description: format!(
+                "List the contents of a directory in the repository. \
+                 Returns subdirectories first (suffixed with `/`), then \
+                 files with sizes. Hidden entries (names starting with \
+                 `.`) are skipped. Up to {MAX_ENTRIES} entries are \
+                 returned per call; if the directory has more, the \
+                 listing is truncated and a footer reports the total. \
+                 Useful for understanding project structure."
+            ),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -75,46 +90,73 @@ impl Tool for ListDirectoryTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let start = crate::tools::start_tool_call();
-        let entries = list_directory(&self.repo_root, &args.path)
+        let listing = list_directory(&self.repo_root, &args.path)
             .await
             .map_err(ListDirectoryError)?;
 
+        let truncated_marker = if listing.truncated {
+            format!(" (+{} more)", listing.total_entries - listing.entries.len())
+        } else {
+            String::new()
+        };
         let result_summary = format!(
-            "{} entr{}",
-            entries.len(),
-            if entries.len() == 1 { "y" } else { "ies" }
+            "{} entr{}{truncated_marker}",
+            listing.entries.len(),
+            if listing.entries.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            }
         );
         crate::tools::finish_tool_call(start, "list_directory", &args.path, result_summary);
 
-        // Format as a readable listing for the LLM
-        if entries.is_empty() {
+        if listing.entries.is_empty() && !listing.truncated {
             return Ok("Directory is empty.".to_string());
         }
 
-        let formatted: Vec<String> = entries
+        let mut formatted: Vec<String> = listing
+            .entries
             .iter()
             .map(|e| {
                 if e.is_dir {
                     format!("{}/", e.name)
                 } else if let Some(size) = e.size {
-                    format!("{} ({} bytes)", e.name, size)
+                    format!("{} ({})", e.name, format_byte_size(size as usize))
                 } else {
                     e.name.clone()
                 }
             })
             .collect();
 
+        if listing.truncated {
+            formatted.push(format!(
+                "... showing {} of {} entries; narrow the path to see more",
+                listing.entries.len(),
+                listing.total_entries,
+            ));
+        }
+
         Ok(formatted.join("\n"))
     }
 }
 
+/// Outcome of a [`list_directory`] call.
+#[derive(Debug, Clone)]
+pub struct DirListing {
+    /// Entries returned (capped at [`MAX_ENTRIES`]), directories first.
+    pub entries: Vec<DirEntry>,
+    /// Total number of (non-hidden) entries in the directory.
+    pub total_entries: usize,
+    /// True when [`MAX_ENTRIES`] was hit.
+    pub truncated: bool,
+}
+
 /// List the contents of a directory in the repository.
 ///
-/// Returns entries sorted with directories first, then files.
-pub async fn list_directory(
-    repo_root: &Path,
-    relative_path: &str,
-) -> Result<Vec<DirEntry>, String> {
+/// Returns entries sorted with directories first, then files. Capped
+/// at [`MAX_ENTRIES`]; the [`DirListing`] reports the true total so
+/// callers can render an honest truncation footer.
+pub async fn list_directory(repo_root: &Path, relative_path: &str) -> Result<DirListing, String> {
     let full_path = repo_root.join(relative_path);
 
     // Security: ensure path is within repo
@@ -130,7 +172,7 @@ pub async fn list_directory(
         return Err(format!("path traversal blocked: {relative_path}"));
     }
 
-    let mut entries = Vec::new();
+    let mut entries: Vec<DirEntry> = Vec::new();
     let mut read_dir = tokio::fs::read_dir(&canonical)
         .await
         .map_err(|e| format!("cannot read directory: {e}"))?;
@@ -158,10 +200,22 @@ pub async fn list_directory(
         entries.push(DirEntry { name, is_dir, size });
     }
 
-    // Sort: directories first, then by name
+    // Sort: directories first, then by name. Done before truncation so
+    // the cap consistently keeps the alphabetically earliest entries
+    // (and prefers directories) regardless of filesystem iteration order.
     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
 
-    Ok(entries)
+    let total_entries = entries.len();
+    let truncated = total_entries > MAX_ENTRIES;
+    if truncated {
+        entries.truncate(MAX_ENTRIES);
+    }
+
+    Ok(DirListing {
+        entries,
+        total_entries,
+        truncated,
+    })
 }
 
 #[cfg(test)]
@@ -175,20 +229,24 @@ mod tests {
         std::fs::write(dir.path().join("file.txt"), "content").unwrap();
         std::fs::write(dir.path().join(".hidden"), "hidden").unwrap();
 
-        let entries = list_directory(dir.path(), ".").await.unwrap();
+        let listing = list_directory(dir.path(), ".").await.unwrap();
 
         // Should have subdir and file.txt, but not .hidden
-        assert_eq!(entries.len(), 2);
-        assert!(entries[0].is_dir); // directories first
-        assert_eq!(entries[0].name, "subdir");
-        assert_eq!(entries[1].name, "file.txt");
+        assert_eq!(listing.entries.len(), 2);
+        assert_eq!(listing.total_entries, 2);
+        assert!(!listing.truncated);
+        assert!(listing.entries[0].is_dir); // directories first
+        assert_eq!(listing.entries[0].name, "subdir");
+        assert_eq!(listing.entries[1].name, "file.txt");
     }
 
     #[tokio::test]
     async fn list_empty_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let entries = list_directory(dir.path(), ".").await.unwrap();
-        assert!(entries.is_empty());
+        let listing = list_directory(dir.path(), ".").await.unwrap();
+        assert!(listing.entries.is_empty());
+        assert_eq!(listing.total_entries, 0);
+        assert!(!listing.truncated);
     }
 
     #[tokio::test]
@@ -207,6 +265,24 @@ mod tests {
             result.unwrap_err().contains("traversal"),
             "should block path traversal"
         );
+    }
+
+    #[tokio::test]
+    async fn list_directory_truncates_at_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create MAX_ENTRIES + 5 files so we know the cap is exercised
+        // without making the test painfully slow on CI.
+        let count = MAX_ENTRIES + 5;
+        for i in 0..count {
+            std::fs::write(dir.path().join(format!("f{i:04}.txt")), "x").unwrap();
+        }
+
+        let listing = list_directory(dir.path(), ".").await.unwrap();
+        assert_eq!(listing.entries.len(), MAX_ENTRIES);
+        assert_eq!(listing.total_entries, count);
+        assert!(listing.truncated);
+        // Sorted alphabetically, first entry is f0000.txt.
+        assert_eq!(listing.entries[0].name, "f0000.txt");
     }
 
     #[tokio::test]
@@ -241,7 +317,28 @@ mod tests {
         .unwrap();
         assert!(result.contains("src/"));
         assert!(result.contains("main.rs"));
-        assert!(result.contains("bytes"));
+        // format_byte_size renders 12 bytes as "12B".
+        assert!(result.contains("12B"));
+    }
+
+    #[tokio::test]
+    async fn call_renders_truncation_footer() {
+        let dir = tempfile::tempdir().unwrap();
+        let count = MAX_ENTRIES + 3;
+        for i in 0..count {
+            std::fs::write(dir.path().join(format!("f{i:04}.txt")), "x").unwrap();
+        }
+
+        let tool = ListDirectoryTool::new(dir.path().to_path_buf());
+        let result = Tool::call(
+            &tool,
+            ListDirectoryArgs {
+                path: ".".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.contains(&format!("showing {MAX_ENTRIES} of {count} entries")));
     }
 
     #[tokio::test]
@@ -250,5 +347,6 @@ mod tests {
         let def = Tool::definition(&tool, String::new()).await;
         assert_eq!(def.name, "list_directory");
         assert!(!def.description.is_empty());
+        assert!(def.description.contains("truncated"));
     }
 }

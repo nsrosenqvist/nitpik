@@ -1247,10 +1247,7 @@ async fn threat_scanner_triage_dismisses_finding() {
     );
 
     // Now triage: dismiss finding #0, confirm finding #1
-    let provider = TriageMockProvider::from_canned(vec![
-        (0, "dismissed"),
-        (1, "confirmed"),
-    ]);
+    let provider = TriageMockProvider::from_canned(vec![(0, "dismissed"), (1, "confirmed")]);
 
     let triaged_findings = nitpik::threat::scan_for_threats(
         &[diff],
