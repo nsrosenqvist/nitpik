@@ -43,6 +43,10 @@ pub struct LoopOutcome {
     /// Set when the loop terminated because the model invoked the
     /// configured [`terminal_tool`](LoopConfig::terminal_tool).
     pub terminated_via_tool: Option<String>,
+    /// True when the loop appended a self-repair correction message
+    /// because the model returned text without calling the terminal
+    /// tool. At most one repair is attempted per run.
+    pub self_repair_attempted: bool,
 }
 
 /// Static configuration for a loop run.
@@ -67,6 +71,12 @@ pub struct LoopConfig {
     /// result, without making another completion call. Used to wire
     /// in the structured-output `submit_findings` tool.
     pub terminal_tool: Option<String>,
+    /// When set, and the model returns a text-only reply without
+    /// having called the [`terminal_tool`], the loop appends a
+    /// synthetic correction message and lets the model retry **once**.
+    /// The correction text is the configured value. Has no effect
+    /// when [`terminal_tool`] is `None`.
+    pub self_repair_message: Option<String>,
 }
 
 impl LoopConfig {
@@ -79,6 +89,7 @@ impl LoopConfig {
             max_turns: max_turns.max(1),
             additional_params: None,
             terminal_tool: None,
+            self_repair_message: None,
         }
     }
 
@@ -91,6 +102,14 @@ impl LoopConfig {
     /// Mark a tool name as terminal: calling it ends the loop.
     pub fn with_terminal_tool(mut self, name: impl Into<String>) -> Self {
         self.terminal_tool = Some(name.into());
+        self
+    }
+
+    /// Enable a single self-repair attempt with the given correction
+    /// message when the model produces text instead of calling the
+    /// terminal tool.
+    pub fn with_self_repair(mut self, message: impl Into<String>) -> Self {
+        self.self_repair_message = Some(message.into());
         self
     }
 }
@@ -116,6 +135,7 @@ where
     let mut history: Vec<Message> = vec![Message::user(user_prompt.clone())];
     let mut usage = Usage::new();
     let mut turns: usize = 0;
+    let mut self_repair_attempted = false;
 
     loop {
         if turns >= config.max_turns {
@@ -128,6 +148,7 @@ where
                 history,
                 turns,
                 terminated_via_tool: None,
+                self_repair_attempted,
             });
         }
 
@@ -167,12 +188,25 @@ where
         let (tool_calls, texts) = partition_choice(&resp.choice);
 
         if tool_calls.is_empty() {
+            // Self-repair: if a terminal tool is configured and the
+            // model emitted text instead of calling it, append a
+            // synthetic correction and let the model retry once.
+            if !self_repair_attempted
+                && config.terminal_tool.is_some()
+                && let Some(repair) = config.self_repair_message.clone()
+                && turns < config.max_turns
+            {
+                self_repair_attempted = true;
+                history.push(Message::user(repair));
+                continue;
+            }
             return Ok(LoopOutcome {
                 final_text: join_texts(&texts),
                 usage,
                 history,
                 turns,
                 terminated_via_tool: None,
+                self_repair_attempted,
             });
         }
 
@@ -219,6 +253,7 @@ where
                 history,
                 turns,
                 terminated_via_tool: Some(name),
+                self_repair_attempted,
             });
         }
     }
@@ -767,6 +802,62 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.terminated_via_tool.as_deref(), Some("finish"));
+        assert_eq!(outcome.turns, 1);
+    }
+
+    #[tokio::test]
+    async fn self_repair_kicks_in_when_text_returned_without_terminal_call() {
+        // Round 1: prose only. Round 2 (after repair): terminal call.
+        let model = MockModel::new(vec![
+            MockTurn::Text("here are my findings: ...".into()),
+            MockTurn::ToolCall {
+                id: "1".into(),
+                name: "finish".into(),
+                args: serde_json::json!({"text": "ok"}),
+            },
+        ]);
+        let cfg = LoopConfig::new("p", 1024, 5)
+            .with_terminal_tool("finish")
+            .with_self_repair("Please call finish.");
+        let outcome = run_agent_loop(model, "go".into(), vec![Arc::new(FinishTool)], cfg)
+            .await
+            .unwrap();
+        assert!(outcome.self_repair_attempted);
+        assert_eq!(outcome.terminated_via_tool.as_deref(), Some("finish"));
+        // History: user, assistant(text), user(repair), assistant(finish call), user(finish result)
+        assert_eq!(outcome.history.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn self_repair_only_attempted_once() {
+        // Two consecutive prose responses → loop bails out without
+        // looping forever, returns the final text + flag set.
+        let model = MockModel::new(vec![
+            MockTurn::Text("first prose".into()),
+            MockTurn::Text("second prose".into()),
+        ]);
+        let cfg = LoopConfig::new("p", 1024, 5)
+            .with_terminal_tool("finish")
+            .with_self_repair("call it!");
+        let outcome = run_agent_loop(model, "go".into(), vec![Arc::new(FinishTool)], cfg)
+            .await
+            .unwrap();
+        assert!(outcome.self_repair_attempted);
+        assert_eq!(outcome.terminated_via_tool, None);
+        assert_eq!(outcome.final_text, "second prose");
+        // Two completion calls made, repair message appended once.
+        assert_eq!(outcome.turns, 2);
+    }
+
+    #[tokio::test]
+    async fn self_repair_disabled_returns_text_immediately() {
+        let model = MockModel::new(vec![MockTurn::Text("just prose".into())]);
+        let cfg = LoopConfig::new("p", 1024, 5).with_terminal_tool("finish");
+        let outcome = run_agent_loop(model, "go".into(), vec![Arc::new(FinishTool)], cfg)
+            .await
+            .unwrap();
+        assert!(!outcome.self_repair_attempted);
+        assert_eq!(outcome.final_text, "just prose");
         assert_eq!(outcome.turns, 1);
     }
 

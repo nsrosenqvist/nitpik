@@ -126,7 +126,13 @@ where
             max_tokens,
             cfg.max_turns,
         )
-        .with_terminal_tool(SUBMIT_FINDINGS_TOOL_NAME);
+        .with_terminal_tool(SUBMIT_FINDINGS_TOOL_NAME)
+        .with_self_repair(
+            "Your previous response did not call the `submit_findings` tool. \
+             Please call `submit_findings` now with your full list of findings, \
+             or with an empty array if there are no issues. Do not write \
+             findings as prose.",
+        );
 
         let budget = cfg.tool_budget.clone();
         let prompt_owned = user_prompt.to_string();
