@@ -7,6 +7,7 @@
 //! matrix behind a single `review()` call — callers never touch
 //! rig-core types directly.
 
+pub mod agent_loop;
 pub mod response;
 pub mod rig;
 

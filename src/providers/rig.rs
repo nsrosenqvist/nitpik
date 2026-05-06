@@ -102,26 +102,33 @@ where
     // The agent builder's type changes once tools are registered
     // (NoToolConfig → WithBuilderTools), so the agentic and non-agentic
     // branches construct separate builders and await independently.
-    let (agent_label, response) = if let Some(cfg) = agentic {
-        let mut builder = client
-            .agent(model)
-            .preamble(system_prompt)
-            .temperature(0.0)
-            .max_tokens(max_tokens)
-            .tool(ReadFileTool::new(cfg.repo_root.clone()))
-            .tool(SearchTextTool::new(cfg.repo_root.clone()))
-            .tool(ListDirectoryTool::new(cfg.repo_root.clone()));
-
+    if let Some(cfg) = agentic {
+        // Build the tool registry once. Each entry is type-erased
+        // through `ToolDyn` so the loop can dispatch by name.
+        let mut tools: Vec<std::sync::Arc<dyn rig::tool::ToolDyn>> = vec![
+            std::sync::Arc::new(ReadFileTool::new(cfg.repo_root.clone())),
+            std::sync::Arc::new(SearchTextTool::new(cfg.repo_root.clone())),
+            std::sync::Arc::new(ListDirectoryTool::new(cfg.repo_root.clone())),
+        ];
         for custom_tool in cfg.custom_tools {
-            builder = builder.tool(custom_tool);
+            tools.push(std::sync::Arc::new(custom_tool));
         }
 
-        let agent = builder.default_max_turns(cfg.max_turns).build();
+        let model_handle = client.completion_model(model);
+        let loop_cfg = super::agent_loop::LoopConfig::new(
+            system_prompt.to_string(),
+            max_tokens,
+            cfg.max_turns,
+        );
+
         let budget = cfg.tool_budget.clone();
-        let response =
-            crate::tools::budget::scope(budget, async move { agent.prompt(user_prompt).await })
-                .await;
-        ("agentic error", response)
+        let prompt_owned = user_prompt.to_string();
+        let outcome = crate::tools::budget::scope(budget, async move {
+            super::agent_loop::run_agent_loop(model_handle, prompt_owned, tools, loop_cfg).await
+        })
+        .await
+        .map_err(|e| ProviderError::ApiError(format!("{label} agentic error: {e}")))?;
+        Ok(outcome.final_text)
     } else {
         let agent = client
             .agent(model)
@@ -130,10 +137,11 @@ where
             .max_tokens(max_tokens)
             .output_schema::<T>()
             .build();
-        ("API error", agent.prompt(user_prompt).await)
-    };
-
-    response.map_err(|e| ProviderError::ApiError(format!("{label} {agent_label}: {e}")))
+        agent
+            .prompt(user_prompt)
+            .await
+            .map_err(|e| ProviderError::ApiError(format!("{label} API error: {e}")))
+    }
 }
 
 /// rig-core based review provider.
