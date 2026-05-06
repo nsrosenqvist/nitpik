@@ -23,7 +23,10 @@ use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
 use crate::providers::response::{parse_findings_response, parse_with_fallbacks};
 use crate::tools::budget::ToolBudget;
-use crate::tools::{CustomCommandTool, ListDirectoryTool, ReadFileTool, SearchTextTool};
+use crate::tools::{
+    CustomCommandTool, ListDirectoryTool, ReadFileTool, SUBMIT_FINDINGS_TOOL_NAME, SearchTextTool,
+    SubmitFindingsTool,
+};
 
 use super::{ProviderError, ReviewProvider, TriageVerdict};
 
@@ -103,9 +106,12 @@ where
     // (NoToolConfig → WithBuilderTools), so the agentic and non-agentic
     // branches construct separate builders and await independently.
     if let Some(cfg) = agentic {
-        // Build the tool registry once. Each entry is type-erased
-        // through `ToolDyn` so the loop can dispatch by name.
+        // The terminal tool is registered first so the LLM sees it
+        // alongside the exploration tools and so call ordering in
+        // logs is deterministic.
+        let (submit_tool, findings_sink) = SubmitFindingsTool::new();
         let mut tools: Vec<std::sync::Arc<dyn rig::tool::ToolDyn>> = vec![
+            std::sync::Arc::new(submit_tool),
             std::sync::Arc::new(ReadFileTool::new(cfg.repo_root.clone())),
             std::sync::Arc::new(SearchTextTool::new(cfg.repo_root.clone())),
             std::sync::Arc::new(ListDirectoryTool::new(cfg.repo_root.clone())),
@@ -119,7 +125,8 @@ where
             system_prompt.to_string(),
             max_tokens,
             cfg.max_turns,
-        );
+        )
+        .with_terminal_tool(SUBMIT_FINDINGS_TOOL_NAME);
 
         let budget = cfg.tool_budget.clone();
         let prompt_owned = user_prompt.to_string();
@@ -128,6 +135,22 @@ where
         })
         .await
         .map_err(|e| ProviderError::ApiError(format!("{label} agentic error: {e}")))?;
+
+        // If the LLM called submit_findings, return its captured
+        // structured payload as JSON so the existing parser takes the
+        // happy path without falling back to text scraping.
+        let captured = findings_sink.lock().expect("findings sink poisoned").take();
+        if let Some(findings) = captured {
+            return serde_json::to_string(&findings).map_err(|e| {
+                ProviderError::ApiError(format!(
+                    "{label} failed to serialize submitted findings: {e}"
+                ))
+            });
+        }
+
+        // No terminal tool call. Fall back to whatever text the model
+        // produced; the caller's parser can still rescue JSON the
+        // model emitted as prose.
         Ok(outcome.final_text)
     } else {
         let agent = client
@@ -502,9 +525,12 @@ fn build_agentic_system_prompt(
         ));
     }
     prompt.push_str(
-        "\n\
-         After exploring, return your findings as a JSON array as described in the \
-         instructions.",
+        "\n## Reporting Findings\n\n\
+         When your review is complete, call the `submit_findings` tool **exactly \
+         once** with your full list of findings. The tool's schema is the \
+         authoritative shape — do not write findings as prose or as JSON in your \
+         message text. If the diff has no issues, call `submit_findings` with an \
+         empty array.\n",
     );
 
     prompt

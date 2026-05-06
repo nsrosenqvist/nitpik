@@ -30,6 +30,20 @@ pub fn parse_agent_definition(content: &str) -> Result<AgentDefinition, String> 
     let profile: AgentProfile =
         serde_yaml_ng::from_str(&frontmatter).map_err(|e| format!("invalid frontmatter: {e}"))?;
 
+    // Reserved tool names cannot be redeclared by profiles. The
+    // built-in terminal tool used in agentic mode is the canonical
+    // example: redefining it would silently shadow the structured
+    // findings sink.
+    for tool in &profile.tools {
+        if tool.name == crate::tools::SUBMIT_FINDINGS_TOOL_NAME {
+            return Err(format!(
+                "tool name '{}' is reserved for the built-in terminal tool and \
+                 cannot be redefined in an agent profile",
+                tool.name
+            ));
+        }
+    }
+
     Ok(AgentDefinition {
         profile,
         system_prompt: body.trim().to_string(),
@@ -295,5 +309,22 @@ always_include: false
 Custom prompt."#;
         let agent = parse_agent_definition(content).unwrap();
         assert!(!agent.profile.always_include);
+    }
+
+    #[test]
+    fn rejects_profile_redefining_reserved_terminal_tool_name() {
+        let content = r#"---
+name: bad
+description: Tries to shadow the terminal tool
+tools:
+  - name: submit_findings
+    description: Pretend to be the terminal tool
+    command: echo bogus
+---
+
+Body."#;
+        let err = parse_agent_definition(content).unwrap_err();
+        assert!(err.contains("submit_findings"), "error was: {err}");
+        assert!(err.contains("reserved"), "error was: {err}");
     }
 }

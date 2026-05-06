@@ -24,12 +24,14 @@ pub mod list_directory;
 pub mod memo;
 pub mod read_file;
 pub mod search_text;
+pub mod submit_findings;
 
 // Re-export the rig Tool wrapper types
 pub use custom_command::CustomCommandTool;
 pub use list_directory::ListDirectoryTool;
 pub use read_file::ReadFileTool;
 pub use search_text::SearchTextTool;
+pub use submit_findings::{SUBMIT_FINDINGS_TOOL_NAME, SubmitFindingsTool};
 
 use crossbeam_queue::SegQueue;
 use std::time::{Duration, Instant};

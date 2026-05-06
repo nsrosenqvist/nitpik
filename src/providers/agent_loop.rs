@@ -40,6 +40,9 @@ pub struct LoopOutcome {
     pub history: Vec<Message>,
     /// Number of completion calls made (one per turn).
     pub turns: usize,
+    /// Set when the loop terminated because the model invoked the
+    /// configured [`terminal_tool`](LoopConfig::terminal_tool).
+    pub terminated_via_tool: Option<String>,
 }
 
 /// Static configuration for a loop run.
@@ -59,6 +62,11 @@ pub struct LoopConfig {
     /// Provider-specific extras forwarded verbatim (e.g. Anthropic
     /// `cache_control` blocks). Sent every turn.
     pub additional_params: Option<Value>,
+    /// Optional terminal tool name. When the model calls a tool with
+    /// this name the loop exits immediately after recording the tool
+    /// result, without making another completion call. Used to wire
+    /// in the structured-output `submit_findings` tool.
+    pub terminal_tool: Option<String>,
 }
 
 impl LoopConfig {
@@ -70,12 +78,19 @@ impl LoopConfig {
             max_tokens,
             max_turns: max_turns.max(1),
             additional_params: None,
+            terminal_tool: None,
         }
     }
 
     /// Attach provider-specific extra params.
     pub fn with_additional_params(mut self, params: Option<Value>) -> Self {
         self.additional_params = params;
+        self
+    }
+
+    /// Mark a tool name as terminal: calling it ends the loop.
+    pub fn with_terminal_tool(mut self, name: impl Into<String>) -> Self {
+        self.terminal_tool = Some(name.into());
         self
     }
 }
@@ -112,6 +127,7 @@ where
                 usage,
                 history,
                 turns,
+                terminated_via_tool: None,
             });
         }
 
@@ -156,8 +172,21 @@ where
                 usage,
                 history,
                 turns,
+                terminated_via_tool: None,
             });
         }
+
+        // Detect terminal tool invocation before execution so we can
+        // surface it deterministically even if the model issues
+        // multiple tool calls in the same turn.
+        let terminal_hit = config.terminal_tool.as_deref().and_then(|term| {
+            tool_calls.iter().find_map(|c| match c {
+                AssistantContent::ToolCall(tc) if tc.function.name == term => {
+                    Some(term.to_string())
+                }
+                _ => None,
+            })
+        });
 
         // Execute every tool call and feed results back.
         let results = execute_tool_calls(&tools, &tool_calls).await;
@@ -177,6 +206,21 @@ where
                 .expect("at least one tool call produced a result"),
         };
         history.push(user_msg);
+
+        if let Some(name) = terminal_hit {
+            // Terminal tool fired: stop the loop without making
+            // another completion call. final_text is the empty string
+            // because the assistant's last action was a tool call;
+            // callers know the structured output is in the tool's
+            // sink.
+            return Ok(LoopOutcome {
+                final_text: String::new(),
+                usage,
+                history,
+                turns,
+                terminated_via_tool: Some(name),
+            });
+        }
     }
 }
 
@@ -447,6 +491,38 @@ mod tests {
         Arc::new(EchoTool)
     }
 
+    /// Mirrors a terminal-tool call shape: trivially succeeds and
+    /// has a different name so the loop can detect it.
+    struct FinishTool;
+
+    #[derive(Debug, Deserialize)]
+    struct FinishArgs {
+        text: String,
+    }
+
+    impl rig::tool::Tool for FinishTool {
+        const NAME: &'static str = "finish";
+        type Error = EchoError;
+        type Args = FinishArgs;
+        type Output = String;
+
+        async fn definition(&self, _prompt: String) -> ToolDefinition {
+            ToolDefinition {
+                name: Self::NAME.to_string(),
+                description: "Signal completion".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                }),
+            }
+        }
+
+        async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+            Ok(format!("finished: {}", args.text))
+        }
+    }
+
     #[tokio::test]
     async fn returns_text_when_no_tool_calls() {
         let model = MockModel::new(vec![MockTurn::Text("hello world".into())]);
@@ -642,6 +718,56 @@ mod tests {
             .unwrap();
         let seen = model.seen_requests.lock().unwrap();
         assert_eq!(seen[0].additional_params, Some(extra));
+    }
+
+    #[tokio::test]
+    async fn terminal_tool_call_ends_loop_immediately() {
+        // Script keeps emitting tool calls forever. If the terminal
+        // tool is not honored, run_agent_loop will hit the script
+        // exhausted error before max_turns.
+        let model = MockModel::new(vec![
+            MockTurn::ToolCall {
+                id: "1".into(),
+                name: "echo".into(),
+                args: serde_json::json!({"text": "explore"}),
+            },
+            MockTurn::ToolCall {
+                id: "2".into(),
+                name: "finish".into(),
+                args: serde_json::json!({"text": "the end"}),
+            },
+            // If terminal handling is broken, the loop would now ask
+            // for another completion and fail with "script exhausted".
+        ]);
+        let cfg = LoopConfig::new("p", 1024, 10).with_terminal_tool("finish");
+        let outcome = run_agent_loop(
+            model,
+            "go".into(),
+            vec![echo_tool(), Arc::new(FinishTool)],
+            cfg,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.terminated_via_tool.as_deref(), Some("finish"));
+        assert_eq!(outcome.turns, 2);
+        assert_eq!(outcome.final_text, "");
+        // History: user, assistant(echo), user(echo result), assistant(finish), user(finish result)
+        assert_eq!(outcome.history.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn terminal_tool_call_in_first_turn_ends_loop() {
+        let model = MockModel::new(vec![MockTurn::ToolCall {
+            id: "1".into(),
+            name: "finish".into(),
+            args: serde_json::json!({"text": "instant"}),
+        }]);
+        let cfg = LoopConfig::new("p", 1024, 10).with_terminal_tool("finish");
+        let outcome = run_agent_loop(model, "go".into(), vec![Arc::new(FinishTool)], cfg)
+            .await
+            .unwrap();
+        assert_eq!(outcome.terminated_via_tool.as_deref(), Some("finish"));
+        assert_eq!(outcome.turns, 1);
     }
 
     /// Ensure compilation: AssistantContent::Reasoning variant exists,
