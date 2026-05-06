@@ -771,6 +771,174 @@ async fn e2e_custom_tool_agentic() {
     );
 }
 
+/// Set up a repo whose changeset reasonably forces use of `read_file`.
+///
+/// The base commit contains a `validator.rs` whose `validate_email` body is
+/// a permissive no-op. The changeset adds `handler.rs` which calls
+/// `validator::validate_email` and gates a privileged DB write on the
+/// returned bool. To responsibly review the new code, the agent has to
+/// inspect what `validate_email` actually does — i.e. invoke `read_file`.
+async fn setup_builtin_tool_repo() -> (PathBuf, tempfile::TempDir) {
+    let tmp = tempfile::Builder::new()
+        .prefix("nitpik-e2e-builtin-tool-")
+        .tempdir_in("/tmp")
+        .expect("failed to create tempdir");
+    let repo = tmp.path().to_path_buf();
+
+    run_git(&repo, &["init"]).await;
+    run_git(&repo, &["config", "user.email", "test@nitpik.dev"]).await;
+    run_git(&repo, &["config", "user.name", "Nitpik E2E"]).await;
+
+    std::fs::create_dir_all(repo.join("src")).expect("create src");
+    std::fs::write(
+        repo.join("src/validator.rs"),
+        "/// Returns true when the input \"looks like\" an email address.\n\
+         pub fn validate_email(input: &str) -> bool {\n\
+         \x20   // TODO: actually validate. For now anything non-empty passes.\n\
+         \x20   !input.is_empty()\n\
+         }\n",
+    )
+    .expect("write validator.rs");
+    // Empty stub so the changeset shows up as a file modification, not an
+    // untracked file (`git diff HEAD` ignores untracked files).
+    std::fs::write(
+        repo.join("src/handler.rs"),
+        "// Subscriber handler. Implementation in progress.\n",
+    )
+    .expect("write handler.rs stub");
+    run_git(&repo, &["add", "."]).await;
+    run_git(&repo, &["commit", "-m", "initial commit"]).await;
+
+    // Changeset: add the real implementation, calling into validator.rs.
+    std::fs::write(
+        repo.join("src/handler.rs"),
+        "use crate::validator;\n\n\
+         /// Persist a new subscriber if the supplied email is valid.\n\
+         pub fn subscribe(email: &str, db: &mut Vec<String>) {\n\
+         \x20   if validator::validate_email(email) {\n\
+         \x20       // Trust the validator and write the email to the DB.\n\
+         \x20       db.push(email.to_string());\n\
+         \x20   }\n\
+         }\n",
+    )
+    .expect("write handler.rs changeset");
+
+    (repo, tmp)
+}
+
+/// E2E: agentic mode must still be able to invoke a built-in tool.
+///
+/// Custom tools and built-in tools both flow through `AgentBuilder::tool(...)`,
+/// but they have distinct concrete types. After the structured-output
+/// migration, [`e2e_custom_tool_agentic`] proves the custom-tool path still
+/// works; this test pins the built-in tool path (`read_file`) so that path
+/// can't silently regress either.
+///
+/// The fixture is constructed so that the diff (a new `handler.rs`)
+/// references `validator::validate_email` from a file that's *not* in the
+/// diff. Properly assessing the new code requires reading the validator —
+/// which means invoking `read_file`.
+#[tokio::test]
+#[ignore]
+async fn e2e_builtin_tool_agentic() {
+    require_api_key!();
+    let config = real_config();
+
+    eprintln!("\n=== E2E: built-in tool agentic (read_file) ===");
+    let (repo, _tmp) = setup_builtin_tool_repo().await;
+
+    use tracing_subscriber::layer::SubscriberExt;
+    let collector = tool_call_layer::ToolCallCollector::default();
+    let tool_spans = Arc::clone(&collector.tool_spans);
+    let subscriber = tracing_subscriber::registry()
+        .with(collector)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(std::io::stderr),
+        )
+        .with(tracing_subscriber::filter::EnvFilter::new("info"));
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let input = InputMode::GitBase("HEAD".to_string());
+    let diffs = get_diffs_owned(&input, &repo).await;
+    assert!(!diffs.is_empty(), "changeset should produce diffs");
+
+    let profiles: Vec<String> = vec!["backend".to_string()];
+    let agent_defs = agents::resolve_profiles(&profiles, None)
+        .await
+        .expect("failed to resolve profiles");
+
+    let baseline =
+        context::build_baseline_context(&repo, &diffs, &config, false, &[], Vec::new()).await;
+    let review_context = ReviewContext {
+        diffs,
+        baseline,
+        repo_root: repo.to_string_lossy().to_string(),
+        is_path_scan: false,
+    };
+
+    let provider: Arc<dyn ReviewProvider> = Arc::new(
+        RigProvider::new(config.provider.clone(), repo.clone()).expect("failed to create provider"),
+    );
+
+    let mut findings = Vec::new();
+    for attempt in 0..3u32 {
+        let cache = CacheEngine::new(false);
+        let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
+        let orchestrator = ReviewOrchestrator::new(
+            Arc::clone(&provider),
+            &config,
+            cache,
+            progress,
+            false,
+            None,
+            String::new(),
+        );
+
+        // agentic=true, max_turns=5, max_tool_calls=10
+        let result = orchestrator
+            .run(&review_context, &agent_defs, 2, true, 5, 10)
+            .await
+            .expect("agentic orchestrator should succeed");
+        findings = result.findings;
+
+        let captured_so_far = tool_spans.lock().unwrap().len();
+        if (result.failed_tasks > 0 || captured_so_far == 0) && attempt < 2 {
+            let backoff = 10 * (attempt + 1);
+            eprintln!(
+                "  ⚠ attempt {} produced {} findings, {} tool calls — retrying in {backoff}s",
+                attempt + 1,
+                findings.len(),
+                captured_so_far,
+            );
+            tool_spans.lock().unwrap().clear();
+            tokio::time::sleep(std::time::Duration::from_secs(backoff as u64)).await;
+            continue;
+        }
+        break;
+    }
+
+    print_findings_summary("builtin-tool/backend", &findings);
+
+    let captured = tool_spans.lock().unwrap();
+    let invoked_read_file = captured
+        .iter()
+        .any(|s| s.contains("read_file") || s.contains("ReadFile"));
+    eprintln!(
+        "  captured {} tool-call event(s): {:?}",
+        captured.len(),
+        captured.iter().take(10).collect::<Vec<_>>()
+    );
+
+    assert!(
+        invoked_read_file,
+        "expected the agent to invoke the built-in `read_file` tool, got events: {:?}",
+        *captured
+    );
+    eprintln!("  ✓ built-in `read_file` tool invocation confirmed");
+}
+
 /// A custom tracing layer that records tool-call events emitted by rig-core.
 ///
 /// rig-core logs `tracing::info!("executed tool {tool_name} ...")` inside an

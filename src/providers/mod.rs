@@ -11,6 +11,8 @@ pub mod response;
 pub mod rig;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::models::AgentDefinition;
@@ -27,6 +29,22 @@ pub enum ProviderError {
 
     #[error("provider not configured: {0}")]
     NotConfigured(String),
+}
+
+/// Raw triage verdict produced by the LLM for a single threat finding.
+///
+/// The classification string is kept as-is so the providers layer does
+/// not depend on the threat module's enum; the consumer normalizes it.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct TriageVerdict {
+    /// Index of the finding in the original list (0-based).
+    pub index: usize,
+    /// One of "confirmed", "dismissed", or "downgraded".
+    pub classification: String,
+    /// Free-form rationale; included to mirror the prompt schema but
+    /// currently unused by callers.
+    #[serde(default)]
+    pub rationale: Option<String>,
 }
 
 /// Trait for LLM-backed code review.
@@ -48,13 +66,13 @@ pub trait ReviewProvider: Send + Sync {
         max_tool_calls: usize,
     ) -> Result<Vec<Finding>, ProviderError>;
 
-    /// Perform a simple one-shot completion (non-agentic, no tool calls).
+    /// Classify threat findings via a single-turn structured-output call.
     ///
-    /// Used for internal tasks like threat triage where the response is
-    /// not a findings array but a custom JSON format.
-    async fn complete(
+    /// Used by the threat scanner's triage step to reclassify pattern
+    /// matches as confirmed, dismissed, or downgraded.
+    async fn triage(
         &self,
         system_prompt: &str,
         user_prompt: &str,
-    ) -> Result<String, ProviderError>;
+    ) -> Result<Vec<TriageVerdict>, ProviderError>;
 }

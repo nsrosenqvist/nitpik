@@ -2,10 +2,18 @@
 //!
 //! Decoupled from provider construction so these concerns can be tested
 //! and reused independently.
+//!
+//! When the provider supports native structured output (rig-core's
+//! `output_schema`), the response should already be valid JSON matching
+//! the requested schema. This module provides a generic fallback parser
+//! used when a provider returns markdown-fenced JSON, JSON with prose
+//! preamble, or otherwise sloppy output despite the schema constraint.
 
 use crate::constants::{INITIAL_BACKOFF, MAX_BACKOFF};
 use crate::models::finding::Finding;
 use crate::providers::ProviderError;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::time::Duration;
 
 /// Maximum length of LLM response text to include in parse error messages.
@@ -68,51 +76,67 @@ pub fn retry_backoff(attempt: u32) -> Duration {
     backoff.min(MAX_BACKOFF)
 }
 
-/// Parse the LLM response text into structured findings.
+/// Generic LLM-response parser with markdown- and prose-tolerant fallbacks.
 ///
-/// With `output_schema` enforcing the JSON schema at the provider level,
-/// the response is expected to be valid JSON. We still handle an empty
-/// response or a `{"findings": [...]}` wrapper gracefully.
+/// With `output_schema` constraining the model at the provider level,
+/// the response is expected to be valid JSON. This helper still tries
+/// several extraction strategies so that providers that wrap output in
+/// markdown fences or prepend prose don't break us:
 ///
-/// Some providers may return JSON wrapped in markdown code fences
-/// (e.g. ```json ... ```), so we extract the inner content first.
-pub fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderError> {
+/// 1. Parse the raw response as `T`.
+/// 2. Find the first `[`/`{` and matching last `]`/`}` and parse that slice.
+/// 3. Strip ` ```json … ``` ` markdown fences and parse the inner content.
+///
+/// Returns the first candidate that deserializes successfully.
+pub fn parse_with_fallbacks<T: DeserializeOwned>(response: &str) -> Result<T, ProviderError> {
     let trimmed = response.trim();
 
     if trimmed.is_empty() {
-        return Ok(Vec::new());
+        return Err(ProviderError::ParseError(
+            "LLM response was empty".to_string(),
+        ));
     }
 
-    // Try the raw text first, then try extracting from markdown fences
-    let candidates = extract_json_candidates(trimmed);
-
-    for candidate in &candidates {
-        // Try parsing as a direct array of findings
-        if let Ok(findings) = serde_json::from_str::<Vec<Finding>>(candidate) {
-            return Ok(trim_finding_fields(findings));
-        }
-
-        // Try parsing as {"findings": [...]}
-        if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(candidate) {
-            if let Some(findings_arr) = wrapper.get("findings") {
-                if let Ok(findings) = serde_json::from_value::<Vec<Finding>>(findings_arr.clone()) {
-                    return Ok(trim_finding_fields(findings));
-                }
-            }
+    for candidate in extract_json_candidates(trimmed) {
+        if let Ok(value) = serde_json::from_str::<T>(&candidate) {
+            return Ok(value);
         }
     }
 
     Err(ProviderError::ParseError(format!(
-        "could not parse LLM response as findings JSON. Response: {}",
+        "could not parse LLM response as JSON. Response: {}",
         &response[..response.len().min(PARSE_ERROR_PREVIEW_LEN)]
     )))
+}
+
+/// Parse the LLM response text into structured findings.
+///
+/// Treats an empty response as zero findings (not an error). Otherwise
+/// runs [`parse_with_fallbacks`] for `Vec<Finding>` first, then for the
+/// `{"findings": [...]}` wrapper shape some providers emit. Trailing
+/// whitespace in string fields is trimmed before returning.
+pub fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderError> {
+    if response.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if let Ok(findings) = parse_with_fallbacks::<Vec<Finding>>(response) {
+        return Ok(trim_finding_fields(findings));
+    }
+
+    #[derive(Deserialize)]
+    struct Wrapper {
+        findings: Vec<Finding>,
+    }
+
+    parse_with_fallbacks::<Wrapper>(response).map(|w| trim_finding_fields(w.findings))
 }
 
 /// Trim trailing whitespace from LLM-generated string fields.
 ///
 /// LLMs occasionally include trailing newlines in finding fields, which
 /// causes extra blank lines in rendered output.
-fn trim_finding_fields(findings: Vec<Finding>) -> Vec<Finding> {
+pub fn trim_finding_fields(findings: Vec<Finding>) -> Vec<Finding> {
     findings
         .into_iter()
         .map(|mut f| {

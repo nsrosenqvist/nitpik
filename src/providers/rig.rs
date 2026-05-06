@@ -8,21 +8,22 @@
 //! In agentic mode (`--agent`), tools are registered with the agent for
 //! multi-turn codebase exploration via rig-core's native tool calling.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use async_trait::async_trait;
 use rig::client::CompletionClient;
 use rig::completion::Prompt;
 use rig::providers;
+use schemars::JsonSchema;
 
 use crate::config::ProviderConfig;
 use crate::models::agent::CustomToolDefinition;
 use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
-use crate::providers::response::parse_findings_response;
+use crate::providers::response::{parse_findings_response, parse_with_fallbacks};
 use crate::tools::{CustomCommandTool, ListDirectoryTool, ReadFileTool, SearchTextTool};
 
-use super::{ProviderError, ReviewProvider};
+use super::{ProviderError, ReviewProvider, TriageVerdict};
 
 /// Maximum tokens per LLM completion response.
 ///
@@ -38,58 +39,91 @@ fn map_client_err<T>(
     result.map_err(|e| ProviderError::ApiError(format!("failed to create {label} client: {e}")))
 }
 
-/// Dispatch a review call through a rig-core client.
-///
-/// In agentic mode, built-in + custom tools are registered with the agent
-/// and the output-schema / max-tokens hints are omitted so the model has
-/// full output budget for tool calls. In non-agentic mode, structured
-/// output and max-tokens are configured directly.
-#[allow(clippy::too_many_arguments)] // Parameters map 1:1 to rig-core API requirements.
-async fn dispatch_review<C: CompletionClient>(
-    client: &C,
-    model: &str,
-    system_prompt: &str,
-    user_prompt: &str,
-    label: &str,
-    agentic: bool,
-    repo_root: &Path,
+/// Tool-using agentic configuration for [`dispatch_review`].
+struct AgenticConfig {
+    repo_root: PathBuf,
     max_turns: usize,
     custom_tools: Vec<CustomCommandTool>,
+}
+
+/// Per-call inputs for [`dispatch_review`].
+///
+/// Bundling these into a struct keeps the per-provider match arms in
+/// [`RigProvider::call`] readable. The schema type is supplied as a
+/// type parameter at the call site (`call::<Vec<Finding>>(...)`) and
+/// constrains the LLM's final response. Sent to providers that support
+/// native structured outputs (Anthropic, OpenAI, Gemini, …); ignored
+/// by providers that don't, in which case the response parser handles
+/// markdown-fenced or prose-prefixed JSON.
+struct CallArgs<'a> {
+    model: &'a str,
+    system_prompt: &'a str,
+    user_prompt: &'a str,
+    label: &'a str,
+    /// Per-call token budget for the final response.
+    max_tokens: u64,
+    /// When `Some`, the agent registers tools and runs multi-turn.
+    agentic: Option<AgenticConfig>,
+}
+
+/// Dispatch a single LLM call through a rig-core client.
+///
+/// In non-agentic mode the agent is built with `output_schema::<T>()`,
+/// so providers that support native structured output constrain the
+/// response server-side. In agentic mode the schema is **not** set
+/// because at least Gemini rejects function calling combined with a
+/// JSON response mime type ("Function calling with a response mime
+/// type: 'application/json' is unsupported"); other providers may
+/// silently ignore it. The agentic prompt itself instructs the LLM to
+/// return JSON, and [`parse_with_fallbacks`] handles markdown-fenced
+/// or prose-prefixed responses.
+async fn dispatch_review<C: CompletionClient, T: JsonSchema>(
+    client: &C,
+    args: CallArgs<'_>,
 ) -> Result<String, ProviderError>
 where
     <C as CompletionClient>::CompletionModel: 'static,
 {
-    if agentic {
+    let CallArgs {
+        model,
+        system_prompt,
+        user_prompt,
+        label,
+        max_tokens,
+        agentic,
+    } = args;
+
+    // The agent builder's type changes once tools are registered
+    // (NoToolConfig → WithBuilderTools), so the agentic and non-agentic
+    // branches construct separate builders and await independently.
+    let (agent_label, response) = if let Some(cfg) = agentic {
         let mut builder = client
             .agent(model)
             .preamble(system_prompt)
             .temperature(0.0)
-            .tool(ReadFileTool::new(repo_root.to_path_buf()))
-            .tool(SearchTextTool::new(repo_root.to_path_buf()))
-            .tool(ListDirectoryTool::new(repo_root.to_path_buf()));
+            .max_tokens(max_tokens)
+            .tool(ReadFileTool::new(cfg.repo_root.clone()))
+            .tool(SearchTextTool::new(cfg.repo_root.clone()))
+            .tool(ListDirectoryTool::new(cfg.repo_root.clone()));
 
-        for custom_tool in custom_tools {
+        for custom_tool in cfg.custom_tools {
             builder = builder.tool(custom_tool);
         }
 
-        let agent = builder.default_max_turns(max_turns).build();
-        agent
-            .prompt(user_prompt)
-            .await
-            .map_err(|e| ProviderError::ApiError(format!("{label} agentic error: {e}")))
+        let agent = builder.default_max_turns(cfg.max_turns).build();
+        ("agentic error", agent.prompt(user_prompt).await)
     } else {
         let agent = client
             .agent(model)
             .preamble(system_prompt)
             .temperature(0.0)
-            .max_tokens(MAX_TOKENS)
-            .output_schema::<Vec<Finding>>()
+            .max_tokens(max_tokens)
+            .output_schema::<T>()
             .build();
-        agent
-            .prompt(user_prompt)
-            .await
-            .map_err(|e| ProviderError::ApiError(format!("{label} API error: {e}")))
-    }
+        ("API error", agent.prompt(user_prompt).await)
+    };
+
+    response.map_err(|e| ProviderError::ApiError(format!("{label} {agent_label}: {e}")))
 }
 
 /// rig-core based review provider.
@@ -154,38 +188,17 @@ impl RigProvider {
 
     /// Make a completion call through rig-core, dispatching on provider once.
     ///
-    /// In agentic mode, tools are registered with the agent for multi-turn
-    /// codebase exploration. `max_turns` and `custom_tools` are only used
-    /// when `agentic` is true.
-    async fn call(
-        &self,
-        model: &str,
-        system_prompt: &str,
-        user_prompt: &str,
-        agentic: bool,
-        max_turns: usize,
-        custom_tools: Vec<CustomCommandTool>,
-    ) -> Result<String, ProviderError> {
+    /// `T` is the JSON-schema-deriving type that constrains the model's
+    /// final response (e.g. `Vec<Finding>` for review,
+    /// `Vec<TriageVerdict>` for triage). Each match arm constructs the
+    /// concrete provider client and forwards to [`dispatch_review`].
+    async fn call<T: JsonSchema>(&self, args: CallArgs<'_>) -> Result<String, ProviderError> {
         // Ollama does not require an API key; all other providers do.
         let api_key = if self.config.name == ProviderName::Ollama {
             self.config.api_key.as_deref().unwrap_or("")
         } else {
             self.api_key()?
         };
-
-        // Helper closure: dispatch to the generic review function after
-        // creating a provider-specific client.  Each match arm creates
-        // its concrete client and the generic `dispatch_review` handles
-        // agent building, tool registration, and prompting.
-        let args = (
-            model,
-            system_prompt,
-            user_prompt,
-            agentic,
-            &self.repo_root,
-            max_turns,
-            custom_tools,
-        );
 
         match self.config.name {
             ProviderName::Anthropic => {
@@ -195,137 +208,66 @@ impl RigProvider {
                         .build(),
                     "Anthropic",
                 )?;
-                dispatch_review(
-                    &client,
-                    args.0,
-                    args.1,
-                    args.2,
-                    "Anthropic",
-                    args.3,
-                    args.4,
-                    args.5,
-                    args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::OpenAI => {
                 let client = self.build_openai_client(api_key)?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "OpenAI", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Cohere => {
                 let client: providers::cohere::Client =
                     map_client_err(providers::cohere::Client::new(api_key), "Cohere")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Cohere", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Gemini => {
                 let client: providers::gemini::Client =
                     map_client_err(providers::gemini::Client::new(api_key), "Gemini")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Gemini", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Perplexity => {
                 let client: providers::perplexity::Client =
                     map_client_err(providers::perplexity::Client::new(api_key), "Perplexity")?;
-                dispatch_review(
-                    &client,
-                    args.0,
-                    args.1,
-                    args.2,
-                    "Perplexity",
-                    args.3,
-                    args.4,
-                    args.5,
-                    args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::DeepSeek => {
                 let client: providers::deepseek::Client =
                     map_client_err(providers::deepseek::Client::new(api_key), "DeepSeek")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "DeepSeek", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::XAI => {
                 let client: providers::xai::Client =
                     map_client_err(providers::xai::Client::new(api_key), "xAI")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "xAI", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Groq => {
                 let client: providers::groq::Client =
                     map_client_err(providers::groq::Client::new(api_key), "Groq")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Groq", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::HuggingFace => {
                 let client: providers::huggingface::Client =
                     map_client_err(providers::huggingface::Client::new(api_key), "HuggingFace")?;
-                dispatch_review(
-                    &client,
-                    args.0,
-                    args.1,
-                    args.2,
-                    "HuggingFace",
-                    args.3,
-                    args.4,
-                    args.5,
-                    args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Hyperbolic => {
                 let client: providers::hyperbolic::Client =
                     map_client_err(providers::hyperbolic::Client::new(api_key), "Hyperbolic")?;
-                dispatch_review(
-                    &client,
-                    args.0,
-                    args.1,
-                    args.2,
-                    "Hyperbolic",
-                    args.3,
-                    args.4,
-                    args.5,
-                    args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Mira => {
                 let client: providers::mira::Client =
                     map_client_err(providers::mira::Client::new(api_key), "Mira")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Mira", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Mistral => {
                 let client: providers::mistral::Client =
                     map_client_err(providers::mistral::Client::new(api_key), "Mistral")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Mistral", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Moonshot => {
                 let client: providers::moonshot::Client =
                     map_client_err(providers::moonshot::Client::new(api_key), "Moonshot")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Moonshot", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Ollama => {
                 let mut builder =
@@ -334,34 +276,17 @@ impl RigProvider {
                     builder = builder.base_url(base_url);
                 }
                 let client: providers::ollama::Client = map_client_err(builder.build(), "Ollama")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Ollama", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::OpenRouter => {
                 let client: providers::openrouter::Client =
                     map_client_err(providers::openrouter::Client::new(api_key), "OpenRouter")?;
-                dispatch_review(
-                    &client,
-                    args.0,
-                    args.1,
-                    args.2,
-                    "OpenRouter",
-                    args.3,
-                    args.4,
-                    args.5,
-                    args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Together => {
                 let client: providers::together::Client =
                     map_client_err(providers::together::Client::new(api_key), "Together")?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Together", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Azure => {
                 let base_url = self.require_base_url()?;
@@ -374,26 +299,12 @@ impl RigProvider {
                         .build(),
                     "Azure",
                 )?;
-                dispatch_review(
-                    &client, args.0, args.1, args.2, "Azure", args.3, args.4, args.5, args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::Galadriel => {
                 let client: providers::galadriel::Client =
                     map_client_err(providers::galadriel::Client::new(api_key), "Galadriel")?;
-                dispatch_review(
-                    &client,
-                    args.0,
-                    args.1,
-                    args.2,
-                    "Galadriel",
-                    args.3,
-                    args.4,
-                    args.5,
-                    args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
             ProviderName::OpenAICompatible => {
                 let base_url = self.require_base_url()?;
@@ -404,18 +315,7 @@ impl RigProvider {
                         .build(),
                     "OpenAI-compatible",
                 )?;
-                dispatch_review(
-                    &client,
-                    args.0,
-                    args.1,
-                    args.2,
-                    "OpenAI-compatible",
-                    args.3,
-                    args.4,
-                    args.5,
-                    args.6,
-                )
-                .await
+                dispatch_review::<_, T>(&client, args).await
             }
         }
     }
@@ -437,8 +337,8 @@ impl ReviewProvider for RigProvider {
             .as_deref()
             .unwrap_or_else(|| self.config.resolved_model());
 
-        let result = if agentic {
-            // Build custom command tools from the agent profile
+        let agentic_system_prompt;
+        let (system_prompt, agentic_cfg) = if agentic {
             let custom_tools: Vec<CustomCommandTool> = agent
                 .profile
                 .tools
@@ -452,48 +352,59 @@ impl ReviewProvider for RigProvider {
                 })
                 .collect();
 
-            // Enhance the system prompt with tool-usage guidance so the
-            // LLM knows it should actively explore before concluding.
-            let agentic_system_prompt = build_agentic_system_prompt(
+            agentic_system_prompt = build_agentic_system_prompt(
                 &agent.system_prompt,
                 &agent.profile.tools,
                 agent.profile.agentic_instructions.as_deref(),
             );
 
-            self.call(
-                model,
-                &agentic_system_prompt,
-                prompt,
-                true,
-                max_turns,
-                custom_tools,
+            (
+                agentic_system_prompt.as_str(),
+                Some(AgenticConfig {
+                    repo_root: self.repo_root.clone(),
+                    max_turns,
+                    custom_tools,
+                }),
             )
-            .await
         } else {
-            self.call(model, &agent.system_prompt, prompt, false, 0, Vec::new())
-                .await
+            (agent.system_prompt.as_str(), None)
         };
 
-        match result {
-            Ok(response) => parse_findings_response(&response),
-            Err(e) => Err(e),
-        }
+        let response = self
+            .call::<Vec<Finding>>(CallArgs {
+                model,
+                system_prompt,
+                user_prompt: prompt,
+                label: "Review",
+                max_tokens: MAX_TOKENS,
+                agentic: agentic_cfg,
+            })
+            .await?;
+
+        parse_findings_response(&response)
     }
 
-    async fn complete(
+    async fn triage(
         &self,
         system_prompt: &str,
         user_prompt: &str,
-    ) -> Result<String, ProviderError> {
-        self.call(
-            self.config.resolved_model(),
-            system_prompt,
-            user_prompt,
-            false,
-            0,
-            Vec::new(),
-        )
-        .await
+    ) -> Result<Vec<TriageVerdict>, ProviderError> {
+        let response = self
+            .call::<Vec<TriageVerdict>>(CallArgs {
+                model: self.config.resolved_model(),
+                system_prompt,
+                user_prompt,
+                label: "Triage",
+                max_tokens: MAX_TOKENS,
+                agentic: None,
+            })
+            .await?;
+
+        if response.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        parse_with_fallbacks::<Vec<TriageVerdict>>(&response)
     }
 }
 

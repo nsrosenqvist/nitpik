@@ -7,10 +7,9 @@
 //! pass through unmodified.
 
 use indexmap::IndexMap;
-use serde::Deserialize;
 
 use crate::models::finding::Severity;
-use crate::providers::ReviewProvider;
+use crate::providers::{ReviewProvider, TriageVerdict as RawVerdict};
 
 use super::scanner::ThreatMatch;
 
@@ -28,12 +27,12 @@ pub async fn triage_findings(
     let prompt = build_triage_prompt(&matches, file_contents);
     let system = system_prompt();
 
-    let response = match provider.complete(&system, &prompt).await {
-        Ok(r) => r,
+    let raw = match provider.triage(&system, &prompt).await {
+        Ok(v) => v,
         Err(_) => return matches, // fail-open
     };
 
-    let verdicts = parse_triage_response(&response);
+    let verdicts = normalize_verdicts(raw);
     if verdicts.is_empty() {
         return matches; // fail-open on unparseable response
     }
@@ -94,7 +93,7 @@ fn extract_context(content: &str, line_no: u32, n: u32) -> String {
     out
 }
 
-// ── Response parsing ────────────────────────────────────────────────
+// ── Verdict normalization ───────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TriageClassification {
@@ -109,28 +108,9 @@ struct TriageVerdict {
     classification: TriageClassification,
 }
 
-#[derive(Deserialize)]
-struct RawVerdict {
-    index: usize,
-    classification: String,
-    #[allow(dead_code)]
-    rationale: Option<String>,
-}
-
-fn parse_triage_response(response: &str) -> Vec<TriageVerdict> {
-    // Strip optional markdown fences
-    let cleaned = response
-        .trim()
-        .strip_prefix("```json")
-        .or_else(|| response.trim().strip_prefix("```"))
-        .unwrap_or(response.trim());
-    let cleaned = cleaned.strip_suffix("```").unwrap_or(cleaned).trim();
-
-    let raw: Vec<RawVerdict> = match serde_json::from_str(cleaned) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-
+/// Map provider-returned [`RawVerdict`]s onto the internal classification
+/// enum. Verdicts with unrecognized classification strings are dropped.
+fn normalize_verdicts(raw: Vec<RawVerdict>) -> Vec<TriageVerdict> {
     raw.into_iter()
         .filter_map(|r| {
             let classification = match r.classification.to_lowercase().as_str() {
@@ -200,14 +180,22 @@ mod tests {
         }
     }
 
+    fn raw(index: usize, classification: &str) -> RawVerdict {
+        RawVerdict {
+            index,
+            classification: classification.to_string(),
+            rationale: None,
+        }
+    }
+
     #[test]
-    fn parse_valid_triage_response() {
-        let json = r#"[
-            {"index": 0, "classification": "confirmed", "rationale": "looks real"},
-            {"index": 1, "classification": "dismissed", "rationale": "false positive"},
-            {"index": 2, "classification": "downgraded", "rationale": "benign usage"}
-        ]"#;
-        let verdicts = parse_triage_response(json);
+    fn normalize_known_classifications() {
+        let raw = vec![
+            raw(0, "confirmed"),
+            raw(1, "dismissed"),
+            raw(2, "downgraded"),
+        ];
+        let verdicts = normalize_verdicts(raw);
         assert_eq!(verdicts.len(), 3);
         assert_eq!(verdicts[0].classification, TriageClassification::Confirmed);
         assert_eq!(verdicts[1].classification, TriageClassification::Dismissed);
@@ -215,21 +203,23 @@ mod tests {
     }
 
     #[test]
-    fn parse_fenced_response() {
-        let json = "```json\n[{\"index\": 0, \"classification\": \"confirmed\", \"rationale\": \"x\"}]\n```";
-        let verdicts = parse_triage_response(json);
+    fn normalize_drops_unknown_classifications() {
+        let raw = vec![raw(0, "confirmed"), raw(1, "wat")];
+        let verdicts = normalize_verdicts(raw);
         assert_eq!(verdicts.len(), 1);
+        assert_eq!(verdicts[0].index, 0);
     }
 
     #[test]
-    fn parse_invalid_response_returns_empty() {
-        let verdicts = parse_triage_response("this is not json");
-        assert!(verdicts.is_empty());
+    fn normalize_handles_mixed_case() {
+        let raw = vec![raw(0, "Confirmed"), raw(1, "DISMISSED")];
+        let verdicts = normalize_verdicts(raw);
+        assert_eq!(verdicts.len(), 2);
     }
 
     #[test]
-    fn parse_empty_response() {
-        let verdicts = parse_triage_response("");
+    fn normalize_empty_input() {
+        let verdicts = normalize_verdicts(Vec::new());
         assert!(verdicts.is_empty());
     }
 

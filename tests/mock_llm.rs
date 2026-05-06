@@ -18,7 +18,7 @@ use nitpik::models::diff::{DiffLine, DiffLineType, FileDiff, Hunk};
 use nitpik::models::finding::{Finding, Severity};
 use nitpik::orchestrator::ReviewOrchestrator;
 use nitpik::progress::ProgressTracker;
-use nitpik::providers::{ProviderError, ReviewProvider};
+use nitpik::providers::{ProviderError, ReviewProvider, TriageVerdict};
 
 /// A mock review provider that returns canned findings.
 struct MockProvider {
@@ -52,12 +52,12 @@ impl ReviewProvider for MockProvider {
         Ok(self.canned_findings.clone())
     }
 
-    async fn complete(
+    async fn triage(
         &self,
         _system_prompt: &str,
         _user_prompt: &str,
-    ) -> Result<String, ProviderError> {
-        Ok(String::new())
+    ) -> Result<Vec<TriageVerdict>, ProviderError> {
+        Ok(Vec::new())
     }
 }
 
@@ -364,11 +364,11 @@ impl ReviewProvider for FailingProvider {
         Err(ProviderError::ApiError("mock API failure".to_string()))
     }
 
-    async fn complete(
+    async fn triage(
         &self,
         _system_prompt: &str,
         _user_prompt: &str,
-    ) -> Result<String, ProviderError> {
+    ) -> Result<Vec<TriageVerdict>, ProviderError> {
         Err(ProviderError::ApiError("mock API failure".to_string()))
     }
 }
@@ -434,12 +434,12 @@ async fn cache_prevents_duplicate_calls() {
             Ok(self.findings.clone())
         }
 
-        async fn complete(
+        async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<String, ProviderError> {
-            Ok(String::new())
+        ) -> Result<Vec<TriageVerdict>, ProviderError> {
+            Ok(Vec::new())
         }
     }
 
@@ -541,12 +541,12 @@ async fn prior_findings_injected_on_cache_invalidation() {
             }
         }
 
-        async fn complete(
+        async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<String, ProviderError> {
-            Ok(String::new())
+        ) -> Result<Vec<TriageVerdict>, ProviderError> {
+            Ok(Vec::new())
         }
     }
 
@@ -760,12 +760,12 @@ async fn no_prior_context_flag_suppresses_injection() {
             Ok(vec![])
         }
 
-        async fn complete(
+        async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<String, ProviderError> {
-            Ok(String::new())
+        ) -> Result<Vec<TriageVerdict>, ProviderError> {
+            Ok(Vec::new())
         }
     }
 
@@ -914,12 +914,12 @@ async fn custom_tools_appear_in_agentic_prompt() {
             }])
         }
 
-        async fn complete(
+        async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<String, ProviderError> {
-            Ok(String::new())
+        ) -> Result<Vec<TriageVerdict>, ProviderError> {
+            Ok(Vec::new())
         }
     }
 
@@ -1036,12 +1036,12 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
             }])
         }
 
-        async fn complete(
+        async fn triage(
             &self,
             _system_prompt: &str,
             _user_prompt: &str,
-        ) -> Result<String, ProviderError> {
-            Ok(String::new())
+        ) -> Result<Vec<TriageVerdict>, ProviderError> {
+            Ok(Vec::new())
         }
     }
 
@@ -1181,9 +1181,24 @@ async fn threat_scanner_detects_multiple_patterns() {
     );
 }
 
-/// Mock provider that returns a canned triage response to dismiss one finding.
+/// Mock provider that returns canned triage verdicts.
 struct TriageMockProvider {
-    triage_response: String,
+    verdicts: Vec<TriageVerdict>,
+}
+
+impl TriageMockProvider {
+    fn from_canned(verdicts: Vec<(usize, &'static str)>) -> Self {
+        Self {
+            verdicts: verdicts
+                .into_iter()
+                .map(|(index, classification)| TriageVerdict {
+                    index,
+                    classification: classification.to_string(),
+                    rationale: None,
+                })
+                .collect(),
+        }
+    }
 }
 
 #[async_trait]
@@ -1199,12 +1214,12 @@ impl ReviewProvider for TriageMockProvider {
         Ok(vec![])
     }
 
-    async fn complete(
+    async fn triage(
         &self,
         _system_prompt: &str,
         _user_prompt: &str,
-    ) -> Result<String, ProviderError> {
-        Ok(self.triage_response.clone())
+    ) -> Result<Vec<TriageVerdict>, ProviderError> {
+        Ok(self.verdicts.clone())
     }
 }
 
@@ -1232,13 +1247,10 @@ async fn threat_scanner_triage_dismisses_finding() {
     );
 
     // Now triage: dismiss finding #0, confirm finding #1
-    let triage_json = r#"[
-        {"index": 0, "classification": "dismissed", "rationale": "test use"},
-        {"index": 1, "classification": "confirmed", "rationale": "real threat"}
-    ]"#;
-    let provider = TriageMockProvider {
-        triage_response: triage_json.to_string(),
-    };
+    let provider = TriageMockProvider::from_canned(vec![
+        (0, "dismissed"),
+        (1, "confirmed"),
+    ]);
 
     let triaged_findings = nitpik::threat::scan_for_threats(
         &[diff],
@@ -1263,15 +1275,12 @@ async fn threat_scanner_triage_downgrades_severity() {
     let file_contents = IndexMap::new();
 
     // Downgrade all findings
-    let triage_json = r#"[
-        {"index": 0, "classification": "downgraded", "rationale": "controlled input"},
-        {"index": 1, "classification": "downgraded", "rationale": "controlled input"},
-        {"index": 2, "classification": "downgraded", "rationale": "controlled input"},
-        {"index": 3, "classification": "downgraded", "rationale": "controlled input"}
-    ]"#;
-    let provider = TriageMockProvider {
-        triage_response: triage_json.to_string(),
-    };
+    let provider = TriageMockProvider::from_canned(vec![
+        (0, "downgraded"),
+        (1, "downgraded"),
+        (2, "downgraded"),
+        (3, "downgraded"),
+    ]);
 
     let findings = nitpik::threat::scan_for_threats(
         &[diff],
