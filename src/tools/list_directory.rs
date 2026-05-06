@@ -20,7 +20,7 @@ use crate::tools::format::format_byte_size;
 const MAX_ENTRIES: usize = 200;
 
 /// Arguments for the list_directory tool.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ListDirectoryArgs {
     /// Relative path to the directory within the repository.
     #[serde(default = "default_path")]
@@ -93,6 +93,16 @@ impl Tool for ListDirectoryTool {
             return Err(ListDirectoryError(msg));
         }
         let start = crate::tools::start_tool_call();
+
+        let memo_key = serde_json::json!({
+            "repo": self.repo_root.display().to_string(),
+            "args": &args,
+        });
+        if let Some(hit) = crate::tools::memo::lookup("list_directory", &memo_key) {
+            crate::tools::finish_tool_call(start, "list_directory", &args.path, "cached");
+            return Ok(hit);
+        }
+
         let listing = list_directory(&self.repo_root, &args.path)
             .await
             .map_err(ListDirectoryError)?;
@@ -114,7 +124,9 @@ impl Tool for ListDirectoryTool {
         crate::tools::finish_tool_call(start, "list_directory", &args.path, result_summary);
 
         if listing.entries.is_empty() && !listing.truncated {
-            return Ok("Directory is empty.".to_string());
+            let body = "Directory is empty.".to_string();
+            crate::tools::memo::store("list_directory", &memo_key, body.clone());
+            return Ok(body);
         }
 
         let mut formatted: Vec<String> = listing
@@ -139,7 +151,9 @@ impl Tool for ListDirectoryTool {
             ));
         }
 
-        Ok(formatted.join("\n"))
+        let body = formatted.join("\n");
+        crate::tools::memo::store("list_directory", &memo_key, body.clone());
+        Ok(body)
     }
 }
 

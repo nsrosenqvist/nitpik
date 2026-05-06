@@ -34,7 +34,7 @@ const SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Arguments for the search_text tool.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchTextArgs {
     /// The text pattern to search for.
     pub pattern: String,
@@ -129,6 +129,21 @@ impl Tool for SearchTextTool {
             return Err(SearchTextError(msg));
         }
         let start = crate::tools::start_tool_call();
+        let args_summary = if args.pattern.len() > 40 {
+            format!("\"{}...\"", &args.pattern[..37])
+        } else {
+            format!("\"{}\"", &args.pattern)
+        };
+
+        let memo_key = serde_json::json!({
+            "repo": self.repo_root.display().to_string(),
+            "args": &args,
+        });
+        if let Some(hit) = crate::tools::memo::lookup("search_text", &memo_key) {
+            crate::tools::finish_tool_call(start, "search_text", args_summary, "cached");
+            return Ok(hit);
+        }
+
         let outcome = search_text(&self.repo_root, &args.pattern, args.is_regex)
             .await
             .map_err(SearchTextError)?;
@@ -150,13 +165,9 @@ impl Tool for SearchTextTool {
             )
         };
 
-        let args_summary = if args.pattern.len() > 40 {
-            format!("\"{}...\"", &args.pattern[..37])
-        } else {
-            format!("\"{}\"", &args.pattern)
-        };
         crate::tools::finish_tool_call(start, "search_text", args_summary, result_summary);
 
+        crate::tools::memo::store("search_text", &memo_key, body.clone());
         Ok(body)
     }
 }

@@ -21,6 +21,7 @@ pub mod budget;
 pub mod custom_command;
 pub mod format;
 pub mod list_directory;
+pub mod memo;
 pub mod read_file;
 pub mod search_text;
 

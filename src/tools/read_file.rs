@@ -38,7 +38,7 @@ const DEFAULT_LINE_BUDGET: usize = DEFAULT_MAX_LINES;
 const OUTPUT_BYTE_BUDGET: usize = DEFAULT_MAX_BYTES;
 
 /// Arguments for the read_file tool.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ReadFileArgs {
     /// Relative path to the file within the repository.
     pub path: String,
@@ -117,6 +117,21 @@ impl Tool for ReadFileTool {
             return Err(ReadFileError(msg));
         }
         let start = crate::tools::start_tool_call();
+
+        let memo_key = serde_json::json!({
+            "repo": self.repo_root.display().to_string(),
+            "args": &args,
+        });
+        if let Some(hit) = crate::tools::memo::lookup("read_file", &memo_key) {
+            crate::tools::finish_tool_call(
+                start,
+                "read_file",
+                &args.path,
+                format!("{} (cached)", format_byte_size(hit.len())),
+            );
+            return Ok(hit);
+        }
+
         let result = read_file(&self.repo_root, &args.path, args.start_line, args.end_line).await;
         let range_suffix = match (args.start_line, args.end_line) {
             (Some(s), Some(e)) => format!(" L{s}-{e}"),
@@ -135,7 +150,14 @@ impl Tool for ReadFileTool {
             Err(e) => format!("error: {e}"),
         };
         crate::tools::finish_tool_call(start, "read_file", &args.path, summary);
-        result.map(|o| o.content).map_err(ReadFileError)
+
+        match result {
+            Ok(output) => {
+                crate::tools::memo::store("read_file", &memo_key, output.content.clone());
+                Ok(output.content)
+            }
+            Err(e) => Err(ReadFileError(e)),
+        }
     }
 }
 
@@ -590,5 +612,48 @@ mod tests {
             assert!(format!("{err}").contains("tool budget exhausted"));
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn tool_call_returns_cached_result_on_repeat() {
+        // Each test gets its own tempdir → unique repo path → no
+        // collision with neighboring tests' memo entries.
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("seed.txt");
+        std::fs::write(&file_path, "first").unwrap();
+
+        let tool = ReadFileTool::new(dir.path().to_path_buf());
+        let args = ReadFileArgs {
+            path: "seed.txt".to_string(),
+            start_line: None,
+            end_line: None,
+        };
+
+        let first = Tool::call(
+            &tool,
+            ReadFileArgs {
+                path: args.path.clone(),
+                start_line: None,
+                end_line: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(first.contains("first"));
+
+        // Mutate the file on disk; a cached call should still return
+        // the original content.
+        std::fs::write(&file_path, "second").unwrap();
+        let second = Tool::call(
+            &tool,
+            ReadFileArgs {
+                path: args.path,
+                start_line: None,
+                end_line: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, second);
     }
 }

@@ -107,6 +107,11 @@ impl ReviewOrchestrator {
             return Err(OrchestratorError::NoDiffs);
         }
 
+        // Clear the cross-task tool-result memo so stale entries from
+        // prior runs (in long-lived processes such as `nitpik watch`
+        // or test harnesses) can't leak into this review.
+        crate::tools::memo::clear();
+
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         let mut join_set = JoinSet::new();
 
