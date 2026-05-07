@@ -333,6 +333,7 @@ async fn build_commit_log(
 }
 
 /// Build the provider, cache engine, and review orchestrator.
+#[allow(clippy::too_many_arguments)]
 async fn create_orchestrator(
     config: &Config,
     repo_root_path: &Path,
@@ -341,6 +342,7 @@ async fn create_orchestrator(
     no_prior_context: bool,
     max_prior_findings: Option<usize>,
     verify: bool,
+    multi_wave: bool,
 ) -> Result<(Arc<dyn ReviewProvider>, orchestrator::ReviewOrchestrator)> {
     let provider: Arc<dyn ReviewProvider> = Arc::new(
         RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
@@ -360,6 +362,7 @@ async fn create_orchestrator(
         max_prior_findings,
         review_scope,
         verify,
+        multi_wave,
     );
     Ok((provider, orchestrator))
 }
@@ -467,6 +470,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         args.no_prior_context,
         args.max_prior_findings,
         args.verify,
+        args.multi_wave,
     )
     .await?;
 

@@ -84,6 +84,9 @@ pub struct ReviewOrchestrator {
     /// When `true`, run a critic pass over deduped findings to drop
     /// probable false positives.
     verify: bool,
+    /// When `true`, profiles with `wave: 2` run after wave 1 and
+    /// receive wave-1 findings as additional context. Off by default.
+    multi_wave: bool,
 }
 
 impl ReviewOrchestrator {
@@ -98,6 +101,7 @@ impl ReviewOrchestrator {
         max_prior_findings: Option<usize>,
         review_scope: String,
         verify: bool,
+        multi_wave: bool,
     ) -> Self {
         Self {
             provider,
@@ -108,6 +112,7 @@ impl ReviewOrchestrator {
             max_prior_findings,
             review_scope,
             verify,
+            multi_wave,
         }
     }
 
@@ -134,120 +139,92 @@ impl ReviewOrchestrator {
         // or test harnesses) can't leak into this review.
         crate::tools::memo::clear();
 
-        let semaphore = Arc::new(Semaphore::new(max_concurrent));
-        let mut join_set = JoinSet::new();
-
-        // Collect all (chunk, agent) tasks, then sort smallest-first so
-        // short tasks fill gaps while large tasks are still running.
-        struct Task<'a> {
-            chunk: crate::models::diff::FileDiff<'a>,
-            agent: AgentDefinition,
-            line_count: usize,
-        }
-        let mut tasks: Vec<Task<'_>> = Vec::new();
-        for agent in agents {
-            for diff in &context.diffs {
-                if diff.is_binary {
-                    continue;
-                }
-                let chunks = chunker::chunk_diff(diff, None);
-                for chunk in chunks {
-                    let line_count: usize = chunk.hunks.iter().map(|h| h.lines.len()).sum();
-                    tasks.push(Task {
-                        chunk,
-                        agent: agent.clone(),
-                        line_count,
-                    });
-                }
-            }
-        }
-        tasks.sort_by_key(|t| t.line_count);
-
         // Static system addendum (project docs + commit log) is
         // identical across every task in this run. Build once and
         // splice into each task's agent system prompt so providers
         // can cache the system prefix.
         let system_addendum = build_system_addendum(context);
 
-        for Task {
-            chunk, mut agent, ..
-        } in tasks
-        {
-            let provider = Arc::clone(&self.provider);
-            let sem = Arc::clone(&semaphore);
-            let cache = Arc::clone(&self.cache);
-            let progress = Arc::clone(&self.progress);
-            let no_prior_context = self.no_prior_context;
-            let max_prior_findings = self.max_prior_findings;
-            let review_scope = self.review_scope.clone();
-            let model = agent
-                .profile
-                .model
-                .as_deref()
-                .unwrap_or_else(|| self.config.provider.resolved_model())
-                .to_string();
-            let file_path = chunk.path().to_string();
+        // Partition agents into waves when --multi-wave is enabled.
+        // Otherwise every agent runs in wave 1.
+        let (wave1_agents, wave2_agents): (Vec<&AgentDefinition>, Vec<&AgentDefinition>) =
+            if self.multi_wave {
+                agents.iter().partition(|a| a.profile.wave <= 1)
+            } else {
+                (agents.iter().collect(), Vec::new())
+            };
 
-            // Augment the per-task agent's system prompt with the
-            // static (run-wide) context. The result remains constant
-            // across every file for the same agent, satisfying the
-            // cacheability requirement.
-            if !system_addendum.is_empty() {
-                if !agent.system_prompt.ends_with("\n\n") {
-                    if agent.system_prompt.ends_with('\n') {
-                        agent.system_prompt.push('\n');
-                    } else {
-                        agent.system_prompt.push_str("\n\n");
-                    }
-                }
-                agent.system_prompt.push_str(&system_addendum);
-            }
-
-            let base_prompt = build_prompt(&chunk, context, &agent, agents, None, agentic);
-            let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
-
-            join_set.spawn(execute_review_task(ReviewTaskParams {
-                provider,
-                cache,
-                progress,
-                sem,
-                file_path,
-                agent,
-                model,
-                cache_key,
-                review_scope,
-                base_prompt,
-                no_prior_context,
-                max_prior_findings,
-                agentic,
-                max_turns,
-                max_tool_calls,
-            }));
-        }
-
-        // Collect results from all tasks
         let mut all_findings: Vec<Finding> = Vec::new();
         let mut failed_count: usize = 0;
         let mut total_tokens = TokenUsage::default();
         let mut tokens_by_model: BTreeMap<String, TokenUsage> = BTreeMap::new();
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok((findings, failed, tokens, model)) => {
-                    all_findings.extend(findings);
-                    total_tokens += tokens;
-                    if tokens.total() > 0 {
-                        *tokens_by_model.entry(model).or_default() += tokens;
-                    }
-                    if failed {
-                        failed_count += 1;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Warning: review task panicked: {e}");
-                    failed_count += 1;
-                }
-            }
+
+        let (w1_findings, w1_failed, w1_tokens, w1_tokens_by_model) = self
+            .dispatch_wave(
+                context,
+                &wave1_agents,
+                agents,
+                &system_addendum,
+                None,
+                max_concurrent,
+                agentic,
+                max_turns,
+                max_tool_calls,
+            )
+            .await;
+        failed_count += w1_failed;
+        total_tokens += w1_tokens;
+        for (m, t) in w1_tokens_by_model {
+            *tokens_by_model.entry(m).or_default() += t;
         }
+
+        if !wave2_agents.is_empty() && !w1_findings.is_empty() {
+            // Build a compact summary of wave-1 findings to feed wave-2
+            // reviewers as extra context.
+            let wave1_summary = format_wave1_summary(&w1_findings);
+            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model) = self
+                .dispatch_wave(
+                    context,
+                    &wave2_agents,
+                    agents,
+                    &system_addendum,
+                    Some(&wave1_summary),
+                    max_concurrent,
+                    agentic,
+                    max_turns,
+                    max_tool_calls,
+                )
+                .await;
+            failed_count += w2_failed;
+            total_tokens += w2_tokens;
+            for (m, t) in w2_tokens_by_model {
+                *tokens_by_model.entry(m).or_default() += t;
+            }
+            all_findings.extend(w2_findings);
+        } else if !wave2_agents.is_empty() {
+            // Wave 1 found nothing; run wave 2 anyway with no addendum.
+            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model) = self
+                .dispatch_wave(
+                    context,
+                    &wave2_agents,
+                    agents,
+                    &system_addendum,
+                    None,
+                    max_concurrent,
+                    agentic,
+                    max_turns,
+                    max_tool_calls,
+                )
+                .await;
+            failed_count += w2_failed;
+            total_tokens += w2_tokens;
+            for (m, t) in w2_tokens_by_model {
+                *tokens_by_model.entry(m).or_default() += t;
+            }
+            all_findings.extend(w2_findings);
+        }
+
+        all_findings.extend(w1_findings);
 
         // Deduplicate findings
         let deduped = dedup::deduplicate(all_findings);
@@ -282,6 +259,187 @@ impl ReviewOrchestrator {
             dropped,
         })
     }
+
+    /// Dispatch a single wave of file×agent tasks and collect results.
+    ///
+    /// `wave_addendum` is appended to each agent's system prompt
+    /// before tasks are spawned. Returns aggregated findings, failure
+    /// count, total tokens, and per-model token breakdown.
+    #[allow(clippy::too_many_arguments)]
+    async fn dispatch_wave(
+        &self,
+        context: &ReviewContext<'_>,
+        wave_agents: &[&AgentDefinition],
+        all_agents: &[AgentDefinition],
+        system_addendum: &str,
+        wave_addendum: Option<&str>,
+        max_concurrent: usize,
+        agentic: bool,
+        max_turns: usize,
+        max_tool_calls: usize,
+    ) -> (
+        Vec<Finding>,
+        usize,
+        TokenUsage,
+        BTreeMap<String, TokenUsage>,
+    ) {
+        if wave_agents.is_empty() {
+            return (Vec::new(), 0, TokenUsage::default(), BTreeMap::new());
+        }
+
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        let mut join_set = JoinSet::new();
+
+        struct Task<'a> {
+            chunk: crate::models::diff::FileDiff<'a>,
+            agent: AgentDefinition,
+            line_count: usize,
+        }
+        let mut tasks: Vec<Task<'_>> = Vec::new();
+        for agent in wave_agents {
+            for diff in &context.diffs {
+                if diff.is_binary {
+                    continue;
+                }
+                let chunks = chunker::chunk_diff(diff, None);
+                for chunk in chunks {
+                    let line_count: usize = chunk.hunks.iter().map(|h| h.lines.len()).sum();
+                    tasks.push(Task {
+                        chunk,
+                        agent: (*agent).clone(),
+                        line_count,
+                    });
+                }
+            }
+        }
+        tasks.sort_by_key(|t| t.line_count);
+
+        for Task {
+            chunk, mut agent, ..
+        } in tasks
+        {
+            let provider = Arc::clone(&self.provider);
+            let sem = Arc::clone(&semaphore);
+            let cache = Arc::clone(&self.cache);
+            let progress = Arc::clone(&self.progress);
+            let no_prior_context = self.no_prior_context;
+            let max_prior_findings = self.max_prior_findings;
+            let review_scope = self.review_scope.clone();
+            let model = agent
+                .profile
+                .model
+                .as_deref()
+                .unwrap_or_else(|| self.config.provider.resolved_model())
+                .to_string();
+            let file_path = chunk.path().to_string();
+
+            // Augment the per-task agent's system prompt with the
+            // static (run-wide) context. The result remains constant
+            // across every file for the same agent, satisfying the
+            // cacheability requirement.
+            if !system_addendum.is_empty() {
+                if !agent.system_prompt.ends_with("\n\n") {
+                    if agent.system_prompt.ends_with('\n') {
+                        agent.system_prompt.push('\n');
+                    } else {
+                        agent.system_prompt.push_str("\n\n");
+                    }
+                }
+                agent.system_prompt.push_str(system_addendum);
+            }
+            // Wave-2 agents also receive the wave-1 findings summary.
+            if let Some(addendum) = wave_addendum {
+                if !agent.system_prompt.ends_with("\n\n") {
+                    if agent.system_prompt.ends_with('\n') {
+                        agent.system_prompt.push('\n');
+                    } else {
+                        agent.system_prompt.push_str("\n\n");
+                    }
+                }
+                agent.system_prompt.push_str(addendum);
+            }
+
+            let base_prompt = build_prompt(&chunk, context, &agent, all_agents, None, agentic);
+            let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
+
+            join_set.spawn(execute_review_task(ReviewTaskParams {
+                provider,
+                cache,
+                progress,
+                sem,
+                file_path,
+                agent,
+                model,
+                cache_key,
+                review_scope,
+                base_prompt,
+                no_prior_context,
+                max_prior_findings,
+                agentic,
+                max_turns,
+                max_tool_calls,
+            }));
+        }
+
+        let mut findings: Vec<Finding> = Vec::new();
+        let mut failed: usize = 0;
+        let mut total_tokens = TokenUsage::default();
+        let mut tokens_by_model: BTreeMap<String, TokenUsage> = BTreeMap::new();
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok((f, fail, tokens, model)) => {
+                    findings.extend(f);
+                    total_tokens += tokens;
+                    if tokens.total() > 0 {
+                        *tokens_by_model.entry(model).or_default() += tokens;
+                    }
+                    if fail {
+                        failed += 1;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Warning: review task panicked: {e}");
+                    failed += 1;
+                }
+            }
+        }
+        (findings, failed, total_tokens, tokens_by_model)
+    }
+}
+
+/// Build a compact summary of wave-1 findings to feed wave-2 reviewers.
+///
+/// Caps both the number of findings included and each finding's
+/// message length so the addendum stays well within the system-prompt
+/// budget even when wave 1 produced hundreds of findings.
+fn format_wave1_summary(findings: &[Finding]) -> String {
+    const MAX_FINDINGS: usize = 30;
+    const MAX_MSG: usize = 240;
+    let mut s = String::with_capacity(findings.len().min(MAX_FINDINGS) * 200);
+    s.push_str(
+        "## Findings from initial review\n\n\
+         The following findings were produced by an earlier wave of \
+         reviewers. Use them as context: cross-reference, build on, \
+         or contradict them. Do not duplicate findings already covered \
+         here unless you have new evidence.\n\n",
+    );
+    for f in findings.iter().take(MAX_FINDINGS) {
+        let mut msg: String = f.message.chars().take(MAX_MSG).collect();
+        if f.message.chars().count() > MAX_MSG {
+            msg.push('…');
+        }
+        s.push_str(&format!(
+            "- **{}** [{}] `{}:{}` — {}: {}\n",
+            f.agent, f.severity, f.file, f.line, f.title, msg
+        ));
+    }
+    if findings.len() > MAX_FINDINGS {
+        s.push_str(&format!(
+            "- … and {} more findings omitted for brevity\n",
+            findings.len() - MAX_FINDINGS
+        ));
+    }
+    s
 }
 
 /// Parameters for a single file×agent review task.
@@ -459,4 +617,63 @@ async fn with_retry(
     }
 
     Err(last_err.unwrap_or_else(|| "max retries exhausted".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::finding::Severity;
+
+    fn f(agent: &str, file: &str, line: u32, title: &str, msg: &str) -> Finding {
+        Finding {
+            file: file.into(),
+            line,
+            end_line: None,
+            severity: Severity::Warning,
+            title: title.into(),
+            message: msg.into(),
+            suggestion: None,
+            agent: agent.into(),
+            evidence: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn wave1_summary_includes_each_finding_with_agent_and_severity() {
+        let findings = vec![
+            f("backend", "src/a.rs", 10, "issue a", "details a"),
+            f("frontend", "src/b.tsx", 20, "issue b", "details b"),
+        ];
+        let s = format_wave1_summary(&findings);
+        assert!(s.contains("## Findings from initial review"));
+        assert!(s.contains("**backend**"));
+        assert!(s.contains("**frontend**"));
+        assert!(s.contains("src/a.rs:10"));
+        assert!(s.contains("src/b.tsx:20"));
+        assert!(s.contains("issue a"));
+        assert!(s.contains("issue b"));
+    }
+
+    #[test]
+    fn wave1_summary_caps_findings_count() {
+        let findings: Vec<Finding> = (0..50)
+            .map(|i| f("backend", "x.rs", i + 1, &format!("t{i}"), "m"))
+            .collect();
+        let s = format_wave1_summary(&findings);
+        // Should mention 30 included + omitted suffix.
+        assert!(s.contains("and 20 more findings omitted"));
+        assert!(s.contains("t0"));
+        assert!(!s.contains("t30"), "findings beyond cap should be omitted");
+    }
+
+    #[test]
+    fn wave1_summary_truncates_long_messages() {
+        let long: String = "x".repeat(500);
+        let findings = vec![f("backend", "f.rs", 1, "t", &long)];
+        let s = format_wave1_summary(&findings);
+        // The truncation marker must be present.
+        assert!(s.contains('…'));
+        // And the full 500x string must NOT appear.
+        assert!(!s.contains(&"x".repeat(500)));
+    }
 }

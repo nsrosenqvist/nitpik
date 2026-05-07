@@ -240,6 +240,14 @@ pub struct ReviewArgs {
     #[arg(long, value_enum, default_value_t = AutoMode::Hybrid)]
     pub auto_mode: AutoMode,
 
+    /// Run reviewers in waves. Profiles whose frontmatter declares
+    /// `wave: 2` run after wave 1 completes and receive the wave-1
+    /// findings as additional context. Capped at 2 waves. Off by
+    /// default — every profile runs in a single wave regardless of
+    /// frontmatter.
+    #[arg(long, default_value_t = false)]
+    pub multi_wave: bool,
+
     // --- Context ---
     /// Skip auto-detected project documentation files (AGENTS.md, CONVENTIONS.md, etc.).
     #[arg(long, default_value_t = false)]
@@ -421,6 +429,7 @@ mod tests {
             verify: false,
             show_dropped: false,
             auto_mode: AutoMode::Hybrid,
+            multi_wave: false,
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: vec![],

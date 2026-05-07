@@ -268,6 +268,7 @@ async fn run_review(repo_path: &Path, profile_names: &[&str], config: &Config) -
         None,
         String::new(),
         false,
+        false,
     );
 
     let result = orchestrator
@@ -595,6 +596,7 @@ async fn e2e_custom_profile() {
         None,
         String::new(),
         false,
+        false,
     );
 
     let result = orchestrator
@@ -717,6 +719,7 @@ async fn e2e_custom_tool_agentic() {
             false,
             None,
             String::new(),
+            false,
             false,
         );
 
@@ -897,6 +900,7 @@ async fn e2e_builtin_tool_agentic() {
             false,
             None,
             String::new(),
+            false,
             false,
         );
 
@@ -1109,6 +1113,7 @@ async fn e2e_cache_prior_findings() {
         None,
         String::new(),
         false,
+        false,
     );
 
     let result_v1 = orch1
@@ -1174,6 +1179,7 @@ async fn e2e_cache_prior_findings() {
         false, // no_prior_context = false → inject prior findings
         None,  // unlimited
         String::new(),
+        false,
         false,
     );
 
@@ -1284,6 +1290,7 @@ async fn e2e_agentic_mode() {
             false,
             None,
             String::new(),
+            false,
             false,
         );
 

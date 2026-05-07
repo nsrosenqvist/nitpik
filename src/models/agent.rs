@@ -68,6 +68,24 @@ pub struct AgentProfile {
     /// an override with `always_include: false`.
     #[serde(default)]
     pub always_include: bool,
+
+    /// Wave this profile runs in for multi-wave reviews.
+    ///
+    /// Wave 1 is the default. Profiles with `wave: 2` run after wave 1
+    /// completes and receive the wave-1 findings as additional context
+    /// in their system prompt. Used to express dependencies between
+    /// reviewers (e.g. an architect that wants to react to backend
+    /// findings). Capped at 2 waves; values > 2 are treated as 2.
+    ///
+    /// Multi-wave dispatch is only active when the user opts in via
+    /// `--multi-wave`; otherwise every profile runs in a single wave
+    /// regardless of this field.
+    #[serde(default = "default_wave")]
+    pub wave: u8,
+}
+
+fn default_wave() -> u8 {
+    1
 }
 
 /// A custom tool defined in agent profile frontmatter.

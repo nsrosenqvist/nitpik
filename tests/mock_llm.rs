@@ -143,6 +143,7 @@ fn test_agent(name: &str) -> AgentDefinition {
             agentic_instructions: None,
             environment: vec![],
             always_include: false,
+            wave: 1,
         },
         system_prompt: "You are a test reviewer.".to_string(),
     }
@@ -159,6 +160,7 @@ fn test_agent_with_model(name: &str, model: &str) -> AgentDefinition {
             agentic_instructions: None,
             environment: vec![],
             always_include: false,
+            wave: 1,
         },
         system_prompt: "You are a test reviewer.".to_string(),
     }
@@ -212,6 +214,7 @@ async fn orchestrator_returns_findings_from_mock_provider() {
         None,
         String::new(),
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -253,6 +256,7 @@ async fn orchestrator_returns_empty_for_no_issues() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -304,6 +308,7 @@ async fn orchestrator_aggregates_token_usage_across_tasks() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -375,6 +380,7 @@ async fn orchestrator_splits_token_usage_by_model() {
         None,
         String::new(),
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -421,6 +427,7 @@ async fn orchestrator_zero_tokens_when_all_failed() {
         None,
         String::new(),
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -454,6 +461,7 @@ async fn orchestrator_errors_on_empty_diffs() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -491,6 +499,7 @@ async fn orchestrator_skips_binary_files() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -543,6 +552,7 @@ async fn orchestrator_handles_multiple_agents_and_files() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -619,6 +629,7 @@ async fn orchestrator_handles_provider_errors_gracefully() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -697,6 +708,7 @@ async fn cache_prevents_duplicate_calls() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -932,6 +944,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         None,  // max_prior_findings = unlimited
         String::new(),
         false,
+        false,
     );
 
     let result2 = orchestrator
@@ -1069,6 +1082,7 @@ async fn no_prior_context_flag_suppresses_injection() {
         None,
         String::new(),
         false,
+        false,
     );
 
     let new_content = format!("let new_npc_{} = 2;", std::process::id());
@@ -1122,6 +1136,7 @@ fn test_agent_with_tools(
             agentic_instructions: None,
             environment: vec![],
             always_include: false,
+            wave: 1,
         },
         system_prompt: "You are a test reviewer with tools.".to_string(),
     }
@@ -1213,6 +1228,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
@@ -1332,6 +1348,7 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
         false,
         None,
         String::new(),
+        false,
         false,
     );
 
