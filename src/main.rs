@@ -639,7 +639,7 @@ fn print_token_summary(
         handle,
         "  {} {}",
         "▸".cyan().bold(),
-        format_token_line(&usage).dimmed(),
+        usage.format_summary().dimmed(),
     );
 
     if by_model.len() > 1 {
@@ -649,46 +649,13 @@ fn print_token_summary(
                 "    {} {} {}",
                 "→".dimmed(),
                 model.cyan(),
-                format_token_line(u).dimmed(),
+                u.format_summary().dimmed(),
             );
         }
     }
 
     let _ = writeln!(handle);
     let _ = handle.flush();
-}
-
-fn format_token_line(usage: &nitpik::models::TokenUsage) -> String {
-    let mut line = format!(
-        "Tokens: {}↑ in, {}↓ out",
-        format_count(usage.input),
-        format_count(usage.output),
-    );
-    if usage.cached_input > 0 {
-        line.push_str(&format!(
-            " ({} cached, {:.0}% hit)",
-            format_count(usage.cached_input),
-            usage.cache_hit_ratio() * 100.0,
-        ));
-    }
-    if usage.cache_creation > 0 {
-        line.push_str(&format!(
-            " (+{} cache write)",
-            format_count(usage.cache_creation)
-        ));
-    }
-    line
-}
-
-/// Render a token count compactly: `1234` → `1.2K`, `1234567` → `1.2M`.
-fn format_count(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
 }
 
 /// Verify the license key from config, returning claims and optional

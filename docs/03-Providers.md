@@ -156,6 +156,32 @@ Or in your global config at `~/.config/nitpik/config.toml` to set a default for 
 
 See [Configuration](14-Configuration) for the full layering order.
 
+## Prompt Caching
+
+For multi-file reviews, nitpik structures the prompt so that the system
+prefix (agent system prompt + project documentation + commit history)
+is byte-identical across every file in the run. Providers with prompt
+caching can reuse that prefix on the second task and beyond, cutting
+the input-token bill substantially on big diffs.
+
+| Provider | Caching | How it activates |
+|---|---|---|
+| Anthropic | yes (ephemeral, 5 min) | rig-core inserts `cache_control` on large system blocks |
+| OpenAI | yes (automatic) | provider caches prompts ≥ 1024 input tokens |
+| Gemini | yes (implicit) | context cache kicks in above provider thresholds |
+| Azure OpenAI | yes (automatic) | inherits OpenAI's behavior |
+| Cohere, DeepSeek, Groq, Mistral, others | none / provider-controlled | no client opt-in |
+
+When cache hits occur, the run summary surfaces them:
+
+```
+  ▸ Tokens: 42.1K↑ in, 1.2K↓ out (28.0K cached, 67% hit)
+```
+
+The hit ratio (`cached_input / input`) tells you what fraction of input
+tokens were served from cache. Providers without caching simply omit
+the cache section from the summary.
+
 ## Related Pages
 
 - [Quick Start](02-Quick-Start) — run your first review

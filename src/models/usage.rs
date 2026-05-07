@@ -54,6 +54,46 @@ impl TokenUsage {
             self.cached_input as f64 / self.input as f64
         }
     }
+
+    /// Format the usage as a one-line summary suitable for the
+    /// terminal token report. The output omits cache fields when zero
+    /// so non-caching providers produce a concise line.
+    ///
+    /// Sample outputs:
+    /// * `Tokens: 1.2K↑ in, 340↓ out`
+    /// * `Tokens: 12.0K↑ in, 1.5K↓ out (8.0K cached, 67% hit)`
+    pub fn format_summary(&self) -> String {
+        let mut line = format!(
+            "Tokens: {}↑ in, {}↓ out",
+            format_count(self.input),
+            format_count(self.output),
+        );
+        if self.cached_input > 0 {
+            line.push_str(&format!(
+                " ({} cached, {:.0}% hit)",
+                format_count(self.cached_input),
+                self.cache_hit_ratio() * 100.0,
+            ));
+        }
+        if self.cache_creation > 0 {
+            line.push_str(&format!(
+                " (+{} cache write)",
+                format_count(self.cache_creation)
+            ));
+        }
+        line
+    }
+}
+
+/// Render a token count compactly: `1234` → `1.2K`, `1234567` → `1.2M`.
+pub(crate) fn format_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
 }
 
 impl Add for TokenUsage {
@@ -170,5 +210,50 @@ mod tests {
         let u = TokenUsage::default();
         assert_eq!(u, TokenUsage::new());
         assert_eq!(u.total(), 0);
+    }
+
+    #[test]
+    fn format_summary_basic_no_cache() {
+        let u = TokenUsage {
+            input: 1234,
+            output: 56,
+            cached_input: 0,
+            cache_creation: 0,
+        };
+        assert_eq!(u.format_summary(), "Tokens: 1.2K↑ in, 56↓ out");
+    }
+
+    #[test]
+    fn format_summary_includes_cache_hit_ratio() {
+        let u = TokenUsage {
+            input: 12_000,
+            output: 1_500,
+            cached_input: 8_000,
+            cache_creation: 0,
+        };
+        let s = u.format_summary();
+        assert!(s.contains("Tokens: 12.0K↑ in, 1.5K↓ out"));
+        assert!(s.contains("8.0K cached"));
+        assert!(s.contains("67% hit"));
+    }
+
+    #[test]
+    fn format_summary_includes_cache_creation_when_present() {
+        let u = TokenUsage {
+            input: 1000,
+            output: 100,
+            cached_input: 0,
+            cache_creation: 500,
+        };
+        let s = u.format_summary();
+        assert!(s.contains("+500 cache write"));
+    }
+
+    #[test]
+    fn format_count_handles_thresholds() {
+        assert_eq!(format_count(0), "0");
+        assert_eq!(format_count(999), "999");
+        assert_eq!(format_count(1_000), "1.0K");
+        assert_eq!(format_count(2_500_000), "2.5M");
     }
 }
