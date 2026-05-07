@@ -10,9 +10,17 @@ const FRONTEND_MD: &str = include_str!("frontend.md");
 const ARCHITECT_MD: &str = include_str!("architect.md");
 const SECURITY_MD: &str = include_str!("security.md");
 const GENERAL_MD: &str = include_str!("general.md");
+const CRITIC_MD: &str = include_str!("critic.md");
 
 /// List of all built-in profile names.
-const BUILTIN_NAMES: &[&str] = &["backend", "frontend", "architect", "security", "general"];
+const BUILTIN_NAMES: &[&str] = &[
+    "backend",
+    "frontend",
+    "architect",
+    "security",
+    "general",
+    "critic",
+];
 
 /// Get a built-in agent definition by name.
 pub fn get_builtin(name: &str) -> Option<AgentDefinition> {
@@ -22,6 +30,7 @@ pub fn get_builtin(name: &str) -> Option<AgentDefinition> {
         "architect" => ARCHITECT_MD,
         "security" => SECURITY_MD,
         "general" => GENERAL_MD,
+        "critic" => CRITIC_MD,
         _ => return None,
     };
 
@@ -77,5 +86,16 @@ mod tests {
                 "{name} should not be always-on by default"
             );
         }
+    }
+
+    #[test]
+    fn critic_profile_is_internal_not_a_reviewer() {
+        let critic = get_builtin("critic").unwrap();
+        assert_eq!(critic.profile.name, "critic");
+        // Critic should not be auto-selected like a normal reviewer.
+        assert!(!critic.profile.always_include);
+        // Sanity: prompt mentions verdict format.
+        assert!(critic.system_prompt.contains("keep"));
+        assert!(critic.system_prompt.contains("drop"));
     }
 }

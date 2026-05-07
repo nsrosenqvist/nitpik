@@ -211,6 +211,7 @@ async fn orchestrator_returns_findings_from_mock_provider() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -252,6 +253,7 @@ async fn orchestrator_returns_empty_for_no_issues() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -302,6 +304,7 @@ async fn orchestrator_aggregates_token_usage_across_tasks() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -371,6 +374,7 @@ async fn orchestrator_splits_token_usage_by_model() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -416,6 +420,7 @@ async fn orchestrator_zero_tokens_when_all_failed() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -449,6 +454,7 @@ async fn orchestrator_errors_on_empty_diffs() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -485,6 +491,7 @@ async fn orchestrator_skips_binary_files() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let mut binary_diff = test_diff("image.png", "");
@@ -536,6 +543,7 @@ async fn orchestrator_handles_multiple_agents_and_files() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -611,6 +619,7 @@ async fn orchestrator_handles_provider_errors_gracefully() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -688,6 +697,7 @@ async fn cache_prevents_duplicate_calls() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -921,6 +931,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         false, // no_prior_context = false → inject prior findings
         None,  // max_prior_findings = unlimited
         String::new(),
+        false,
     );
 
     let result2 = orchestrator
@@ -1057,6 +1068,7 @@ async fn no_prior_context_flag_suppresses_injection() {
         true, // no_prior_context = true → suppress prior findings
         None,
         String::new(),
+        false,
     );
 
     let new_content = format!("let new_npc_{} = 2;", std::process::id());
@@ -1201,6 +1213,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {
@@ -1319,6 +1332,7 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
         false,
         None,
         String::new(),
+        false,
     );
 
     let context = ReviewContext {

@@ -12,6 +12,7 @@
 pub mod dedup;
 pub mod prompt;
 pub mod scope;
+pub mod verify;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -36,6 +37,7 @@ use crate::constants::MAX_RETRIES;
 
 use prompt::{build_prompt, build_prompt_with_prior, build_system_addendum};
 use scope::filter_to_diff_scope;
+use verify::DroppedFinding;
 
 /// Errors from the orchestrator.
 #[derive(Error, Debug)]
@@ -62,6 +64,9 @@ pub struct ReviewResult {
     /// run may consume tokens on several models. The map is keyed by
     /// the resolved model identifier.
     pub tokens_by_model: BTreeMap<String, TokenUsage>,
+    /// Findings the critic dropped (only populated when `verify`
+    /// was enabled on the orchestrator). Empty otherwise.
+    pub dropped: Vec<DroppedFinding>,
 }
 
 /// Orchestrates parallel review execution across agents and files.
@@ -76,10 +81,14 @@ pub struct ReviewOrchestrator {
     max_prior_findings: Option<usize>,
     /// Branch / PR scope for sidecar isolation.
     review_scope: String,
+    /// When `true`, run a critic pass over deduped findings to drop
+    /// probable false positives.
+    verify: bool,
 }
 
 impl ReviewOrchestrator {
     /// Create a new orchestrator.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Arc<dyn ReviewProvider>,
         config: &Config,
@@ -88,6 +97,7 @@ impl ReviewOrchestrator {
         no_prior_context: bool,
         max_prior_findings: Option<usize>,
         review_scope: String,
+        verify: bool,
     ) -> Self {
         Self {
             provider,
@@ -97,6 +107,7 @@ impl ReviewOrchestrator {
             no_prior_context,
             max_prior_findings,
             review_scope,
+            verify,
         }
     }
 
@@ -249,11 +260,26 @@ impl ReviewOrchestrator {
             filter_to_diff_scope(deduped, &context.diffs)
         };
 
+        // Optional critic pass: drop findings the critic votes to
+        // discard. Fails open on provider error.
+        let (final_findings, dropped) = if self.verify && !scoped.is_empty() {
+            let outcome = verify::verify_findings(&self.provider, scoped).await;
+            if outcome.tokens.total() > 0 {
+                total_tokens += outcome.tokens;
+                let critic_model = self.config.provider.resolved_model().to_string();
+                *tokens_by_model.entry(critic_model).or_default() += outcome.tokens;
+            }
+            (outcome.kept, outcome.dropped)
+        } else {
+            (scoped, Vec::new())
+        };
+
         Ok(ReviewResult {
-            findings: scoped,
+            findings: final_findings,
             failed_tasks: failed_count,
             tokens: total_tokens,
             tokens_by_model,
+            dropped,
         })
     }
 }

@@ -107,7 +107,12 @@ pub async fn list_all_profiles(
     }
 
     // Built-in profiles, skipping any overridden by a custom profile of the same name.
+    // The `critic` profile is internal (used by the verify pass) and is intentionally
+    // excluded from listings so it never participates as a regular reviewer.
     for name in builtin::list_builtin_names() {
+        if name == "critic" {
+            continue;
+        }
         if custom_names.contains(name) {
             continue;
         }

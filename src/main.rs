@@ -340,6 +340,7 @@ async fn create_orchestrator(
     progress: Arc<dyn progress::ProgressReporter>,
     no_prior_context: bool,
     max_prior_findings: Option<usize>,
+    verify: bool,
 ) -> Result<(Arc<dyn ReviewProvider>, orchestrator::ReviewOrchestrator)> {
     let provider: Arc<dyn ReviewProvider> = Arc::new(
         RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
@@ -358,6 +359,7 @@ async fn create_orchestrator(
         no_prior_context,
         max_prior_findings,
         review_scope,
+        verify,
     );
     Ok((provider, orchestrator))
 }
@@ -464,6 +466,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         Arc::clone(&progress) as Arc<dyn progress::ProgressReporter>,
         args.no_prior_context,
         args.max_prior_findings,
+        args.verify,
     )
     .await?;
 
@@ -583,6 +586,19 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             .then(a.file.cmp(&b.file))
             .then(a.line.cmp(&b.line))
     });
+
+    if args.show_dropped && !args.quiet && !review_result.dropped.is_empty() {
+        eprintln!(
+            "\nDropped {} finding(s) by critic verify pass:",
+            review_result.dropped.len()
+        );
+        for d in &review_result.dropped {
+            eprintln!(
+                "  - {}:{} {} — {}",
+                d.finding.file, d.finding.line, d.finding.title, d.reason
+            );
+        }
+    }
 
     let total_tokens = review_result.tokens + triage_tokens;
     let mut tokens_by_model = review_result.tokens_by_model.clone();

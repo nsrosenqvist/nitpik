@@ -220,6 +220,17 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub no_tokens: bool,
 
+    /// Run a critic pass after the main review to drop probable
+    /// false positives. Adds one extra LLM call per file with findings;
+    /// disabled by default to keep latency and tokens low.
+    #[arg(long, default_value_t = false)]
+    pub verify: bool,
+
+    /// Print findings the critic dropped under `--verify` to stderr for
+    /// debugging. Has no effect without `--verify`.
+    #[arg(long, default_value_t = false)]
+    pub show_dropped: bool,
+
     // --- Context ---
     /// Skip auto-detected project documentation files (AGENTS.md, CONVENTIONS.md, etc.).
     #[arg(long, default_value_t = false)]
@@ -386,6 +397,8 @@ mod tests {
             max_prior_findings: None,
             quiet: false,
             no_tokens: false,
+            verify: false,
+            show_dropped: false,
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: vec![],
