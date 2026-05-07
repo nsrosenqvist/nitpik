@@ -24,9 +24,13 @@ New to nitpik? Start here:
 
 - **[How Reviews Work](09-How-Reviews-Work)** — context assembly, multi-agent coordination, and quality post-processing.
 - **[Caching & Prior Findings](10-Caching)** — content-hash caching and iterative review continuity.
+- **[Project Documentation Context](13-Project-Docs)** — teach the reviewer your team's conventions.
+
+## Security & Privacy
+
+- **[Security Model](19-Security-Model)** — what nitpik sends to LLM providers, subprocess sandboxing, telemetry, and on-disk data.
 - **[Secret Scanning](11-Secret-Scanning)** — detect and redact secrets before code reaches the LLM.
 - **[Threat Scanning](12-Threat-Scanning)** — detect obfuscated payloads, dangerous APIs, supply chain attacks, and homoglyph tricks.
-- **[Project Documentation Context](13-Project-Docs)** — teach the reviewer your team's conventions.
 
 ## Deployment
 

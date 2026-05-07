@@ -17,9 +17,12 @@
 **How It Works**
 - [How Reviews Work](09-How-Reviews-Work)
 - [Caching & Prior Findings](10-Caching)
+- [Project Documentation](13-Project-Docs)
+
+**Security & Privacy**
+- [Security Model](19-Security-Model)
 - [Secret Scanning](11-Secret-Scanning)
 - [Threat Scanning](12-Threat-Scanning)
-- [Project Documentation](13-Project-Docs)
 
 **Deployment**
 - [Configuration](14-Configuration)
