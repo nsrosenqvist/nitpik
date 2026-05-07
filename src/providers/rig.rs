@@ -25,8 +25,8 @@ use crate::models::{AgentDefinition, ProviderName};
 use crate::providers::response::{parse_findings_response, parse_with_fallbacks};
 use crate::tools::budget::ToolBudget;
 use crate::tools::{
-    CustomCommandTool, ListDirectoryTool, ReadFileTool, SUBMIT_FINDINGS_TOOL_NAME, SearchTextTool,
-    SubmitFindingsTool,
+    CustomCommandTool, GlobTool, ListDirectoryTool, ReadFileTool, ReadFilesTool,
+    SUBMIT_FINDINGS_TOOL_NAME, SearchTextTool, SubmitFindingsTool,
 };
 
 use super::{ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict};
@@ -114,8 +114,10 @@ where
         let mut tools: Vec<std::sync::Arc<dyn rig::tool::ToolDyn>> = vec![
             std::sync::Arc::new(submit_tool),
             std::sync::Arc::new(ReadFileTool::new(cfg.repo_root.clone())),
+            std::sync::Arc::new(ReadFilesTool::new(cfg.repo_root.clone())),
             std::sync::Arc::new(SearchTextTool::new(cfg.repo_root.clone())),
             std::sync::Arc::new(ListDirectoryTool::new(cfg.repo_root.clone())),
+            std::sync::Arc::new(GlobTool::new(cfg.repo_root.clone())),
         ];
         for custom_tool in cfg.custom_tools {
             tools.push(std::sync::Arc::new(custom_tool));
@@ -513,17 +515,22 @@ fn build_agentic_system_prompt(
          of guessing what they contain. Specifically:\n\n\
          1. **Read referenced files** — if the diff imports from or calls into another \
          module, use `read_file` to examine it.\n\
-         2. **Search for usages** — use `search_text` to find callers, implementations, \
+         2. **Batch related reads** — when you need several related files at once, use \
+         `read_files` to fetch them in a single call instead of issuing many `read_file` \
+         requests.\n\
+         3. **Search for usages** — use `search_text` to find callers, implementations, \
          or tests related to the changed code.\n\
-         3. **Understand the project layout** — use `list_directory` if you are unsure \
+         4. **Locate files by name** — use `glob` with patterns like `**/*.rs` or \
+         `src/**/handler*.rs` to discover files when you do not know their exact path.\n\
+         5. **Understand the project layout** — use `list_directory` if you are unsure \
          where a file lives or what a module contains.\n\
-         4. **Verify before reporting** — do not flag an issue unless you have confirmed \
+         6. **Verify before reporting** — do not flag an issue unless you have confirmed \
          it by reading the relevant code. False positives from guessing are worse \
          than a missed finding.\n"
     );
 
     // Append custom tool guidance
-    let mut tool_number = 5;
+    let mut tool_number = 7;
     for tool in custom_tools {
         prompt.push_str(&format!(
             "         {tool_number}. **Use `{}`** — {}\n",
@@ -539,6 +546,8 @@ fn build_agentic_system_prompt(
          ### Example tool calls\n\n\
          - List the repo root: `list_directory` with `{{\"path\": \".\"}}`\n\
          - Read a file: `read_file` with `{{\"path\": \"src/handler.rs\"}}`\n\
+         - Read several files at once: `read_files` with `{{\"files\": [{{\"path\": \"src/a.rs\"}}, {{\"path\": \"src/b.rs\"}}]}}`\n\
+         - Find files by pattern: `glob` with `{{\"pattern\": \"**/*.rs\"}}`\n\
          - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n",
     );
 
@@ -629,7 +638,9 @@ mod tests {
         assert!(enhanced.starts_with(base));
         assert!(enhanced.contains("Tool-Assisted Review"));
         assert!(enhanced.contains("read_file"));
+        assert!(enhanced.contains("read_files"));
         assert!(enhanced.contains("search_text"));
+        assert!(enhanced.contains("glob"));
         assert!(enhanced.contains("list_directory"));
         assert!(enhanced.contains("relative to the repository root"));
         assert!(enhanced.contains("proactively"));

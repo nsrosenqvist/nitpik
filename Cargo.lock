@@ -1379,6 +1379,7 @@ dependencies = [
  "ed25519-dalek",
  "filetime",
  "flate2",
+ "globset",
  "hex",
  "ignore",
  "indexmap",
