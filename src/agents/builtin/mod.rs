@@ -11,6 +11,7 @@ const ARCHITECT_MD: &str = include_str!("architect.md");
 const SECURITY_MD: &str = include_str!("security.md");
 const GENERAL_MD: &str = include_str!("general.md");
 const CRITIC_MD: &str = include_str!("critic.md");
+const TRIAGE_MD: &str = include_str!("triage.md");
 
 /// List of all built-in profile names.
 const BUILTIN_NAMES: &[&str] = &[
@@ -20,6 +21,7 @@ const BUILTIN_NAMES: &[&str] = &[
     "security",
     "general",
     "critic",
+    "triage",
 ];
 
 /// Get a built-in agent definition by name.
@@ -31,6 +33,7 @@ pub fn get_builtin(name: &str) -> Option<AgentDefinition> {
         "security" => SECURITY_MD,
         "general" => GENERAL_MD,
         "critic" => CRITIC_MD,
+        "triage" => TRIAGE_MD,
         _ => return None,
     };
 

@@ -859,7 +859,7 @@ async fn resolve_agents(
 
     let used_auto = profile_names.iter().any(|p| p == "auto");
     let profiles = if used_auto {
-        agents::auto::auto_select_profiles(diffs, repo_root_path)
+        select_auto_profiles(args, config, diffs, repo_root_path).await?
     } else {
         profile_names
     };
@@ -902,6 +902,72 @@ async fn resolve_agents(
     }
 
     Ok(agent_defs)
+}
+
+/// Pick reviewer profiles for `--profile auto`, honoring `--auto-mode`.
+///
+/// In `heuristic` mode this is a thin wrapper around the file/path
+/// classifier. In `llm` mode it always asks the model. In `hybrid`
+/// mode (default) the heuristic runs first, and the LLM is consulted
+/// only when the heuristic confidence is low (i.e. no language
+/// specialist matched).
+///
+/// Fails open: any provider error falls back to the heuristic result.
+async fn select_auto_profiles(
+    args: &cli::args::ReviewArgs,
+    config: &Config,
+    diffs: &[models::FileDiff<'_>],
+    repo_root_path: &Path,
+) -> Result<Vec<String>> {
+    use cli::args::AutoMode;
+    let (heuristic, confidence) =
+        agents::auto::auto_select_profiles_with_confidence(diffs, repo_root_path);
+
+    let need_llm = match args.auto_mode {
+        AutoMode::Heuristic => false,
+        AutoMode::Llm => true,
+        AutoMode::Hybrid => confidence == agents::auto::HeuristicConfidence::Low,
+    };
+    if !need_llm {
+        return Ok(heuristic);
+    }
+
+    let triage_agent = match agents::builtin::get_builtin("triage") {
+        Some(a) => a,
+        None => return Ok(heuristic),
+    };
+    let provider: Arc<dyn ReviewProvider> =
+        match RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf()) {
+            Ok(p) => Arc::new(p),
+            Err(e) => {
+                eprintln!("Warning: triage provider init failed ({e}); using heuristic profiles.");
+                return Ok(heuristic);
+            }
+        };
+
+    let summary = agents::auto::build_triage_summary(diffs);
+    match provider.triage(&triage_agent.system_prompt, &summary).await {
+        Ok(outcome) => {
+            let mut picked = agents::auto::parse_triage_profiles(&outcome.verdicts);
+            // Always preserve architect when the heuristic flagged a
+            // structural change — the LLM rarely sees CI/IaC signals
+            // strongly enough but the heuristic does.
+            if heuristic.iter().any(|p| p == "architect")
+                && !picked.iter().any(|p| p == "architect")
+            {
+                picked.push("architect".to_string());
+            }
+            if picked.is_empty() {
+                Ok(heuristic)
+            } else {
+                Ok(picked)
+            }
+        }
+        Err(e) => {
+            eprintln!("Warning: triage call failed ({e}); using heuristic profiles.");
+            Ok(heuristic)
+        }
+    }
 }
 
 /// Build review context, optionally scanning and redacting secrets.

@@ -231,6 +231,15 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub show_dropped: bool,
 
+    /// Strategy for `--profile auto` selection.
+    ///
+    /// - `heuristic`: file/path/dependency rules only (no LLM call).
+    /// - `llm`: ask the model to pick profiles for every diff.
+    /// - `hybrid` (default): use heuristics; only consult the LLM when
+    ///   the heuristic is inconclusive (e.g. selects only `general`).
+    #[arg(long, value_enum, default_value_t = AutoMode::Hybrid)]
+    pub auto_mode: AutoMode,
+
     // --- Context ---
     /// Skip auto-detected project documentation files (AGENTS.md, CONVENTIONS.md, etc.).
     #[arg(long, default_value_t = false)]
@@ -250,6 +259,18 @@ pub struct ReviewArgs {
     #[cfg(debug_assertions)]
     #[arg(long, default_value_t = false, hide = true)]
     pub debug_prompt: bool,
+}
+
+/// Strategy for selecting reviewer profiles when `--profile auto` is used.
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum AutoMode {
+    /// Pure file/path/dependency heuristics (no LLM call).
+    Heuristic,
+    /// Always call the LLM to pick profiles.
+    Llm,
+    /// Heuristics first; consult the LLM only when heuristics are
+    /// inconclusive (default).
+    Hybrid,
 }
 
 /// Output format options.
@@ -399,6 +420,7 @@ mod tests {
             no_tokens: false,
             verify: false,
             show_dropped: false,
+            auto_mode: AutoMode::Hybrid,
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: vec![],

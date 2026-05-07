@@ -482,6 +482,91 @@ pub fn auto_select_profiles(diffs: &[FileDiff<'_>], repo_root: &Path) -> Vec<Str
     profiles
 }
 
+/// Confidence in a heuristic auto-selection result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeuristicConfidence {
+    /// At least one language specialist was selected (backend or frontend),
+    /// or `architect` covered the diff alone for clearly structural changes.
+    High,
+    /// No specialist matched — the heuristic fell back to `general`. The
+    /// hybrid auto-mode will consult the LLM to confirm or refine.
+    Low,
+}
+
+/// Heuristic profile selection that also reports its own confidence.
+///
+/// Returns `(profiles, confidence)`. Confidence is `Low` when the
+/// heuristic could not pick a language specialist (only `general` is
+/// returned, possibly with `architect`); the hybrid auto-mode uses
+/// this signal to decide whether to ask the LLM for a second opinion.
+pub fn auto_select_profiles_with_confidence(
+    diffs: &[FileDiff<'_>],
+    repo_root: &Path,
+) -> (Vec<String>, HeuristicConfidence) {
+    let profiles = auto_select_profiles(diffs, repo_root);
+    let has_specialist = profiles.iter().any(|p| p == "backend" || p == "frontend");
+    let confidence = if has_specialist {
+        HeuristicConfidence::High
+    } else {
+        HeuristicConfidence::Low
+    };
+    (profiles, confidence)
+}
+
+/// Build a compact diff summary for the LLM triage profile.
+///
+/// Lists each changed file path on its own line with a small marker for
+/// added/modified/removed lines. The summary is capped to keep token
+/// use predictable on very large diffs.
+pub fn build_triage_summary(diffs: &[FileDiff<'_>]) -> String {
+    const MAX_FILES: usize = 200;
+    let mut s = String::with_capacity(diffs.len().min(MAX_FILES) * 80);
+    s.push_str("## Changed files\n\n");
+    for d in diffs.iter().take(MAX_FILES) {
+        let mut added = 0usize;
+        let mut removed = 0usize;
+        for h in &d.hunks {
+            for line in &h.lines {
+                match line.line_type {
+                    crate::models::diff::DiffLineType::Added => added += 1,
+                    crate::models::diff::DiffLineType::Removed => removed += 1,
+                    _ => {}
+                }
+            }
+        }
+        s.push_str(&format!("- `{}` (+{added}/-{removed})\n", d.path()));
+    }
+    if diffs.len() > MAX_FILES {
+        s.push_str(&format!("- … and {} more files\n", diffs.len() - MAX_FILES));
+    }
+    s.push_str(
+        "\nPick the smallest set of reviewer profiles needed. Return only the JSON array.\n",
+    );
+    s
+}
+
+/// Parse triage verdicts into a deduplicated list of profile names.
+///
+/// Filters classifications to the known reviewer set so a hallucinated
+/// name (e.g. `\"security\"` — handled separately by always_include —
+/// or a typo) cannot break the pipeline. Returns profile names in
+/// the order the model emitted them, deduplicated.
+pub fn parse_triage_profiles(verdicts: &[crate::providers::TriageVerdict]) -> Vec<String> {
+    const ALLOWED: &[&str] = &["backend", "frontend", "architect", "general"];
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for v in verdicts {
+        let name = v.classification.trim().to_lowercase();
+        if !ALLOWED.contains(&name.as_str()) {
+            continue;
+        }
+        if seen.insert(name.clone()) {
+            out.push(name);
+        }
+    }
+    out
+}
+
 /// Returns `true` if the path looks like it sits inside a frontend directory.
 fn is_frontend_path(path: &str) -> bool {
     JS_FRONTEND_PATH_SEGMENTS
@@ -1024,5 +1109,105 @@ mod tests {
             !profiles.contains(&"architect".to_string()),
             "5 files in one directory should not trigger architect"
         );
+    }
+
+    #[test]
+    fn confidence_high_when_specialist_picked() {
+        let (_dir, root) = bare_root();
+        let diffs = vec![make_diff("src/lib.rs")];
+        let (profiles, conf) = auto_select_profiles_with_confidence(&diffs, &root);
+        assert!(profiles.contains(&"backend".to_string()));
+        assert_eq!(conf, HeuristicConfidence::High);
+    }
+
+    #[test]
+    fn confidence_low_when_only_general() {
+        let (_dir, root) = bare_root();
+        // Use an extension the heuristic does not classify as backend
+        // or frontend so the result falls back to `general`.
+        let diffs = vec![make_diff("notes/draft.txt")];
+        let (profiles, conf) = auto_select_profiles_with_confidence(&diffs, &root);
+        assert!(
+            profiles.contains(&"general".to_string()),
+            "got {profiles:?}"
+        );
+        assert_eq!(conf, HeuristicConfidence::Low);
+    }
+
+    #[test]
+    fn triage_summary_lists_files_with_counts() {
+        let mut d = make_diff("src/foo.rs");
+        d.hunks = vec![crate::models::diff::Hunk {
+            old_start: 1,
+            old_count: 0,
+            new_start: 1,
+            new_count: 2,
+            header: None,
+            lines: vec![
+                crate::models::diff::DiffLine {
+                    line_type: crate::models::diff::DiffLineType::Added,
+                    content: "a".into(),
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                },
+                crate::models::diff::DiffLine {
+                    line_type: crate::models::diff::DiffLineType::Added,
+                    content: "b".into(),
+                    old_line_no: None,
+                    new_line_no: Some(2),
+                },
+            ],
+        }];
+        let summary = build_triage_summary(&[d]);
+        assert!(summary.contains("src/foo.rs"));
+        assert!(summary.contains("+2/-0"));
+    }
+
+    #[test]
+    fn parse_triage_filters_unknown_classifications() {
+        use crate::providers::TriageVerdict;
+        let v = vec![
+            TriageVerdict {
+                index: 0,
+                classification: "backend".into(),
+                rationale: None,
+            },
+            TriageVerdict {
+                index: 1,
+                classification: "frontend".into(),
+                rationale: None,
+            },
+            TriageVerdict {
+                index: 2,
+                classification: "security".into(), // disallowed — added separately
+                rationale: None,
+            },
+            TriageVerdict {
+                index: 3,
+                classification: "garbage".into(),
+                rationale: None,
+            },
+        ];
+        let picked = parse_triage_profiles(&v);
+        assert_eq!(picked, vec!["backend".to_string(), "frontend".to_string()]);
+    }
+
+    #[test]
+    fn parse_triage_dedupes_repeated_classifications() {
+        use crate::providers::TriageVerdict;
+        let v = vec![
+            TriageVerdict {
+                index: 0,
+                classification: "backend".into(),
+                rationale: None,
+            },
+            TriageVerdict {
+                index: 1,
+                classification: "BACKEND".into(),
+                rationale: None,
+            },
+        ];
+        let picked = parse_triage_profiles(&v);
+        assert_eq!(picked, vec!["backend".to_string()]);
     }
 }
