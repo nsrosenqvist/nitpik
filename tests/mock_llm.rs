@@ -148,6 +148,22 @@ fn test_agent(name: &str) -> AgentDefinition {
     }
 }
 
+fn test_agent_with_model(name: &str, model: &str) -> AgentDefinition {
+    AgentDefinition {
+        profile: AgentProfile {
+            name: name.to_string(),
+            description: format!("Test agent: {name}"),
+            model: Some(model.to_string()),
+            tags: vec![],
+            tools: vec![],
+            agentic_instructions: None,
+            environment: vec![],
+            always_include: false,
+        },
+        system_prompt: "You are a test reviewer.".to_string(),
+    }
+}
+
 /// Helper: build test findings.
 fn test_findings(file: &str, agent: &str) -> Vec<Finding> {
     vec![
@@ -314,6 +330,68 @@ async fn orchestrator_aggregates_token_usage_across_tasks() {
     // Sanity: total() and cache_hit_ratio() reflect the sum.
     assert_eq!(result.tokens.total(), 500);
     assert!((result.tokens.cache_hit_ratio() - 0.4).abs() < 1e-9);
+    // No agent overrode the model, so all usage is attributed to the
+    // default model resolved by the orchestrator (`Config::default()`
+    // returns the OpenAI default).
+    assert_eq!(result.tokens_by_model.len(), 1);
+    let (_only_model, only_tokens) = result.tokens_by_model.iter().next().unwrap();
+    assert_eq!(*only_tokens, expected);
+}
+
+#[tokio::test]
+async fn orchestrator_splits_token_usage_by_model() {
+    use nitpik::models::TokenUsage;
+
+    // Two agents, each pinned to a different model. One file → one task
+    // per agent, so each model gets exactly one task's worth of usage.
+    let per_call = TokenUsage {
+        input: 50,
+        output: 10,
+        cached_input: 0,
+        cache_creation: 0,
+    };
+    let provider = Arc::new(UsageMockProvider {
+        findings: Vec::new(),
+        tokens_per_call: per_call,
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/a.rs".to_string()],
+        &["fast".to_string(), "slow".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/a.rs", "let x = 1;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![
+        test_agent_with_model("fast", "gpt-4o-mini"),
+        test_agent_with_model("slow", "gpt-4o"),
+    ];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(result.failed_tasks, 0);
+    assert_eq!(result.tokens.total(), 120); // 2 × (50+10)
+    assert_eq!(result.tokens_by_model.len(), 2);
+    assert_eq!(result.tokens_by_model.get("gpt-4o-mini"), Some(&per_call));
+    assert_eq!(result.tokens_by_model.get("gpt-4o"), Some(&per_call));
 }
 
 #[tokio::test]

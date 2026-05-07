@@ -585,12 +585,17 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     });
 
     let total_tokens = review_result.tokens + triage_tokens;
+    let mut tokens_by_model = review_result.tokens_by_model.clone();
+    if triage_tokens.total() > 0 {
+        let triage_model = config.provider.resolved_model().to_string();
+        *tokens_by_model.entry(triage_model).or_default() += triage_tokens;
+    }
     let show_tokens = !args.quiet
         && !args.no_tokens
         && args.format == OutputFormat::Terminal
         && std::io::stderr().is_terminal();
     if show_tokens && total_tokens.total() > 0 {
-        print_token_summary(total_tokens);
+        print_token_summary(total_tokens, &tokens_by_model);
     }
 
     let fail_on_severity: Option<Severity> = if args.no_fail {
@@ -615,14 +620,45 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     )
 }
 
-/// Print a one-line token usage summary to stderr.
+/// Print a token usage summary to stderr.
 ///
-/// Format: `▸ Tokens: <input>↑ <output>↓ [<cached> cached] [<created> cache-created]`
-/// where the cached/created suffixes are omitted when zero.
-fn print_token_summary(usage: nitpik::models::TokenUsage) {
+/// When all tokens are attributed to a single model the output is a
+/// one-liner. When multiple models contributed (because profile
+/// overrides selected different models), the totals are followed by
+/// a per-model breakdown.
+fn print_token_summary(
+    usage: nitpik::models::TokenUsage,
+    by_model: &std::collections::BTreeMap<String, nitpik::models::TokenUsage>,
+) {
     use colored::Colorize;
     use std::io::Write;
 
+    let stderr = std::io::stderr();
+    let mut handle = stderr.lock();
+    let _ = writeln!(
+        handle,
+        "  {} {}",
+        "▸".cyan().bold(),
+        format_token_line(&usage).dimmed(),
+    );
+
+    if by_model.len() > 1 {
+        for (model, u) in by_model {
+            let _ = writeln!(
+                handle,
+                "    {} {} {}",
+                "→".dimmed(),
+                model.cyan(),
+                format_token_line(u).dimmed(),
+            );
+        }
+    }
+
+    let _ = writeln!(handle);
+    let _ = handle.flush();
+}
+
+fn format_token_line(usage: &nitpik::models::TokenUsage) -> String {
     let mut line = format!(
         "Tokens: {}↑ in, {}↓ out",
         format_count(usage.input),
@@ -641,12 +677,7 @@ fn print_token_summary(usage: nitpik::models::TokenUsage) {
             format_count(usage.cache_creation)
         ));
     }
-
-    let stderr = std::io::stderr();
-    let mut handle = stderr.lock();
-    let _ = writeln!(handle, "  {} {}", "▸".cyan().bold(), line.dimmed());
-    let _ = writeln!(handle);
-    let _ = handle.flush();
+    line
 }
 
 /// Render a token count compactly: `1234` → `1.2K`, `1234567` → `1.2M`.

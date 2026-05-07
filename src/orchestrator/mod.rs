@@ -13,6 +13,7 @@ pub mod dedup;
 pub mod prompt;
 pub mod scope;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -55,6 +56,11 @@ pub struct ReviewResult {
     /// Aggregated token usage across every file×agent task that
     /// reached the provider (cache hits contribute zero).
     pub tokens: TokenUsage,
+    /// Per-model breakdown of token usage. Profiles can override the
+    /// default model via their YAML frontmatter, so a single review
+    /// run may consume tokens on several models. The map is keyed by
+    /// the resolved model identifier.
+    pub tokens_by_model: BTreeMap<String, TokenUsage>,
 }
 
 /// Orchestrates parallel review execution across agents and files.
@@ -187,11 +193,15 @@ impl ReviewOrchestrator {
         let mut all_findings: Vec<Finding> = Vec::new();
         let mut failed_count: usize = 0;
         let mut total_tokens = TokenUsage::default();
+        let mut tokens_by_model: BTreeMap<String, TokenUsage> = BTreeMap::new();
         while let Some(result) = join_set.join_next().await {
             match result {
-                Ok((findings, failed, tokens)) => {
+                Ok((findings, failed, tokens, model)) => {
                     all_findings.extend(findings);
                     total_tokens += tokens;
+                    if tokens.total() > 0 {
+                        *tokens_by_model.entry(model).or_default() += tokens;
+                    }
                     if failed {
                         failed_count += 1;
                     }
@@ -218,6 +228,7 @@ impl ReviewOrchestrator {
             findings: scoped,
             failed_tasks: failed_count,
             tokens: total_tokens,
+            tokens_by_model,
         })
     }
 }
@@ -242,7 +253,7 @@ struct ReviewTaskParams {
 }
 
 /// Execute a single file×agent review task with caching and retries.
-async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, TokenUsage) {
+async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, TokenUsage, String) {
     let ReviewTaskParams {
         provider,
         cache,
@@ -272,7 +283,7 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, T
             )
             .await;
         progress.update(&file_path, TaskStatus::Done);
-        return (cached, false, TokenUsage::default());
+        return (cached, false, TokenUsage::default(), model);
     }
 
     // Cache miss — resolve prior findings for the prompt
@@ -327,11 +338,11 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, T
                 )
                 .await;
             progress.update(&file_path, TaskStatus::Done);
-            (findings, false, tokens)
+            (findings, false, tokens, model)
         }
         Err(err_msg) => {
             progress.update(&file_path, TaskStatus::Failed(err_msg));
-            (Vec::new(), true, TokenUsage::default())
+            (Vec::new(), true, TokenUsage::default(), model)
         }
     }
 }
