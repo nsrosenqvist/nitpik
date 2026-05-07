@@ -33,19 +33,31 @@ Agentic reviews use more LLM tokens (each tool call is an additional turn) but p
 
 ## Built-in Tools
 
-Every agentic review has access to three built-in tools:
+Every agentic review has access to five built-in tools:
 
 ### `read_file`
 
 Reads the contents of a file from the repository. The LLM uses this to examine functions, types, or modules referenced in the diff.
 
+### `read_files`
+
+Reads several files in a single call (up to 10 files, 64 KB total). The LLM uses this to batch related reads — e.g. fetching a module and its tests at once — and save round trips.
+
 ### `search_text`
 
 Searches for a text pattern across the codebase. The LLM uses this to find usages of a changed function, check whether an issue is handled elsewhere, or trace data flow.
 
+### `glob`
+
+Finds files by glob pattern (e.g. `**/*.rs`, `src/**/handler*.rs`). Gitignore-aware, capped at 200 results. The LLM uses this to discover files when it doesn't know an exact path.
+
 ### `list_directory`
 
 Lists the contents of a directory. The LLM uses this to understand module structure and navigate the codebase.
+
+### `submit_findings`
+
+Terminal tool the LLM calls to submit its final findings as structured JSON. Always available in agentic mode — it's how findings exit the agent loop.
 
 ## Custom Tools
 

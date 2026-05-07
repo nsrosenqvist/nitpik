@@ -40,6 +40,24 @@ When you run multiple profiles together (e.g. `--profile backend,security`), nit
 
 You don't need to configure anything — just combine profiles and nitpik handles the rest.
 
+### Multi-Wave Reviews
+
+With `--multi-wave`, profiles whose YAML frontmatter declares `wave: 2` run **after** wave 1 completes and receive a compact summary of wave-1 findings as additional context. This lets late-stage reviewers (e.g. an architect) react to issues found by earlier specialists. Capped at 2 waves; off by default.
+
+### Auto Profile Selection
+
+`--profile auto` picks reviewer profiles from the diff itself. The strategy is controlled by `--auto-mode`:
+
+- `heuristic` — file/path/dependency rules only, no LLM call.
+- `llm` — always ask the model (using a built-in `triage` profile) to pick.
+- `hybrid` (default) — heuristics first; consult the LLM only when heuristics are inconclusive.
+
+## Verification (Critic Pass)
+
+With `--verify`, nitpik runs a single extra LLM call after deduplication that votes keep/drop on each finding using a built-in `critic` profile. Findings the critic drops are removed from the output; the rest pass through unchanged. The critic fails open — a provider error keeps every finding.
+
+Use `--show-dropped` to print the dropped findings (with rationale) to stderr for debugging.
+
 ## Prior Findings
 
 When a file changes and the cached review is invalidated, nitpik carries forward the previous findings so reviews stay consistent across iterations. The LLM won't flip-flop on findings between runs, and it won't re-report issues you've already fixed.
@@ -50,9 +68,10 @@ Prior findings are scoped per branch so parallel PRs don't contaminate each othe
 
 Before findings reach you, nitpik applies quality filters:
 
-- **Deduplication** — when multiple agents review the same file and flag the same issue, duplicates are removed automatically.
+- **Deduplication** — when multiple agents review the same file and flag the same issue, duplicates are removed automatically. Findings can include short `evidence` snippets (the actual code or symbol they reference); shared evidence is one of the signals used to merge near-duplicates.
 - **Diff scope filtering** — findings on lines outside the diff are discarded, so only your changes are reviewed. This filter is skipped in `--scan` mode, where the entire file is in scope.
 - **Severity normalization** — LLMs sometimes use inconsistent severity labels. nitpik normalizes them to a standard set (`error`, `warning`, `info`).
+- **Critic pass** — optional `--verify` step that drops probable false positives. See [Verification](#verification-critic-pass) above.
 
 ## Related Pages
 

@@ -34,6 +34,7 @@ Check for:
 | `agentic_instructions` | No | Additional instructions injected only in `--agent` mode. Use this to tell the LLM how to use tools effectively for this profile's focus. Not included in standard (non-agentic) reviews. |
 | `environment` | No | List of env var names (or prefix globs like `AWS_*`) that custom command tools are allowed to inherit. See [Environment Passthrough](#environment-passthrough). |
 | `always_include` | No | When `true`, the profile is added to every `auto` review regardless of file heuristics. Defaults to `false`. See [Always-On Profiles](#always-on-profiles). |
+| `wave` | No | Either `1` (default) or `2`. Profiles set to `wave: 2` run after wave 1 completes when `--multi-wave` is enabled, and receive a summary of wave-1 findings as additional context. Ignored without `--multi-wave`. |
 | `tools` | No | Custom CLI tools the LLM can invoke in agentic mode. See [Custom Agentic Tools](#custom-agentic-tools). |
 
 ## Using Custom Profiles

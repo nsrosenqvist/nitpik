@@ -86,6 +86,18 @@ The `security` profile is always included because its frontmatter sets `always_i
 
 When neither `frontend` nor `backend` signals fire (for example a docs-only, infra-only, or shell-only diff), the `general` profile is used as the catch-all. `general` and the language specialists are mutually exclusive: a strictly-backend or strictly-frontend diff never pulls `general` in alongside the specialist. JS/TS files with no clear signal still default to `frontend` rather than `general`.
 
+### Auto-Mode Strategy
+
+Tune how `--profile auto` decides with `--auto-mode`:
+
+| Mode | Behavior |
+|---|---|
+| `heuristic` | File/path/dependency rules only — no LLM call. Fastest, fully offline. |
+| `llm` | Always ask the model to pick profiles using a built-in `triage` system prompt. Most flexible for unusual diffs. |
+| `hybrid` (default) | Heuristics first; consult the LLM only when the heuristic confidence is low (e.g. it would otherwise pick only `general`). |
+
+Hybrid mode is the recommended default — you get heuristic precision on common cases without losing flexibility on edge cases. Falls open: if the triage call fails, the heuristic result is used.
+
 ## Tag-Based Selection
 
 Select profiles by tag instead of name:

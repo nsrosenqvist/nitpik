@@ -40,6 +40,8 @@ Run a code review.
 | `--profile <NAMES>` | `general` | Comma-separated list of profile names, file paths, or `auto`. Built-in: `backend`, `frontend`, `architect`, `security`, `general`. |
 | `--profile-dir <DIR>` | — | Directory to resolve bare profile names from. |
 | `--tag <TAGS>` | — | Comma-separated tags. All profiles (built-in and custom) whose tags match are included. Combines with `--profile`. |
+| `--auto-mode <MODE>` | `hybrid` | How `--profile auto` picks reviewers: `heuristic` (rules only, no LLM call), `llm` (always ask the model), `hybrid` (heuristics first, fall back to LLM when inconclusive). |
+| `--multi-wave` | `false` | Run reviewers in waves. Profiles whose frontmatter declares `wave: 2` run after wave 1 and receive the wave-1 findings as context. Capped at 2 waves. |
 
 ### Output
 
@@ -49,6 +51,14 @@ Run a code review.
 | `--fail-on <SEVERITY>` | `error` | Exit non-zero if any finding meets this severity: `error`, `warning`, `info`. |
 | `--no-fail` | `false` | Never exit non-zero on findings, even when `--fail-on` or config is set. |
 | `-q`, `--quiet` | `false` | Suppress banner, progress display, and informational messages. Only findings and errors are shown. |
+| `--no-tokens` | `false` | Suppress the per-run token usage summary printed after the review. Only affects terminal output. |
+
+### Verification
+
+| Flag | Default | Description |
+|---|---|---|
+| `--verify` | `false` | Run a critic pass after the main review that votes keep/drop on each finding to suppress probable false positives. Adds one extra LLM call per run with findings. |
+| `--show-dropped` | `false` | Print findings the critic dropped (with rationale) to stderr. No effect without `--verify`. |
 
 ### Agentic Mode
 

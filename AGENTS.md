@@ -27,10 +27,10 @@ Extend the system by implementing a trait, not by modifying existing implementat
 | `config/` | `.nitpik.toml` loading, env var resolution, config layering (CLI → env → repo config → global config → defaults) |
 | `diff/` | Git CLI wrapper, unified diff parsing, file scanning, chunk splitting |
 | `context/` | Baseline context: full file loading, project doc detection with `REVIEW.md`/`NITPIK.md` priority (supports `--no-project-docs` and `--exclude-doc`) |
-| `agents/` | Built-in profiles (`backend`, `frontend`, `architect`, `security`, `general`), markdown+YAML parser, auto-profile selection, tag-based profile resolution |
-| `providers/` | `ReviewProvider` trait, rig-core multi-provider integration (Anthropic, Azure, Cohere, DeepSeek, Galadriel, Gemini, Groq, HuggingFace, Hyperbolic, Mira, Mistral, Moonshot, Ollama, OpenAI, OpenRouter, Perplexity, Together, xAI, OpenAI-compatible) |
-| `tools/` | Agentic tools: `ReadFileTool`, `SearchTextTool`, `ListDirectoryTool`, `CustomCommandTool` (user-defined CLI tools from profile frontmatter), `ToolCallLog` (audit log for tool invocations) |
-| `orchestrator/` | Parallel review execution, prompt construction, deduplication |
+| `agents/` | Built-in profiles (`backend`, `frontend`, `architect`, `security`, `general`) plus internal-only `critic` (used by `--verify`) and `triage` (used by `--auto-mode hybrid|llm`); markdown+YAML parser; auto-profile selection with confidence scoring; tag-based resolution |
+| `providers/` | `ReviewProvider` trait, rig-core multi-provider integration (Anthropic, Azure, Cohere, DeepSeek, Galadriel, Gemini, Groq, HuggingFace, Hyperbolic, Mira, Mistral, Moonshot, Ollama, OpenAI, OpenRouter, Perplexity, Together, xAI, OpenAI-compatible). Owns the agent loop directly via `CompletionModel::completion`; `events.rs` exposes a tokio task-local `LoopEvent` sink so the progress layer can surface live tool-call status. |
+| `tools/` | Agentic tools: `ReadFileTool`, `ReadFilesTool` (batched reads, ≤10 files / 64 KB), `SearchTextTool`, `GlobTool` (gitignore-aware file discovery), `ListDirectoryTool`, `SubmitFindingsTool` (terminal tool that exits the agent loop with structured findings), `CustomCommandTool` (user-defined CLI tools from profile frontmatter), `ToolCallLog` (audit log for tool invocations), and a cross-task memo cache for read-only tool results |
+| `orchestrator/` | Parallel review execution, prompt construction, deduplication, multi-wave dispatch (`--multi-wave`), and the optional critic verify pass (`verify.rs`) |
 | `output/` | `OutputRenderer` trait + format implementations (terminal, JSON, GitHub, GitLab, Bitbucket, Forgejo) |
 | `security/` | Secret scanner, vendored gitleaks rules, entropy checks, redaction |
 | `cache/` | Content-hash cache, filesystem storage, branch-scoped sidecar metadata for prior findings |
@@ -146,7 +146,7 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 1. Create `src/agents/builtin/my_profile.md` (YAML frontmatter + system prompt)
 2. Register with `include_str!` in `src/agents/builtin/mod.rs`
 
-**Frontmatter fields**: `name`, `description`, `model` (optional), `tags`, `tools` (optional), `agentic_instructions` (optional), `environment` (optional).
+**Frontmatter fields**: `name`, `description`, `model` (optional), `tags`, `tools` (optional), `agentic_instructions` (optional), `environment` (optional), `always_include` (optional), `wave` (optional, `1` or `2` — only honored when `--multi-wave` is set).
 
 - The `agentic_instructions` field contains tool-usage guidance that is **only** injected in agentic mode (when the LLM has access to tools). Keep it out of the main system prompt body so non-agentic reviews aren't confused by references to tools.
 - The `environment` field lists env var names (or prefix globs like `AWS_*`) that custom command tools are allowed to inherit. By default, all LLM API keys and nitpik secrets are stripped from subprocess environments. See **Environment Sanitization** below.
@@ -234,6 +234,18 @@ This is shown after the file-status summary and before the findings count. It is
 ### Add LLM Provider Support
 
 If rig-core supports it, add the provider name to config resolution in `src/config/loader.rs` and the provider construction in `src/providers/rig.rs`. Otherwise, implement a rig-core provider adapter or extend `ReviewProvider`.
+
+### Review Pipeline Features
+
+The orchestrator supports several opt-in pipeline stages, all wired through CLI flags and threaded into `ReviewOrchestrator::new`:
+
+- **Verify / critic pass (`--verify`, `--show-dropped`)** — after dedup the orchestrator runs `orchestrator::verify::verify_findings`, which calls `ReviewProvider::triage` with the built-in `critic` profile (`src/agents/builtin/critic.md`). Dropped findings end up in `ReviewResult.dropped` and are printed by `main.rs` when `--show-dropped` is set. Fails open: provider errors keep every finding.
+- **Hybrid auto-mode (`--auto-mode heuristic|llm|hybrid`)** — `main::select_auto_profiles` runs `agents::auto::auto_select_profiles_with_confidence` and only consults the LLM (built-in `triage` profile, `src/agents/builtin/triage.md`) when configured to. `parse_triage_profiles` filters verdicts to known profile names.
+- **Multi-wave (`--multi-wave`)** — the orchestrator partitions agents on `profile.wave` and runs wave 2 after wave 1 with a compact wave-1 summary spliced into each task's user prompt. Capped at 2 waves.
+- **Token usage** — every `ReviewOutcome.tokens` is aggregated into `ReviewResult.tokens` and split per resolved model in `tokens_by_model`. Suppress the per-run summary on terminal output with `--no-tokens`.
+- **Evidence on findings** — `Finding.evidence: Vec<String>` (max 5) carries the actual code/symbols a finding refers to. Used as a 4th dedup signal (`has_shared_evidence`) and rendered by the terminal output.
+
+Both `critic` and `triage` are excluded from `agents::list_all_profiles` so they never show up as user-selectable reviewers.
 
 ### `tools/` Directory (Project Root)
 
