@@ -476,6 +476,7 @@ mod tests {
             message: "This is a test finding".to_string(),
             suggestion: Some("Fix it".to_string()),
             agent: "backend".to_string(),
+            evidence: Vec::new(),
         }
     }
 

@@ -126,6 +126,7 @@ mod tests {
             message: "test message".into(),
             suggestion: None,
             agent: "test-agent".into(),
+            evidence: Vec::new(),
         }
     }
 

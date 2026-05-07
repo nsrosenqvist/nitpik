@@ -237,6 +237,7 @@ mod tests {
                 message: "A bug was found".to_string(),
                 suggestion: Some("Fix the bug".to_string()),
                 agent: "backend".to_string(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "src/lib.rs".to_string(),
@@ -247,6 +248,7 @@ mod tests {
                 message: "Style issue".to_string(),
                 suggestion: None,
                 agent: "backend".to_string(),
+                evidence: Vec::new(),
             },
         ]
     }
@@ -272,6 +274,7 @@ mod tests {
                 message: "error".to_string(),
                 suggestion: None,
                 agent: "t".to_string(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "b.rs".to_string(),
@@ -282,6 +285,7 @@ mod tests {
                 message: "warning".to_string(),
                 suggestion: None,
                 agent: "t".to_string(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "c.rs".to_string(),
@@ -292,6 +296,7 @@ mod tests {
                 message: "info".to_string(),
                 suggestion: None,
                 agent: "t".to_string(),
+                evidence: Vec::new(),
             },
         ];
         let output = BitbucketFormatter.format(&findings);

@@ -239,6 +239,7 @@ mod tests {
                 message: "A bug was found".to_string(),
                 suggestion: Some("Fix the bug".to_string()),
                 agent: "backend".to_string(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "src/lib.rs".to_string(),
@@ -249,6 +250,7 @@ mod tests {
                 message: "Style issue".to_string(),
                 suggestion: None,
                 agent: "backend".to_string(),
+                evidence: Vec::new(),
             },
         ]
     }
@@ -329,6 +331,7 @@ mod tests {
             message: "M".to_string(),
             suggestion: None,
             agent: "a".to_string(),
+            evidence: Vec::new(),
         }];
         let output = ForgejoFormatter.format(&findings);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
@@ -348,6 +351,7 @@ mod tests {
             message: "Just a note.".to_string(),
             suggestion: None,
             agent: "architect".to_string(),
+            evidence: Vec::new(),
         };
         let body = format_comment_body(&f);
         assert!(body.contains("🔵"));

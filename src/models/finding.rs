@@ -135,6 +135,32 @@ pub struct Finding {
     pub suggestion: Option<String>,
     /// The agent that produced this finding.
     pub agent: String,
+    /// Optional structured evidence — referenced symbols, function or
+    /// type names, or short line-citation snippets that pinpoint the
+    /// issue. Used by [`crate::orchestrator::dedup`] for semantic
+    /// matching across reviewers (two findings citing the same
+    /// symbol are treated as the same issue regardless of phrasing).
+    ///
+    /// Capped at [`Finding::MAX_EVIDENCE`] entries on deserialization
+    /// so a chatty model can't blow up the token budget. Defaults to
+    /// an empty vec for backward compatibility with cached findings
+    /// produced before this field was introduced.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+}
+
+impl Finding {
+    /// Maximum number of evidence items kept per finding. Excess
+    /// entries are dropped on the orchestrator side.
+    pub const MAX_EVIDENCE: usize = 5;
+
+    /// Truncate `evidence` to [`Self::MAX_EVIDENCE`] in place. Useful
+    /// after deserializing untrusted LLM output.
+    pub fn cap_evidence(&mut self) {
+        if self.evidence.len() > Self::MAX_EVIDENCE {
+            self.evidence.truncate(Self::MAX_EVIDENCE);
+        }
+    }
 }
 
 /// Summary statistics for a review run.
@@ -199,6 +225,7 @@ mod tests {
                 message: "m".into(),
                 suggestion: None,
                 agent: "test".into(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "b.rs".into(),
@@ -209,6 +236,7 @@ mod tests {
                 message: "m".into(),
                 suggestion: None,
                 agent: "test".into(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "c.rs".into(),
@@ -219,6 +247,7 @@ mod tests {
                 message: "m".into(),
                 suggestion: None,
                 agent: "test".into(),
+                evidence: Vec::new(),
             },
         ];
         let s = Summary::from_findings(&findings);

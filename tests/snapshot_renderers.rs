@@ -24,6 +24,7 @@ fn test_findings() -> Vec<Finding> {
             message: "Using .unwrap() can cause a panic at runtime. Use proper error handling with ? or .expect().".into(),
             suggestion: Some("Replace .unwrap() with .context(\"description\")? using anyhow".into()),
             agent: "backend".into(),
+        evidence: Vec::new(),
         },
         Finding {
             file: "src/main.rs".into(),
@@ -34,6 +35,7 @@ fn test_findings() -> Vec<Finding> {
             message: "This error propagation loses context about what operation failed.".into(),
             suggestion: None,
             agent: "backend".into(),
+        evidence: Vec::new(),
         },
         Finding {
             file: "src/utils.rs".into(),
@@ -44,6 +46,7 @@ fn test_findings() -> Vec<Finding> {
             message: "This block of logic is repeated in multiple places and could be extracted into a shared helper function.".into(),
             suggestion: Some("Create a `validate_input()` function in utils.rs".into()),
             agent: "architect".into(),
+        evidence: Vec::new(),
         },
     ]
 }

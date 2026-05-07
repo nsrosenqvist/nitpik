@@ -83,6 +83,7 @@ mod tests {
             message: "User input interpolated into query.".into(),
             suggestion: Some("Use parameterized queries.".into()),
             agent: "security".into(),
+            evidence: Vec::new(),
         }];
 
         let output = GitlabFormatter.format(&findings);
@@ -115,6 +116,7 @@ mod tests {
             message: "M".into(),
             suggestion: None,
             agent: "a".into(),
+            evidence: Vec::new(),
         };
 
         let findings = vec![
@@ -141,6 +143,7 @@ mod tests {
             message: "M".into(),
             suggestion: None,
             agent: "a".into(),
+            evidence: Vec::new(),
         }];
 
         let output = GitlabFormatter.format(&findings);
@@ -166,6 +169,7 @@ mod tests {
             message: "M".into(),
             suggestion: None,
             agent: "a".into(),
+            evidence: Vec::new(),
         };
         assert_eq!(compute_fingerprint(&f), compute_fingerprint(&f));
     }
@@ -181,6 +185,7 @@ mod tests {
             message: "M1".into(),
             suggestion: None,
             agent: "a".into(),
+            evidence: Vec::new(),
         };
         let f2 = Finding {
             file: "a.rs".into(),
@@ -191,6 +196,7 @@ mod tests {
             message: "M2".into(),
             suggestion: None,
             agent: "a".into(),
+            evidence: Vec::new(),
         };
         assert_ne!(compute_fingerprint(&f1), compute_fingerprint(&f2));
     }
@@ -206,6 +212,7 @@ mod tests {
             message: "Just the message.".into(),
             suggestion: None,
             agent: "a".into(),
+            evidence: Vec::new(),
         }];
 
         let output = GitlabFormatter.format(&findings);

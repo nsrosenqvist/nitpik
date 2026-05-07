@@ -132,10 +132,12 @@ pub fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderE
     parse_with_fallbacks::<Wrapper>(response).map(|w| trim_finding_fields(w.findings))
 }
 
-/// Trim trailing whitespace from LLM-generated string fields.
+/// Trim trailing whitespace from LLM-generated string fields and cap
+/// the per-finding evidence list at [`Finding::MAX_EVIDENCE`].
 ///
 /// LLMs occasionally include trailing newlines in finding fields, which
-/// causes extra blank lines in rendered output.
+/// causes extra blank lines in rendered output. They also sometimes
+/// over-share evidence beyond what's useful for dedup.
 pub fn trim_finding_fields(findings: Vec<Finding>) -> Vec<Finding> {
     findings
         .into_iter()
@@ -143,6 +145,11 @@ pub fn trim_finding_fields(findings: Vec<Finding>) -> Vec<Finding> {
             f.title = f.title.trim().to_string();
             f.message = f.message.trim().to_string();
             f.suggestion = f.suggestion.map(|s| s.trim().to_string());
+            for e in &mut f.evidence {
+                *e = e.trim().to_string();
+            }
+            f.evidence.retain(|e| !e.is_empty());
+            f.cap_evidence();
             f
         })
         .collect()

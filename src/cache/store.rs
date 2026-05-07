@@ -294,6 +294,7 @@ mod tests {
             message: "Details".into(),
             suggestion: None,
             agent: "backend".into(),
+            evidence: Vec::new(),
         }]
     }
 
@@ -560,6 +561,7 @@ mod tests {
             message: "Only on feature-b".into(),
             suggestion: None,
             agent: "backend".into(),
+            evidence: Vec::new(),
         }];
         store.put("key-b1", &findings_b).await;
         store

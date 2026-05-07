@@ -154,6 +154,7 @@ fn sample_findings() -> Vec<Finding> {
         message: "A test finding".into(),
         suggestion: None,
         agent: "backend".into(),
+        evidence: Vec::new(),
     }]
 }
 

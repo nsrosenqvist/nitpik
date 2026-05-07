@@ -74,6 +74,7 @@ mod tests {
             message: "User input is interpolated directly into query string.".into(),
             suggestion: Some("Use parameterized queries.".into()),
             agent: "security".into(),
+            evidence: Vec::new(),
         }];
 
         let output = renderer.format(&findings);
@@ -102,6 +103,7 @@ mod tests {
             message: "Details".into(),
             suggestion: None,
             agent: "backend".into(),
+            evidence: Vec::new(),
         }];
 
         let output = renderer.format(&findings);
@@ -121,6 +123,7 @@ mod tests {
             message: "Consider this".into(),
             suggestion: None,
             agent: "backend".into(),
+            evidence: Vec::new(),
         }];
 
         let output = renderer.format(&findings);

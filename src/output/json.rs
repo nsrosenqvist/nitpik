@@ -42,6 +42,7 @@ mod tests {
             message: "Details".into(),
             suggestion: Some("Fix".into()),
             agent: "backend".into(),
+            evidence: Vec::new(),
         }];
 
         let output = renderer.format(&findings);

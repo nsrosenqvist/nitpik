@@ -67,10 +67,20 @@ fn lines_overlap(a: &Finding, b: &Finding) -> bool {
 /// Check if two findings describe the same issue using multiple signals.
 ///
 /// Returns `true` if *any* of the following match:
-/// - Title word overlap > 50%
-/// - At least one shared backtick-wrapped code symbol in title+message
-/// - Combined (title+message) word overlap > 50%
+/// - At least one shared `evidence` entry (semantic primary signal).
+/// - Title word overlap > 50%.
+/// - At least one shared backtick-wrapped code symbol in title+message.
+/// - Combined (title+message) word overlap > 50%.
+///
+/// Evidence is checked first because it's the strongest signal: when
+/// both reviewers cite the same symbol or line, they are talking about
+/// the same issue regardless of how they phrase the title.
 fn content_similar(a: &Finding, b: &Finding) -> bool {
+    // Signal 0: shared evidence (LLM-supplied semantic anchor).
+    if has_shared_evidence(a, b) {
+        return true;
+    }
+
     // Signal 1: title word overlap (original heuristic)
     if word_overlap(&a.title, &b.title) > 0.5 {
         return true;
@@ -89,6 +99,18 @@ fn content_similar(a: &Finding, b: &Finding) -> bool {
     }
 
     false
+}
+
+/// Compare evidence sets case-insensitively. Empty evidence on either
+/// side never matches — absence of evidence is not a similarity signal.
+fn has_shared_evidence(a: &Finding, b: &Finding) -> bool {
+    if a.evidence.is_empty() || b.evidence.is_empty() {
+        return false;
+    }
+    let a_norm: Vec<String> = a.evidence.iter().map(|s| s.to_lowercase()).collect();
+    b.evidence
+        .iter()
+        .any(|e| a_norm.contains(&e.to_lowercase()))
 }
 
 /// Concatenate title and message for broader similarity comparison.
@@ -176,6 +198,7 @@ mod tests {
             message: "msg".into(),
             suggestion: None,
             agent: agent.into(),
+            evidence: Vec::new(),
         }
     }
 
@@ -195,6 +218,7 @@ mod tests {
             message: message.into(),
             suggestion: None,
             agent: agent.into(),
+            evidence: Vec::new(),
         }
     }
 
@@ -371,5 +395,64 @@ mod tests {
     fn word_overlap_empty() {
         assert_eq!(word_overlap("", "something"), 0.0);
         assert_eq!(word_overlap("something", ""), 0.0);
+    }
+
+    fn make_finding_with_evidence(
+        file: &str,
+        line: u32,
+        title: &str,
+        agent: &str,
+        evidence: Vec<&str>,
+    ) -> Finding {
+        let mut f = make_finding(file, line, title, agent);
+        f.evidence = evidence.into_iter().map(String::from).collect();
+        f
+    }
+
+    #[test]
+    fn shared_evidence_deduplicates_across_phrasings() {
+        // Two reviewers, very different titles, but both citing the
+        // same symbol as evidence — should collapse to one.
+        let findings = vec![
+            make_finding_with_evidence(
+                "auth.rs",
+                42,
+                "Race condition risk in lock acquisition",
+                "backend",
+                vec!["acquire_session_lock"],
+            ),
+            make_finding_with_evidence(
+                "auth.rs",
+                42,
+                "Insufficient mutual exclusion on session state",
+                "security",
+                vec!["acquire_session_lock", "session_mutex"],
+            ),
+        ];
+        let result = deduplicate(findings);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn shared_evidence_match_is_case_insensitive() {
+        let findings = vec![
+            make_finding_with_evidence("x.rs", 1, "A different problem", "alpha", vec!["MyFunc"]),
+            make_finding_with_evidence("x.rs", 1, "Yet another concern", "beta", vec!["myfunc"]),
+        ];
+        let result = deduplicate(findings);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn empty_evidence_does_not_deduplicate_unrelated_findings() {
+        // Same file + line so the line-overlap check passes; only the
+        // content_similar logic decides. With no evidence on either
+        // side and no shared text, the findings stay separate.
+        let findings = vec![
+            make_finding("z.rs", 42, "Performance regression in hot path", "alpha"),
+            make_finding("z.rs", 42, "Missing input validation", "beta"),
+        ];
+        let result = deduplicate(findings);
+        assert_eq!(result.len(), 2);
     }
 }

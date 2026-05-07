@@ -43,6 +43,7 @@ Return your findings as a JSON array. For each finding include:
 - \"title\": a concise summary (10 words or fewer)
 - \"message\": 1–2 sentences on what is specifically wrong in this code. Be direct — name the symbol, state the consequence. Skip general background the reader already knows from the title.
 - \"suggestion\": (optional) the concrete fix — lead with corrected code or a specific action, not a general explanation. Don't just say \"consider fixing this\".
+- \"evidence\": (optional) 1–3 short strings naming the symbols, type names, or line citations that pinpoint the issue (e.g. \"acquire_lock\", \"UserSession::from_cookie\", \"line 42\"). Used for cross-reviewer deduplication — keep them stable across paraphrases.
 - \"agent\": \"{agent_name}\"
 
 Be concise. The title already states the issue category — the message should add *specific* \
@@ -67,6 +68,7 @@ Example finding:
   \"title\": \"Unhandled error from file I/O\",
   \"message\": \"`read_config` panics on missing/unreadable files instead of propagating the error.\",
   \"suggestion\": \"Replace `.unwrap()` with `.map_err(|e| AppError::ConfigLoad(e))?`\",
+  \"evidence\": [\"read_config\", \"unwrap()\"],
   \"agent\": \"{agent_name}\"
 }}
 ```
@@ -441,6 +443,7 @@ mod tests {
             message: "This was found before".into(),
             suggestion: None,
             agent: "backend".into(),
+            evidence: Vec::new(),
         }];
 
         let prompt = build_prompt(
@@ -487,6 +490,7 @@ mod tests {
             message: "Needs fixing".into(),
             suggestion: None,
             agent: "backend".into(),
+            evidence: Vec::new(),
         }];
 
         let base = build_prompt(

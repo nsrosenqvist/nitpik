@@ -81,6 +81,7 @@ mod tests {
             message: "test".into(),
             suggestion: None,
             agent: "test".into(),
+            evidence: Vec::new(),
         }
     }
 

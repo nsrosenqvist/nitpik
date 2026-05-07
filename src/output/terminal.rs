@@ -58,6 +58,15 @@ impl OutputFormatter for TerminalFormatter {
                 let _ = writeln!(output, "   {} {}", "→".cyan(), suggestion);
             }
 
+            if !finding.evidence.is_empty() {
+                let _ = writeln!(
+                    output,
+                    "   {} {}",
+                    "evidence:".dimmed(),
+                    finding.evidence.join(", ").dimmed(),
+                );
+            }
+
             output.push('\n');
         }
 
@@ -113,6 +122,7 @@ mod tests {
                 message: "This is broken".into(),
                 suggestion: Some("Fix it".into()),
                 agent: "backend".into(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "src/main.rs".into(),
@@ -123,6 +133,7 @@ mod tests {
                 message: "Could be faster".into(),
                 suggestion: None,
                 agent: "backend".into(),
+                evidence: Vec::new(),
             },
         ];
         let output = renderer.format(&findings);
@@ -146,6 +157,7 @@ mod tests {
                 message: "Problem in A".into(),
                 suggestion: None,
                 agent: "test".into(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "src/b.rs".into(),
@@ -156,6 +168,7 @@ mod tests {
                 message: "Problem in B".into(),
                 suggestion: None,
                 agent: "test".into(),
+                evidence: Vec::new(),
             },
         ];
         let output = renderer.format(&findings);

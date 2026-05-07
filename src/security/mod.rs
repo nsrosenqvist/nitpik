@@ -43,6 +43,7 @@ pub fn scan_and_redact(
             ),
             suggestion: Some("Remove the hardcoded secret and use environment variables or a secrets manager instead.".to_string()),
             agent: "secret-scanner".to_string(),
+            evidence: Vec::new(),
         });
 
         // Redact the matched secret

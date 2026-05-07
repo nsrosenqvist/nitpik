@@ -81,6 +81,7 @@ mod tests {
                 message: "A bug was found".to_string(),
                 suggestion: Some("Fix the bug".to_string()),
                 agent: "backend".to_string(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "src/lib.rs".to_string(),
@@ -91,6 +92,7 @@ mod tests {
                 message: "Style issue".to_string(),
                 suggestion: None,
                 agent: "frontend".to_string(),
+                evidence: Vec::new(),
             },
             Finding {
                 file: "src/main.rs".to_string(),
@@ -101,6 +103,7 @@ mod tests {
                 message: "Consider refactoring".to_string(),
                 suggestion: None,
                 agent: "architect".to_string(),
+                evidence: Vec::new(),
             },
         ]
     }
@@ -168,6 +171,7 @@ mod tests {
             message: "Use <T> instead of \"raw\" types & 'stuff'".to_string(),
             suggestion: None,
             agent: "backend".to_string(),
+            evidence: Vec::new(),
         }];
         let output = CheckstyleFormatter.format(&findings);
         assert!(output.contains("name=\"src/foo&amp;bar.rs\""));

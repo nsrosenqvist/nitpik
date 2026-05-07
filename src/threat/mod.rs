@@ -39,6 +39,7 @@ pub fn match_to_finding(m: &ThreatMatch) -> Finding {
         ),
         suggestion: Some(suggestion_for_severity(m.severity)),
         agent: THREAT_SCANNER_AGENT.to_string(),
+        evidence: Vec::new(),
     }
 }
 

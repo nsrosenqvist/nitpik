@@ -176,6 +176,7 @@ fn test_findings(file: &str, agent: &str) -> Vec<Finding> {
             message: "The variable `x` is never used.".to_string(),
             suggestion: Some("Remove the variable or prefix with underscore.".to_string()),
             agent: agent.to_string(),
+            evidence: Vec::new(),
         },
         Finding {
             file: file.to_string(),
@@ -186,6 +187,7 @@ fn test_findings(file: &str, agent: &str) -> Vec<Finding> {
             message: "This function lacks a doc comment.".to_string(),
             suggestion: None,
             agent: agent.to_string(),
+            evidence: Vec::new(),
         },
     ]
 }
@@ -516,6 +518,7 @@ async fn orchestrator_handles_multiple_agents_and_files() {
         message: "Error found by agent A.".to_string(),
         suggestion: None,
         agent: "agent-a".to_string(),
+        evidence: Vec::new(),
     }];
     let provider = Arc::new(MockProvider::new(findings_a));
     let config = Config::default();
@@ -786,6 +789,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         message: "Could panic at runtime.".to_string(),
         suggestion: Some("Add a None check.".to_string()),
         agent: "prior-agent".to_string(),
+        evidence: Vec::new(),
     }];
 
     // Follow-up findings (the model's response when it sees prior context)
@@ -799,6 +803,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         message: "The previous null deref was fixed but naming could improve.".to_string(),
         suggestion: None,
         agent: "prior-agent".to_string(),
+        evidence: Vec::new(),
     }];
 
     let provider = Arc::new(PromptCapturingProvider {
@@ -1007,6 +1012,7 @@ async fn no_prior_context_flag_suppresses_injection() {
         message: "User input concatenated into query.".to_string(),
         suggestion: None,
         agent: "sec-agent".to_string(),
+        evidence: Vec::new(),
     }];
 
     let config = Config::default();
@@ -1141,6 +1147,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
                     message: "Minor style issue.".to_string(),
                     suggestion: None,
                     agent: "tool-agent".to_string(),
+                    evidence: Vec::new(),
                 }],
                 tokens: Default::default(),
             })
@@ -1266,6 +1273,7 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
                     message: "Minor.".to_string(),
                     suggestion: None,
                     agent: "tool-agent".to_string(),
+                    evidence: Vec::new(),
                 }],
                 tokens: Default::default(),
             })
