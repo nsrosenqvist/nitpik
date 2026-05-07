@@ -215,6 +215,7 @@ async fn orchestrator_returns_findings_from_mock_provider() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -256,6 +257,7 @@ async fn orchestrator_returns_empty_for_no_issues() {
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -308,6 +310,7 @@ async fn orchestrator_aggregates_token_usage_across_tasks() {
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -381,6 +384,7 @@ async fn orchestrator_splits_token_usage_by_model() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -428,6 +432,7 @@ async fn orchestrator_zero_tokens_when_all_failed() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -461,6 +466,7 @@ async fn orchestrator_errors_on_empty_diffs() {
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -499,6 +505,7 @@ async fn orchestrator_skips_binary_files() {
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -552,6 +559,7 @@ async fn orchestrator_handles_multiple_agents_and_files() {
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -631,6 +639,7 @@ async fn orchestrator_handles_provider_errors_gracefully() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -708,6 +717,7 @@ async fn cache_prevents_duplicate_calls() {
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -945,6 +955,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let result2 = orchestrator
@@ -1081,6 +1092,7 @@ async fn no_prior_context_flag_suppresses_injection() {
         true, // no_prior_context = true → suppress prior findings
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -1230,6 +1242,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let context = ReviewContext {
@@ -1348,6 +1361,7 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -1746,6 +1760,7 @@ async fn orchestrator_verify_drops_findings_via_critic() {
         String::new(),
         true,  // verify
         false, // multi_wave
+        false,
     );
 
     let context = ReviewContext {
@@ -1822,6 +1837,7 @@ async fn orchestrator_verify_fail_open_when_triage_errors() {
         String::new(),
         true,  // verify on, but triage fails
         false, // multi_wave
+        false,
     );
 
     let context = ReviewContext {
@@ -1888,6 +1904,7 @@ async fn orchestrator_no_verify_leaves_findings_untouched() {
         None,
         String::new(),
         false, // verify off
+        false,
         false,
     );
 
@@ -2017,6 +2034,7 @@ async fn orchestrator_multi_wave_feeds_wave1_findings_into_wave2() {
         String::new(),
         false, // verify
         true,  // multi_wave
+        false,
     );
 
     let context = ReviewContext {
@@ -2114,6 +2132,7 @@ async fn orchestrator_runs_all_agents_in_one_wave_when_multi_wave_disabled() {
         String::new(),
         false, // verify
         false, // multi_wave OFF
+        false,
     );
 
     let context = ReviewContext {
@@ -2144,4 +2163,317 @@ async fn orchestrator_runs_all_agents_in_one_wave_when_multi_wave_disabled() {
             "{name}'s prompt should not mention wave-1 findings, got:\n{prompt}",
         );
     }
+}
+
+// ─── Audit log tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn orchestrator_collects_task_audits_when_audit_enabled() {
+    let findings = test_findings("src/main.rs", "test-agent");
+    let provider = Arc::new(MockProvider::new(findings));
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        true, // audit_enabled
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("test-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(result.task_audits.len(), 1);
+    let task = &result.task_audits[0];
+    assert_eq!(task.agent, "test-agent");
+    assert_eq!(task.file, "src/main.rs");
+    assert_eq!(task.wave, 1);
+    assert!(matches!(task.status, nitpik::audit::TaskStatus::Done));
+    assert_eq!(task.retries, 0);
+    assert_eq!(task.findings_emitted, 2);
+    assert!(task.error.is_none());
+}
+
+#[tokio::test]
+async fn orchestrator_skips_audit_collection_when_disabled() {
+    let findings = test_findings("src/main.rs", "test-agent");
+    let provider = Arc::new(MockProvider::new(findings));
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        false, // audit_enabled OFF
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("test-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert!(result.task_audits.is_empty());
+    assert!(result.verify_audit.is_none());
+}
+
+#[tokio::test]
+async fn orchestrator_records_failed_task_in_audit() {
+    let provider = Arc::new(FailingProvider);
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        true,
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("test-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should not error even when tasks fail");
+
+    assert_eq!(result.failed_tasks, 1);
+    assert_eq!(result.task_audits.len(), 1);
+    let task = &result.task_audits[0];
+    assert!(matches!(task.status, nitpik::audit::TaskStatus::Failed));
+    assert!(task.error.is_some());
+}
+
+#[tokio::test]
+async fn orchestrator_populates_verify_audit_when_critic_drops() {
+    // Reuse the existing ReviewAndTriageMock pattern: mock returns
+    // findings on review and a triage verdict that drops one finding.
+    let findings = test_findings("src/main.rs", "test-agent");
+    let triage = TriageOutcome {
+        verdicts: vec![
+            TriageVerdict {
+                index: 0,
+                classification: "drop".to_string(),
+                rationale: Some("looks fine".to_string()),
+            },
+            TriageVerdict {
+                index: 1,
+                classification: "keep".to_string(),
+                rationale: None,
+            },
+        ],
+        tokens: Default::default(),
+    };
+    let mock = Arc::new(ReviewAndTriageMock { findings, triage });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        mock,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        true, // verify ON
+        false,
+        true, // audit
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("test-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    let verify = result
+        .verify_audit
+        .expect("verify audit should be populated when critic ran");
+    assert_eq!(verify.kept, 1);
+    assert_eq!(verify.dropped.len(), 1);
+    assert_eq!(verify.dropped[0].agent, "test-agent");
+    assert_eq!(verify.dropped[0].file, "src/main.rs");
+    assert_eq!(verify.dropped[0].title, "Unused variable");
+    assert_eq!(verify.dropped[0].reason, "looks fine");
+}
+
+#[tokio::test]
+async fn audit_log_end_to_end_writes_valid_json_to_disk() {
+    // True e2e: run the orchestrator, assemble a RunAudit document
+    // (mirroring main.rs), write it to disk, then read the file back
+    // and validate the on-disk JSON schema readers will see.
+    use nitpik::audit::{ConfigSummary, RunAudit};
+
+    let mock = Arc::new(MockProvider::new(test_findings("src/lib.rs", "test-agent")));
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/lib.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        mock,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        true, // audit_enabled
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/lib.rs", "fn main() {}")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("test-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    let document = RunAudit {
+        schema: 1,
+        run_id: "test-run-id".to_string(),
+        started_at_unix_ms: 1_700_000_000_000,
+        duration_ms: 42,
+        config: ConfigSummary {
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet".to_string(),
+            agentic: false,
+            max_turns: 10,
+            max_tool_calls: 10,
+            max_concurrent: 4,
+            profiles: vec!["test-agent".to_string()],
+            multi_wave: false,
+            verify: false,
+            auto_mode: Some("hybrid".to_string()),
+            review_scope: "main".to_string(),
+            nitpik_version: "0.0.0-test".to_string(),
+        },
+        tasks: result.task_audits.clone(),
+        verify: result.verify_audit.clone(),
+        findings: result.findings.clone(),
+        failed_tasks: result.failed_tasks,
+        tokens: result.tokens,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested/audit.json");
+    document.write_to(&path).expect("write_to should succeed");
+    assert!(path.exists());
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).expect("audit log must be valid JSON");
+
+    // Top-level shape readers will rely on.
+    assert_eq!(parsed["schema"], 1);
+    assert_eq!(parsed["run_id"], "test-run-id");
+    assert_eq!(parsed["started_at_unix_ms"], 1_700_000_000_000_i64);
+    assert_eq!(parsed["duration_ms"], 42);
+    assert_eq!(parsed["failed_tasks"], 0);
+
+    // Config snapshot — secrets must NOT be serialized.
+    let cfg = &parsed["config"];
+    assert_eq!(cfg["provider"], "anthropic");
+    assert_eq!(cfg["model"], "claude-sonnet");
+    assert_eq!(cfg["nitpik_version"], "0.0.0-test");
+    assert!(cfg.get("api_key").is_none(), "api_key must not leak");
+
+    // Tasks: one file × one agent.
+    let tasks = parsed["tasks"].as_array().expect("tasks must be array");
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0]["agent"], "test-agent");
+    assert_eq!(tasks[0]["file"], "src/lib.rs");
+    assert_eq!(tasks[0]["wave"], 1);
+    assert_eq!(tasks[0]["status"], "done");
+    assert!(tasks[0]["findings_emitted"].as_u64().is_some());
+
+    // Verify is None here — the field is `skip_serializing_if = "Option::is_none"`.
+    assert!(
+        parsed.get("verify").is_none(),
+        "verify must be omitted when None"
+    );
+
+    // Findings array round-trips.
+    let findings = parsed["findings"].as_array().unwrap();
+    assert_eq!(findings.len(), result.findings.len());
+
+    // Token totals are present.
+    assert!(parsed["tokens"]["input"].as_u64().is_some());
+    assert!(parsed["tokens"]["output"].as_u64().is_some());
 }

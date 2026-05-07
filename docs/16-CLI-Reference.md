@@ -105,6 +105,12 @@ Run a code review.
 |---|---|---|
 | `--max-concurrent <N>` | `5` | Max concurrent LLM calls. |
 
+### Audit Log
+
+| Flag | Default | Description |
+|---|---|---|
+| `--audit-log <PATH>` | — | Write a structured JSON audit log to `PATH` after the run. Records per-task status, tool calls, retries, token usage, critic decisions, and final findings. Useful as a CI build artifact for after-the-fact debugging. Also configurable via `NITPIK_AUDIT_LOG` env var or `[review].audit_log` in `.nitpik.toml`. |
+
 ---
 
 ## `nitpik profiles`

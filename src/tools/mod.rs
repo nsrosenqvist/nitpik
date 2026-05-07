@@ -64,7 +64,14 @@ static TOOL_CALL_QUEUE: SegQueue<ToolCallEntry> = SegQueue::new();
 
 impl ToolCallLog {
     /// Record a tool invocation (lock-free push).
+    ///
+    /// In addition to the process-global queue (consumed by the live
+    /// progress display), the entry is mirrored into the current
+    /// task's audit buffer if one is installed via
+    /// [`crate::audit::scope`]. The audit mirror is a no-op outside
+    /// any scope.
     pub fn record(entry: ToolCallEntry) {
+        crate::audit::record(&entry);
         TOOL_CALL_QUEUE.push(entry);
     }
 

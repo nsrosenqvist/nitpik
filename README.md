@@ -263,6 +263,7 @@ enabled = false
 | `NITPIK_API_KEY` | Universal API key fallback |
 | `NITPIK_BASE_URL` | Custom endpoint for OpenAI-compatible APIs |
 | `NITPIK_LICENSE_KEY` | License key (alternative to `nitpik license activate`) |
+| `NITPIK_AUDIT_LOG` | Path to write a per-run JSON audit log (equivalent to `--audit-log`) |
 | `ANTHROPIC_API_KEY` | Anthropic-specific key |
 | `OPENAI_API_KEY` | OpenAI-specific key (also used for openai-compatible) |
 | `GEMINI_API_KEY` | Gemini-specific key |

@@ -3,6 +3,7 @@
 //! Re-exports public modules for integration tests and external use.
 
 pub mod agents;
+pub mod audit;
 pub mod cache;
 pub mod ci;
 pub mod config;

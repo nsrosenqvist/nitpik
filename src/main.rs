@@ -6,6 +6,7 @@
 mod cli;
 
 use nitpik::agents;
+use nitpik::audit;
 use nitpik::cache;
 use nitpik::config;
 use nitpik::constants;
@@ -343,6 +344,7 @@ async fn create_orchestrator(
     max_prior_findings: Option<usize>,
     verify: bool,
     multi_wave: bool,
+    audit_enabled: bool,
 ) -> Result<(Arc<dyn ReviewProvider>, orchestrator::ReviewOrchestrator)> {
     let provider: Arc<dyn ReviewProvider> = Arc::new(
         RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
@@ -363,6 +365,7 @@ async fn create_orchestrator(
         review_scope,
         verify,
         multi_wave,
+        audit_enabled,
     );
     Ok((provider, orchestrator))
 }
@@ -379,6 +382,15 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     let use_agent = args.agent || config.review.agentic.enabled;
     let scan_secrets = args.scan_secrets || config.secrets.enabled;
     let scan_threats = args.scan_threats || config.threats.enabled;
+
+    // Resolve audit log destination: CLI > env (already in config via
+    // apply_env_vars) > [review].audit_log in TOML.
+    let audit_path: Option<std::path::PathBuf> = args
+        .audit_log
+        .clone()
+        .or_else(|| config.review.audit_log.clone());
+    let audit_started_at = audit::now_unix_ms();
+    let audit_started_instant = std::time::Instant::now();
 
     // Get diff source — keeps raw content alive so parsed diffs
     // can borrow via Cow (zero-copy).
@@ -471,6 +483,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         args.max_prior_findings,
         args.verify,
         args.multi_wave,
+        audit_path.is_some(),
     )
     .await?;
 
@@ -616,6 +629,56 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         && std::io::stderr().is_terminal();
     if show_tokens && total_tokens.total() > 0 {
         print_token_summary(total_tokens, &tokens_by_model);
+    }
+
+    // Write audit log artifact (opt-in via --audit-log / NITPIK_AUDIT_LOG / TOML).
+    if let Some(ref path) = audit_path {
+        let auto_mode_str = match args.auto_mode {
+            cli::args::AutoMode::Heuristic => "heuristic",
+            cli::args::AutoMode::Llm => "llm",
+            cli::args::AutoMode::Hybrid => "hybrid",
+        };
+        let profile_names: Vec<String> =
+            agent_defs.iter().map(|a| a.profile.name.clone()).collect();
+        let summary = audit::ConfigSummary {
+            provider: config.provider.name.to_string(),
+            model: config.provider.resolved_model().to_string(),
+            agentic: use_agent,
+            max_turns: args.max_turns,
+            max_tool_calls: args.max_tool_calls,
+            max_concurrent: args.max_concurrent,
+            profiles: profile_names,
+            multi_wave: args.multi_wave,
+            verify: args.verify,
+            auto_mode: Some(auto_mode_str.to_string()),
+            review_scope: diff::git::detect_branch(repo_root_path, &Env::real()).await,
+            nitpik_version: constants::VERSION.to_string(),
+        };
+        let document = audit::RunAudit {
+            schema: 1,
+            run_id: uuid::Uuid::new_v4().to_string(),
+            started_at_unix_ms: audit_started_at,
+            duration_ms: audit_started_instant.elapsed().as_millis() as u64,
+            config: summary,
+            tasks: review_result.task_audits.clone(),
+            verify: review_result.verify_audit.clone(),
+            findings: findings.clone(),
+            failed_tasks: review_result.failed_tasks,
+            tokens: total_tokens,
+        };
+        match document.write_to(path) {
+            Ok(()) => {
+                if !args.quiet {
+                    eprintln!("Audit log written to {}", path.display());
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: failed to write audit log to {}: {e}",
+                    path.display()
+                );
+            }
+        }
     }
 
     let fail_on_severity: Option<Severity> = if args.no_fail {

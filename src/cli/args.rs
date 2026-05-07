@@ -248,6 +248,18 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub multi_wave: bool,
 
+    /// Write a structured audit log of the review run to the given path.
+    ///
+    /// The artifact is a single JSON document containing the run
+    /// configuration (no secrets), per file × agent task data
+    /// (status, retries, tokens, tool calls), the critic verify
+    /// outcome (when `--verify` is set), and the final findings.
+    /// Useful as a CI build artifact for after-the-fact inspection.
+    /// Can also be set via `NITPIK_AUDIT_LOG` or the
+    /// `[review].audit_log` key in `.nitpik.toml`.
+    #[arg(long, value_name = "PATH")]
+    pub audit_log: Option<PathBuf>,
+
     // --- Context ---
     /// Skip auto-detected project documentation files (AGENTS.md, CONVENTIONS.md, etc.).
     #[arg(long, default_value_t = false)]
@@ -430,6 +442,7 @@ mod tests {
             show_dropped: false,
             auto_mode: AutoMode::Hybrid,
             multi_wave: false,
+            audit_log: None,
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: vec![],

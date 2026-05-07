@@ -92,6 +92,7 @@ pub const ENV_BASE_URL: &str = "NITPIK_BASE_URL";
 pub const ENV_LICENSE_KEY: &str = "NITPIK_LICENSE_KEY";
 pub const ENV_TELEMETRY: &str = "NITPIK_TELEMETRY";
 pub const ENV_DEBUG: &str = "NITPIK_DEBUG";
+pub const ENV_AUDIT_LOG: &str = "NITPIK_AUDIT_LOG";
 
 /// Environment variables that custom command subprocesses inherit by default.
 ///

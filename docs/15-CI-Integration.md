@@ -288,6 +288,21 @@ Add `--quiet` in CI to suppress the banner and progress display, keeping logs cl
 nitpik review --diff-base main --format github --quiet
 ```
 
+### Audit Logs as Build Artifacts
+
+Use `--audit-log <PATH>` (or `NITPIK_AUDIT_LOG`) to write a JSON record of the run — per-task status, tool calls, retries, token usage, critic decisions, and final findings — and upload it as a build artifact for after-the-fact debugging:
+
+```yaml
+# GitHub Actions
+- name: Run nitpik
+  run: nitpik review --diff-base origin/main --audit-log nitpik-audit.json --format github
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: nitpik-audit
+    path: nitpik-audit.json
+```
+
 ## Related Pages
 
 - [Output Formats](08-Output-Formats) — format details and `--fail-on` behavior

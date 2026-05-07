@@ -51,6 +51,10 @@ pub struct ReviewConfig {
     pub fail_on: Option<Severity>,
     pub agentic: AgenticConfig,
     pub context: ContextConfig,
+    /// Default destination for the per-run audit log JSON artifact.
+    /// Equivalent to passing `--audit-log <PATH>`. Overridden by
+    /// `NITPIK_AUDIT_LOG` and `--audit-log`.
+    pub audit_log: Option<PathBuf>,
 }
 
 impl Default for ReviewConfig {
@@ -60,6 +64,7 @@ impl Default for ReviewConfig {
             fail_on: None,
             agentic: AgenticConfig::default(),
             context: ContextConfig::default(),
+            audit_log: None,
         }
     }
 }
@@ -294,6 +299,7 @@ impl Config {
             other.review.context.surrounding_lines,
             dc.surrounding_lines
         );
+        merge_if_some!(self.review.audit_log, other.review.audit_log);
 
         // Provider settings
         let dp = ProviderConfig::default();
@@ -373,6 +379,13 @@ impl Config {
                     "Warning: ignoring invalid {} value: {val}",
                     crate::constants::ENV_TELEMETRY
                 ),
+            }
+        }
+
+        // Audit log destination
+        if let Ok(val) = env.var(crate::constants::ENV_AUDIT_LOG) {
+            if !val.is_empty() {
+                self.review.audit_log = Some(PathBuf::from(val));
             }
         }
     }

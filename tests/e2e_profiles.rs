@@ -198,6 +198,58 @@ fn real_config() -> Config {
     Config::load(None, &nitpik::env::Env::real()).unwrap_or_default()
 }
 
+/// Run a review with audit collection enabled and (optionally) agentic mode on.
+/// Returns the full `ReviewResult` so tests can inspect `task_audits`.
+async fn run_review_collecting_audit(
+    repo_path: &Path,
+    profile_names: &[&str],
+    config: &Config,
+    agentic: bool,
+) -> nitpik::orchestrator::ReviewResult {
+    let input = InputMode::GitBase("HEAD".to_string());
+    let diffs = get_diffs_owned(&input, repo_path).await;
+    assert!(!diffs.is_empty());
+
+    let profiles: Vec<String> = profile_names.iter().map(|s| s.to_string()).collect();
+    let agent_defs = agents::resolve_profiles(&profiles, None)
+        .await
+        .expect("failed to resolve profiles");
+
+    let baseline =
+        context::build_baseline_context(repo_path, &diffs, config, false, &[], Vec::new()).await;
+
+    let review_context = ReviewContext {
+        diffs,
+        baseline,
+        repo_root: repo_path.to_string_lossy().to_string(),
+        is_path_scan: false,
+    };
+
+    let provider: Arc<dyn ReviewProvider> = Arc::new(
+        RigProvider::new(config.provider.clone(), repo_path.to_path_buf())
+            .expect("failed to create provider — is API key set?"),
+    );
+    let cache = CacheEngine::new(false);
+    let progress = std::sync::Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
+    let orchestrator = ReviewOrchestrator::new(
+        Arc::clone(&provider),
+        config,
+        cache,
+        progress,
+        agentic,
+        None,
+        String::new(),
+        false,
+        false,
+        true, // audit_enabled
+    );
+
+    orchestrator
+        .run(&review_context, &agent_defs, 2, false, 10, 10)
+        .await
+        .expect("orchestrator should succeed")
+}
+
 /// Run the full review pipeline for a given repo and profile name(s).
 ///
 /// Returns the list of findings produced by the real LLM.
@@ -267,6 +319,7 @@ async fn run_review(repo_path: &Path, profile_names: &[&str], config: &Config) -
         false,
         None,
         String::new(),
+        false,
         false,
         false,
     );
@@ -597,6 +650,7 @@ async fn e2e_custom_profile() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let result = orchestrator
@@ -719,6 +773,7 @@ async fn e2e_custom_tool_agentic() {
             false,
             None,
             String::new(),
+            false,
             false,
             false,
         );
@@ -900,6 +955,7 @@ async fn e2e_builtin_tool_agentic() {
             false,
             None,
             String::new(),
+            false,
             false,
             false,
         );
@@ -1132,6 +1188,7 @@ async fn e2e_cache_prior_findings() {
         String::new(),
         false,
         false,
+        false,
     );
 
     let result_v1 = orch1
@@ -1197,6 +1254,7 @@ async fn e2e_cache_prior_findings() {
         false, // no_prior_context = false → inject prior findings
         None,  // unlimited
         String::new(),
+        false,
         false,
         false,
     );
@@ -1310,6 +1368,7 @@ async fn e2e_agentic_mode() {
             String::new(),
             false,
             false,
+            false,
         );
 
         // agentic=true, max_turns=5, max_tool_calls=10
@@ -1367,5 +1426,101 @@ async fn e2e_agentic_mode() {
         } else {
             format!(" and invoked {} tool call(s)", captured.len())
         }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+
+/// E2E test for the per-run audit log artifact. Runs a real review in
+/// agentic mode (so tool calls are likely), assembles a `RunAudit` document
+/// the same way `main.rs` does, writes it to a tempfile, then reads it back
+/// as JSON and validates the on-disk schema against real orchestrator data.
+#[tokio::test]
+#[ignore]
+async fn e2e_audit_log_real_run() {
+    require_api_key!();
+    let config = real_config();
+
+    eprintln!("\n=== E2E: audit log artifact ===");
+    let (repo, _tmp) = setup_repo("backend").await;
+
+    let result = run_review_collecting_audit(&repo, &["backend"], &config, true).await;
+
+    // Orchestrator must have populated per-task audit data when audit_enabled=true.
+    assert!(
+        !result.task_audits.is_empty(),
+        "task_audits should be populated when audit collection is on"
+    );
+    eprintln!("  collected {} task audit(s)", result.task_audits.len());
+
+    let total_tool_calls: usize = result.task_audits.iter().map(|t| t.tool_calls.len()).sum();
+    eprintln!("  total tool-call records across tasks: {total_tool_calls}");
+
+    // Build the RunAudit document the same way main.rs does.
+    use nitpik::audit::{ConfigSummary, RunAudit};
+    let document = RunAudit {
+        schema: 1,
+        run_id: uuid::Uuid::new_v4().to_string(),
+        started_at_unix_ms: 0,
+        duration_ms: 0,
+        config: ConfigSummary {
+            provider: config.provider.name.to_string(),
+            model: config.provider.model.clone().unwrap_or_default(),
+            agentic: true,
+            max_turns: 10,
+            max_tool_calls: 10,
+            max_concurrent: 2,
+            profiles: vec!["backend".to_string()],
+            multi_wave: false,
+            verify: false,
+            auto_mode: None,
+            review_scope: "HEAD".to_string(),
+            nitpik_version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+        tasks: result.task_audits.clone(),
+        verify: result.verify_audit.clone(),
+        findings: result.findings.clone(),
+        failed_tasks: result.failed_tasks,
+        tokens: result.tokens,
+    };
+
+    // Write to disk and round-trip as JSON.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run-audit.json");
+    document.write_to(&path).expect("write_to should succeed");
+    assert!(path.exists());
+    let raw = std::fs::read_to_string(&path).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).expect("audit log must be valid JSON");
+
+    // Top-level schema.
+    assert_eq!(parsed["schema"], 1);
+    assert!(parsed["run_id"].as_str().unwrap().len() > 10);
+    let cfg = &parsed["config"];
+    assert_eq!(cfg["agentic"], true);
+    assert!(cfg.get("api_key").is_none(), "api_key must not leak");
+
+    // Tasks shape — at least one entry, with the expected keys.
+    let tasks = parsed["tasks"].as_array().expect("tasks must be array");
+    assert!(!tasks.is_empty());
+    for task in tasks {
+        assert!(task["agent"].is_string());
+        assert!(task["file"].is_string());
+        assert!(task["status"].is_string());
+        assert!(task["wave"].is_number());
+        assert!(task["tool_calls"].is_array());
+    }
+
+    // Tokens summary present.
+    assert!(parsed["tokens"]["input"].as_u64().is_some());
+    assert!(parsed["tokens"]["output"].as_u64().is_some());
+
+    eprintln!(
+        "  ✓ audit log written to {} ({} bytes), {} tool call(s) recorded",
+        path.display(),
+        raw.len(),
+        total_tool_calls
     );
 }

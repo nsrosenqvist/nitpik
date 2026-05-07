@@ -34,6 +34,7 @@ Extend the system by implementing a trait, not by modifying existing implementat
 | `output/` | `OutputRenderer` trait + format implementations (terminal, JSON, GitHub, GitLab, Bitbucket, Forgejo) |
 | `security/` | Secret scanner, vendored gitleaks rules, entropy checks, redaction |
 | `cache/` | Content-hash cache, filesystem storage, branch-scoped sidecar metadata for prior findings |
+| `audit/` | Optional per-run JSON audit log artifact: per-task status, tool calls, retries, token usage, critic decisions, and final findings. Writes nothing unless `--audit-log` (or `NITPIK_AUDIT_LOG`/`[review].audit_log`) is set. |
 | `models/` | Shared types: `Finding`, `Severity`, `FileDiff`, `AgentDefinition`, `ReviewConfig`, `ReviewContext`, etc. |
 | `license/` | Offline Ed25519 license key verification, expiry checks |
 | `progress/` | Live terminal progress display — spinners, status tracking per file×agent task, suppressed with `--quiet` |
@@ -244,6 +245,7 @@ The orchestrator supports several opt-in pipeline stages, all wired through CLI 
 - **Multi-wave (`--multi-wave`)** — the orchestrator partitions agents on `profile.wave` and runs wave 2 after wave 1 with a compact wave-1 summary spliced into each task's user prompt. Capped at 2 waves.
 - **Token usage** — every `ReviewOutcome.tokens` is aggregated into `ReviewResult.tokens` and split per resolved model in `tokens_by_model`. Suppress the per-run summary on terminal output with `--no-tokens`.
 - **Evidence on findings** — `Finding.evidence: Vec<String>` (max 5) carries the actual code/symbols a finding refers to. Used as a 4th dedup signal (`has_shared_evidence`) and rendered by the terminal output.
+- **Audit log (`--audit-log <PATH>`, `NITPIK_AUDIT_LOG`, `[review].audit_log`)** — when opt-in, the `audit` module collects a per-run JSON artifact: per-task status / retries / tool calls, critic verdicts, token totals, and the final findings list. Per-task tool-call collection uses a `tokio::task_local` `TASK_BUFFER`; `ToolCallLog::record` mirrors entries into the active scope. When the flag is unset there is zero overhead — the orchestrator skips audit collection entirely (`ReviewResult.task_audits` and `verify_audit` stay empty/`None`). The artifact is written by `main.rs` after the token summary; failures are non-fatal and reported on stderr.
 
 Both `critic` and `triage` are excluded from `agents::list_all_profiles` so they never show up as user-selectable reviewers.
 

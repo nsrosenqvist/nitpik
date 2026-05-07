@@ -71,6 +71,7 @@ The project config overrides the global config, so teams can set project-level s
 |---|---|---|---|
 | `default_profiles` | array | `["backend"]` | Profiles used when `--profile` is not specified on the CLI. |
 | `fail_on` | string | `"error"` | Fail-on severity threshold. One of: `error`, `warning`, `info`. nitpik exits non-zero if any finding meets this threshold. Use `--no-fail` on the CLI to disable. |
+| `audit_log` | string | *(none)* | Path to write the per-run JSON audit log. When set, nitpik captures per-task status, tool calls, retries, token usage, critic decisions, and final findings. CLI flag `--audit-log` and env var `NITPIK_AUDIT_LOG` take precedence. |
 
 ### `[review.agentic]`
 
@@ -152,6 +153,7 @@ nitpik checks for a provider-specific key first, then falls back to `NITPIK_API_
 |---|---|
 | `NITPIK_LICENSE_KEY` | Commercial license key |
 | `NITPIK_TELEMETRY` | Set `false` to disable telemetry |
+| `NITPIK_AUDIT_LOG` | Path to write a per-run JSON audit log (equivalent to `--audit-log`) |
 
 ## Related Pages
 

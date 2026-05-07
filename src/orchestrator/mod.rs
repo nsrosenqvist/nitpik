@@ -39,6 +39,8 @@ use prompt::{build_prompt, build_prompt_with_prior, build_system_addendum};
 use scope::filter_to_diff_scope;
 use verify::DroppedFinding;
 
+use crate::audit::{TaskAudit, TaskStatus as AuditTaskStatus, VerifyAudit};
+
 /// Errors from the orchestrator.
 #[derive(Error, Debug)]
 pub enum OrchestratorError {
@@ -67,6 +69,12 @@ pub struct ReviewResult {
     /// Findings the critic dropped (only populated when `verify`
     /// was enabled on the orchestrator). Empty otherwise.
     pub dropped: Vec<DroppedFinding>,
+    /// Per-task audit records. Only populated when the orchestrator
+    /// was constructed with `audit_enabled = true`.
+    pub task_audits: Vec<TaskAudit>,
+    /// Critic verify-pass audit summary. `Some` only when both
+    /// audit and verify were enabled.
+    pub verify_audit: Option<VerifyAudit>,
 }
 
 /// Orchestrates parallel review execution across agents and files.
@@ -87,6 +95,9 @@ pub struct ReviewOrchestrator {
     /// When `true`, profiles with `wave: 2` run after wave 1 and
     /// receive wave-1 findings as additional context. Off by default.
     multi_wave: bool,
+    /// When `true`, collect per-task audit data
+    /// (status, retries, tool calls, …) into `ReviewResult.task_audits`.
+    audit_enabled: bool,
 }
 
 impl ReviewOrchestrator {
@@ -102,6 +113,7 @@ impl ReviewOrchestrator {
         review_scope: String,
         verify: bool,
         multi_wave: bool,
+        audit_enabled: bool,
     ) -> Self {
         Self {
             provider,
@@ -113,6 +125,7 @@ impl ReviewOrchestrator {
             review_scope,
             verify,
             multi_wave,
+            audit_enabled,
         }
     }
 
@@ -158,8 +171,9 @@ impl ReviewOrchestrator {
         let mut failed_count: usize = 0;
         let mut total_tokens = TokenUsage::default();
         let mut tokens_by_model: BTreeMap<String, TokenUsage> = BTreeMap::new();
+        let mut all_audits: Vec<TaskAudit> = Vec::new();
 
-        let (w1_findings, w1_failed, w1_tokens, w1_tokens_by_model) = self
+        let (w1_findings, w1_failed, w1_tokens, w1_tokens_by_model, w1_audits) = self
             .dispatch_wave(
                 context,
                 &wave1_agents,
@@ -170,6 +184,7 @@ impl ReviewOrchestrator {
                 agentic,
                 max_turns,
                 max_tool_calls,
+                1,
             )
             .await;
         failed_count += w1_failed;
@@ -177,12 +192,13 @@ impl ReviewOrchestrator {
         for (m, t) in w1_tokens_by_model {
             *tokens_by_model.entry(m).or_default() += t;
         }
+        all_audits.extend(w1_audits);
 
         if !wave2_agents.is_empty() && !w1_findings.is_empty() {
             // Build a compact summary of wave-1 findings to feed wave-2
             // reviewers as extra context.
             let wave1_summary = format_wave1_summary(&w1_findings);
-            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model) = self
+            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model, w2_audits) = self
                 .dispatch_wave(
                     context,
                     &wave2_agents,
@@ -193,6 +209,7 @@ impl ReviewOrchestrator {
                     agentic,
                     max_turns,
                     max_tool_calls,
+                    2,
                 )
                 .await;
             failed_count += w2_failed;
@@ -200,10 +217,11 @@ impl ReviewOrchestrator {
             for (m, t) in w2_tokens_by_model {
                 *tokens_by_model.entry(m).or_default() += t;
             }
+            all_audits.extend(w2_audits);
             all_findings.extend(w2_findings);
         } else if !wave2_agents.is_empty() {
             // Wave 1 found nothing; run wave 2 anyway with no addendum.
-            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model) = self
+            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model, w2_audits) = self
                 .dispatch_wave(
                     context,
                     &wave2_agents,
@@ -214,6 +232,7 @@ impl ReviewOrchestrator {
                     agentic,
                     max_turns,
                     max_tool_calls,
+                    2,
                 )
                 .await;
             failed_count += w2_failed;
@@ -221,6 +240,7 @@ impl ReviewOrchestrator {
             for (m, t) in w2_tokens_by_model {
                 *tokens_by_model.entry(m).or_default() += t;
             }
+            all_audits.extend(w2_audits);
             all_findings.extend(w2_findings);
         }
 
@@ -239,16 +259,30 @@ impl ReviewOrchestrator {
 
         // Optional critic pass: drop findings the critic votes to
         // discard. Fails open on provider error.
-        let (final_findings, dropped) = if self.verify && !scoped.is_empty() {
+        let (final_findings, dropped, verify_audit) = if self.verify && !scoped.is_empty() {
             let outcome = verify::verify_findings(&self.provider, scoped).await;
             if outcome.tokens.total() > 0 {
                 total_tokens += outcome.tokens;
                 let critic_model = self.config.provider.resolved_model().to_string();
                 *tokens_by_model.entry(critic_model).or_default() += outcome.tokens;
             }
-            (outcome.kept, outcome.dropped)
+            let audit = if self.audit_enabled {
+                Some(VerifyAudit {
+                    kept: outcome.kept.len(),
+                    dropped: outcome
+                        .dropped
+                        .iter()
+                        .cloned()
+                        .map(crate::audit::DroppedRecord::from)
+                        .collect(),
+                    tokens: outcome.tokens,
+                })
+            } else {
+                None
+            };
+            (outcome.kept, outcome.dropped, audit)
         } else {
-            (scoped, Vec::new())
+            (scoped, Vec::new(), None)
         };
 
         Ok(ReviewResult {
@@ -257,6 +291,12 @@ impl ReviewOrchestrator {
             tokens: total_tokens,
             tokens_by_model,
             dropped,
+            task_audits: if self.audit_enabled {
+                all_audits
+            } else {
+                Vec::new()
+            },
+            verify_audit,
         })
     }
 
@@ -277,14 +317,22 @@ impl ReviewOrchestrator {
         agentic: bool,
         max_turns: usize,
         max_tool_calls: usize,
+        wave_number: u8,
     ) -> (
         Vec<Finding>,
         usize,
         TokenUsage,
         BTreeMap<String, TokenUsage>,
+        Vec<TaskAudit>,
     ) {
         if wave_agents.is_empty() {
-            return (Vec::new(), 0, TokenUsage::default(), BTreeMap::new());
+            return (
+                Vec::new(),
+                0,
+                TokenUsage::default(),
+                BTreeMap::new(),
+                Vec::new(),
+            );
         }
 
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
@@ -378,6 +426,8 @@ impl ReviewOrchestrator {
                 agentic,
                 max_turns,
                 max_tool_calls,
+                audit_enabled: self.audit_enabled,
+                wave: wave_number,
             }));
         }
 
@@ -385,9 +435,11 @@ impl ReviewOrchestrator {
         let mut failed: usize = 0;
         let mut total_tokens = TokenUsage::default();
         let mut tokens_by_model: BTreeMap<String, TokenUsage> = BTreeMap::new();
+        let mut audits: Vec<TaskAudit> = Vec::new();
         while let Some(result) = join_set.join_next().await {
             match result {
-                Ok((f, fail, tokens, model)) => {
+                Ok((f, fail, tokens, model, audit)) => {
+                    let emitted = f.len();
                     findings.extend(f);
                     total_tokens += tokens;
                     if tokens.total() > 0 {
@@ -396,6 +448,10 @@ impl ReviewOrchestrator {
                     if fail {
                         failed += 1;
                     }
+                    if let Some(mut a) = audit {
+                        a.findings_emitted = emitted;
+                        audits.push(a);
+                    }
                 }
                 Err(e) => {
                     eprintln!("Warning: review task panicked: {e}");
@@ -403,7 +459,7 @@ impl ReviewOrchestrator {
                 }
             }
         }
-        (findings, failed, total_tokens, tokens_by_model)
+        (findings, failed, total_tokens, tokens_by_model, audits)
     }
 }
 
@@ -459,10 +515,14 @@ struct ReviewTaskParams {
     agentic: bool,
     max_turns: usize,
     max_tool_calls: usize,
+    audit_enabled: bool,
+    wave: u8,
 }
 
 /// Execute a single file×agent review task with caching and retries.
-async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, TokenUsage, String) {
+async fn execute_review_task(
+    params: ReviewTaskParams,
+) -> (Vec<Finding>, bool, TokenUsage, String, Option<TaskAudit>) {
     let ReviewTaskParams {
         provider,
         cache,
@@ -479,7 +539,21 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, T
         agentic,
         max_turns,
         max_tool_calls,
+        audit_enabled,
+        wave,
     } = params;
+    let mut audit = audit_enabled.then(|| TaskAudit {
+        agent: agent.profile.name.clone(),
+        file: file_path.clone(),
+        model: model.clone(),
+        wave,
+        status: AuditTaskStatus::Done,
+        error: None,
+        retries: 0,
+        tokens: TokenUsage::default(),
+        tool_calls: Vec::new(),
+        findings_emitted: 0,
+    });
     // Check cache first
     if let Some(cached) = cache.get(&cache_key).await {
         cache
@@ -492,7 +566,10 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, T
             )
             .await;
         progress.update(&file_path, TaskStatus::Done);
-        return (cached, false, TokenUsage::default(), model);
+        if let Some(a) = audit.as_mut() {
+            a.status = AuditTaskStatus::CacheHit;
+        }
+        return (cached, false, TokenUsage::default(), model, audit);
     }
 
     // Cache miss — resolve prior findings for the prompt
@@ -523,19 +600,30 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, T
     progress.update(&file_path, TaskStatus::InProgress);
     let _permit = sem.acquire().await.expect("semaphore closed");
 
-    match with_retry(
-        &provider,
-        &agent,
-        &prompt,
-        agentic,
-        max_turns,
-        max_tool_calls,
-        &progress,
-        &file_path,
+    // Per-task tool-call buffer for the audit log (None when audit is off).
+    let task_buf = audit_enabled.then(crate::audit::new_buffer);
+
+    let retry_result = crate::audit::scope(
+        task_buf.clone(),
+        with_retry(
+            &provider,
+            &agent,
+            &prompt,
+            agentic,
+            max_turns,
+            max_tool_calls,
+            &progress,
+            &file_path,
+        ),
     )
-    .await
-    {
-        Ok((findings, tokens)) => {
+    .await;
+
+    if let (Some(buf), Some(a)) = (task_buf.as_ref(), audit.as_mut()) {
+        a.tool_calls = crate::audit::drain_records(buf);
+    }
+
+    match retry_result {
+        Ok((findings, tokens, retries)) => {
             cache.put(&cache_key, &findings).await;
             cache
                 .put_sidecar(
@@ -547,19 +635,31 @@ async fn execute_review_task(params: ReviewTaskParams) -> (Vec<Finding>, bool, T
                 )
                 .await;
             progress.update(&file_path, TaskStatus::Done);
-            (findings, false, tokens, model)
+            if let Some(a) = audit.as_mut() {
+                a.status = AuditTaskStatus::Done;
+                a.tokens = tokens;
+                a.retries = retries;
+            }
+            (findings, false, tokens, model, audit)
         }
-        Err(err_msg) => {
-            progress.update(&file_path, TaskStatus::Failed(err_msg));
-            (Vec::new(), true, TokenUsage::default(), model)
+        Err((err_msg, retries)) => {
+            progress.update(&file_path, TaskStatus::Failed(err_msg.clone()));
+            if let Some(a) = audit.as_mut() {
+                a.status = AuditTaskStatus::Failed;
+                a.retries = retries;
+                a.error = Some(err_msg);
+            }
+            (Vec::new(), true, TokenUsage::default(), model, audit)
         }
     }
 }
 
 /// Retry a provider review call with exponential backoff.
 ///
-/// Returns `Ok((findings, tokens))` on success or `Err(message)` when retries
-/// are exhausted or a non-retryable error is encountered.
+/// Returns `Ok((findings, tokens, retries))` on success or
+/// `Err((message, retries))` when retries are exhausted or a
+/// non-retryable error is encountered. `retries` is the number of
+/// retry attempts performed (0 = succeeded on first attempt).
 #[allow(clippy::too_many_arguments)] // Thin extraction from spawn closure; a one-shot struct adds noise.
 async fn with_retry(
     provider: &Arc<dyn ReviewProvider>,
@@ -570,7 +670,7 @@ async fn with_retry(
     max_tool_calls: usize,
     progress: &Arc<dyn ProgressReporter>,
     file_path: &str,
-) -> Result<(Vec<Finding>, TokenUsage), String> {
+) -> Result<(Vec<Finding>, TokenUsage, usize), (String, usize)> {
     let mut last_err = None;
 
     let sink: LoopEventSink = {
@@ -590,7 +690,7 @@ async fn with_retry(
     for attempt in 0..=MAX_RETRIES {
         let call = provider.review(agent, prompt, agentic, max_turns, max_tool_calls);
         match events::scope(Some(Arc::clone(&sink)), call).await {
-            Ok(outcome) => return Ok((outcome.findings, outcome.tokens)),
+            Ok(outcome) => return Ok((outcome.findings, outcome.tokens, attempt as usize)),
             Err(ref e) if is_retryable(e) && attempt < MAX_RETRIES => {
                 let backoff = retry_backoff(attempt);
                 let reason = classify_error(e).unwrap_or("Transient error").to_string();
@@ -611,12 +711,15 @@ async fn with_retry(
                 let short = classify_error(&e)
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("{e}"));
-                return Err(short);
+                return Err((short, attempt as usize));
             }
         }
     }
 
-    Err(last_err.unwrap_or_else(|| "max retries exhausted".to_string()))
+    Err((
+        last_err.unwrap_or_else(|| "max retries exhausted".to_string()),
+        MAX_RETRIES as usize,
+    ))
 }
 
 #[cfg(test)]
