@@ -95,6 +95,19 @@ nitpik automatically retries with exponential backoff (up to 5 retries) when rat
 - Use fewer profiles per run.
 - Check your provider's rate limit tier and consider upgrading.
 
+## Stuck or Hung Reviews
+
+**Symptom:** a single file × agent task sits on the progress display indefinitely without making progress.
+
+Each review call has a per-attempt timeout (default 300 seconds, set via `--timeout <SECONDS>`). When the budget elapses, the call is aborted and treated as a retryable error so the standard retry policy kicks in — each retry gets a fresh timeout budget.
+
+If you see frequent timeouts:
+
+- Lower `--timeout` to fail faster on a hung connection (e.g. `--timeout 120`).
+- Raise it if you legitimately use slow models with many agentic tool calls (e.g. `--timeout 600`).
+- Set `--timeout 0` to disable the timeout entirely (not recommended in CI).
+- Reduce `--max-turns` or `--max-tool-calls` to cap the work a single attempt can do.
+
 ## Git Errors
 
 **Symptom:** "not a git repository" or "unknown revision" errors.

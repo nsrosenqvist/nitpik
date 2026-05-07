@@ -104,6 +104,7 @@ Run a code review.
 | Flag | Default | Description |
 |---|---|---|
 | `--max-concurrent <N>` | `5` | Max concurrent LLM calls. |
+| `--timeout <SECONDS>` | `300` | Per-attempt timeout for each file × agent review call (wraps the whole agentic loop, including all turns and tool roundtrips). On timeout the call is treated as a retryable error; each retry gets a fresh budget. Set to `0` to disable. |
 
 ### Audit Log
 
