@@ -101,12 +101,19 @@ impl Tool for SubmitFindingsTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let start = crate::tools::start_tool_call();
         let n = args.findings.len();
         let mut guard = self.sink.lock().expect("findings sink poisoned");
         // Replace any previously captured set: only the last call wins.
         // The agent loop exits immediately after this call lands so a
         // second call is unreachable in practice.
         *guard = Some(args.findings);
+        crate::tools::finish_tool_call(
+            start,
+            SUBMIT_FINDINGS_TOOL_NAME,
+            String::new(),
+            format!("{n} finding{}", if n == 1 { "" } else { "s" }),
+        );
         Ok(format!("recorded {n} findings"))
     }
 }

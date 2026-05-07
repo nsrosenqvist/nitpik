@@ -695,11 +695,17 @@ async fn with_retry(
         let file_path = file_path.to_string();
         let agent_name = agent_name.to_string();
         Arc::new(move |ev| match ev {
-            LoopEvent::ToolCallStart { tool, .. } => {
-                progress.update(&file_path, &agent_name, TaskStatus::ToolCalling { tool });
+            LoopEvent::ToolCallStart { tool, args_summary } => {
+                progress.update(
+                    &file_path,
+                    &agent_name,
+                    TaskStatus::ToolCalling { tool: tool.clone() },
+                );
+                progress.tool_started(&file_path, &agent_name, &tool, &args_summary);
             }
-            LoopEvent::ToolCallEnd { .. } => {
+            LoopEvent::ToolCallEnd { tool, ok, duration } => {
                 progress.update(&file_path, &agent_name, TaskStatus::InProgress);
+                progress.tool_finished(&file_path, &agent_name, &tool, ok, duration);
             }
             _ => {}
         })

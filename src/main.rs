@@ -462,7 +462,14 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     let heartbeat = fire_telemetry(&config, diffs, &agent_defs, &license_claims, no_telemetry);
 
-    let progress = setup_progress(&args, diffs, &agent_defs, &baseline, &license_claims);
+    let progress = setup_progress(
+        &args,
+        diffs,
+        &agent_defs,
+        &baseline,
+        &license_claims,
+        use_agent,
+    );
     progress.start();
 
     let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
@@ -818,6 +825,7 @@ fn setup_progress(
     agents: &[models::AgentDefinition],
     baseline: &models::BaselineContext,
     license_claims: &Option<(license::LicenseClaims, Option<i64>)>,
+    agentic: bool,
 ) -> Arc<ProgressTracker> {
     let is_interactive = args.format == OutputFormat::Terminal && std::io::stderr().is_terminal();
     let show_info = !args.quiet && is_interactive;
@@ -825,10 +833,15 @@ fn setup_progress(
 
     let file_names: Vec<String> = diffs.iter().map(|d| d.path().to_string()).collect();
     let agent_names: Vec<String> = agents.iter().map(|a| a.profile.name.clone()).collect();
-    let progress = Arc::new(ProgressTracker::new(
+    // Tool-log pane is hidden when --agent is off (no tools can fire).
+    // Cap matches the plan: max(8, max_concurrent).
+    let log_cap = std::cmp::max(8, args.max_concurrent);
+    let progress = Arc::new(ProgressTracker::with_options(
         &file_names,
         &agent_names,
         show_progress,
+        agentic,
+        log_cap,
     ));
 
     if show_info {
