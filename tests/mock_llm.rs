@@ -1669,3 +1669,479 @@ async fn threat_scanner_binary_diff_skipped() {
         "binary files should be skipped by threat scanner"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Verify (critic pass) — D1 end-to-end
+// ---------------------------------------------------------------------------
+
+/// Mock that returns canned findings for every review call AND a canned
+/// triage outcome for the critic / triage path. Used to exercise the
+/// orchestrator's verify pass end-to-end.
+struct ReviewAndTriageMock {
+    findings: Vec<Finding>,
+    triage: TriageOutcome,
+}
+
+#[async_trait]
+impl ReviewProvider for ReviewAndTriageMock {
+    async fn review(
+        &self,
+        _agent: &AgentDefinition,
+        _prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<ReviewOutcome, ProviderError> {
+        Ok(ReviewOutcome {
+            findings: self.findings.clone(),
+            tokens: Default::default(),
+        })
+    }
+
+    async fn triage(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(self.triage.clone())
+    }
+}
+
+#[tokio::test]
+async fn orchestrator_verify_drops_findings_via_critic() {
+    // Two findings come back from the reviewer; the critic votes to
+    // drop index 0 and keep index 1.
+    let findings = test_findings("src/main.rs", "test-agent");
+    let triage = TriageOutcome {
+        verdicts: vec![
+            TriageVerdict {
+                index: 0,
+                classification: "drop".to_string(),
+                rationale: Some("speculative".to_string()),
+            },
+            TriageVerdict {
+                index: 1,
+                classification: "keep".to_string(),
+                rationale: None,
+            },
+        ],
+        tokens: Default::default(),
+    };
+    let provider = Arc::new(ReviewAndTriageMock { findings, triage });
+
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        true,  // verify
+        false, // multi_wave
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let result = orchestrator
+        .run(&context, &[test_agent("test-agent")], 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(result.findings.len(), 1, "one finding should remain");
+    assert_eq!(result.findings[0].title, "Consider documentation");
+    assert_eq!(result.dropped.len(), 1, "one finding should be dropped");
+    assert_eq!(result.dropped[0].finding.title, "Unused variable");
+    assert_eq!(result.dropped[0].reason, "speculative");
+}
+
+/// Provider whose `review` succeeds but whose `triage` always errors —
+/// used to exercise the verify pass's fail-open path.
+struct ReviewOkTriageFailMock {
+    findings: Vec<Finding>,
+}
+
+#[async_trait]
+impl ReviewProvider for ReviewOkTriageFailMock {
+    async fn review(
+        &self,
+        _agent: &AgentDefinition,
+        _prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<ReviewOutcome, ProviderError> {
+        Ok(ReviewOutcome {
+            findings: self.findings.clone(),
+            tokens: Default::default(),
+        })
+    }
+
+    async fn triage(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<TriageOutcome, ProviderError> {
+        Err(ProviderError::ApiError("triage offline".to_string()))
+    }
+}
+
+#[tokio::test]
+async fn orchestrator_verify_fail_open_when_triage_errors() {
+    let findings = test_findings("src/main.rs", "test-agent");
+    let provider = Arc::new(ReviewOkTriageFailMock {
+        findings: findings.clone(),
+    });
+
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        true,  // verify on, but triage fails
+        false, // multi_wave
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let result = orchestrator
+        .run(&context, &[test_agent("test-agent")], 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(
+        result.findings.len(),
+        findings.len(),
+        "fail-open: triage error should preserve all findings"
+    );
+    assert!(
+        result.dropped.is_empty(),
+        "no findings should be reported as dropped on triage error"
+    );
+}
+
+#[tokio::test]
+async fn orchestrator_no_verify_leaves_findings_untouched() {
+    // Even if triage *would* drop everything, verify=false bypasses
+    // the critic entirely.
+    let findings = test_findings("src/main.rs", "test-agent");
+    let triage = TriageOutcome {
+        verdicts: vec![
+            TriageVerdict {
+                index: 0,
+                classification: "drop".to_string(),
+                rationale: None,
+            },
+            TriageVerdict {
+                index: 1,
+                classification: "drop".to_string(),
+                rationale: None,
+            },
+        ],
+        tokens: Default::default(),
+    };
+    let provider = Arc::new(ReviewAndTriageMock {
+        findings: findings.clone(),
+        triage,
+    });
+
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false, // verify off
+        false,
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let result = orchestrator
+        .run(&context, &[test_agent("test-agent")], 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(result.findings.len(), findings.len());
+    assert!(result.dropped.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Multi-wave reviews — D3 end-to-end
+// ---------------------------------------------------------------------------
+
+/// Helper: build a wave-2 agent definition.
+fn test_agent_wave2(name: &str) -> AgentDefinition {
+    AgentDefinition {
+        profile: AgentProfile {
+            name: name.to_string(),
+            description: format!("Test agent: {name}"),
+            model: None,
+            tags: vec![],
+            tools: vec![],
+            agentic_instructions: None,
+            environment: vec![],
+            always_include: false,
+            wave: 2,
+        },
+        system_prompt: "You are a test wave-2 reviewer.".to_string(),
+    }
+}
+
+/// Provider that records every prompt it receives (per agent name) and
+/// returns canned per-agent findings. Used to assert wave-2 reviewers
+/// see wave-1 findings in their prompt.
+struct RecordingPerAgentMock {
+    findings_by_agent: std::collections::HashMap<String, Vec<Finding>>,
+    prompts: tokio::sync::Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait]
+impl ReviewProvider for RecordingPerAgentMock {
+    async fn review(
+        &self,
+        agent: &AgentDefinition,
+        prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<ReviewOutcome, ProviderError> {
+        self.prompts
+            .lock()
+            .await
+            .push((agent.profile.name.clone(), prompt.to_string()));
+        let findings = self
+            .findings_by_agent
+            .get(&agent.profile.name)
+            .cloned()
+            .unwrap_or_default();
+        Ok(ReviewOutcome {
+            findings,
+            tokens: Default::default(),
+        })
+    }
+
+    async fn triage(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(TriageOutcome::default())
+    }
+}
+
+#[tokio::test]
+async fn orchestrator_multi_wave_feeds_wave1_findings_into_wave2() {
+    let mut by_agent: std::collections::HashMap<String, Vec<Finding>> =
+        std::collections::HashMap::new();
+    by_agent.insert(
+        "wave1-agent".to_string(),
+        test_findings("src/main.rs", "wave1-agent"),
+    );
+    // Wave 2 returns its own finding (one) so we can verify both
+    // waves' outputs appear in the aggregate result.
+    by_agent.insert(
+        "wave2-agent".to_string(),
+        vec![Finding {
+            file: "src/main.rs".to_string(),
+            line: 2,
+            end_line: None,
+            severity: Severity::Error,
+            title: "Architectural concern".to_string(),
+            message: "Wave-2 reviewer flagged an architectural concern.".to_string(),
+            suggestion: None,
+            agent: "wave2-agent".to_string(),
+            evidence: Vec::new(),
+        }],
+    );
+    let provider = Arc::new(RecordingPerAgentMock {
+        findings_by_agent: by_agent,
+        prompts: tokio::sync::Mutex::new(Vec::new()),
+    });
+
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["wave1-agent".to_string(), "wave2-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider.clone(),
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false, // verify
+        true,  // multi_wave
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("wave1-agent"), test_agent_wave2("wave2-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    // Findings from both waves should be in the aggregate result.
+    let agents_seen: std::collections::HashSet<&str> =
+        result.findings.iter().map(|f| f.agent.as_str()).collect();
+    assert!(
+        agents_seen.contains("wave1-agent"),
+        "wave 1 findings should appear in the aggregate result: {agents_seen:?}",
+    );
+    assert!(
+        agents_seen.contains("wave2-agent"),
+        "wave 2 findings should appear in the aggregate result: {agents_seen:?}",
+    );
+
+    // The wave-2 prompt should reference wave-1 findings; the wave-1
+    // prompt should not (since wave-1 runs first).
+    let prompts = provider.prompts.lock().await;
+    let wave1_prompt = prompts
+        .iter()
+        .find(|(n, _)| n == "wave1-agent")
+        .map(|(_, p)| p.clone())
+        .expect("wave-1 prompt recorded");
+    let wave2_prompt = prompts
+        .iter()
+        .find(|(n, _)| n == "wave2-agent")
+        .map(|(_, p)| p.clone())
+        .expect("wave-2 prompt recorded");
+
+    assert!(
+        wave2_prompt.contains("Unused variable") || wave2_prompt.to_lowercase().contains("wave"),
+        "wave-2 prompt should mention wave-1 findings, got:\n{wave2_prompt}",
+    );
+    assert!(
+        !wave1_prompt.contains("Unused variable") || !wave1_prompt.contains("wave1-agent"),
+        "wave-1 prompt should not contain wave-1 findings yet"
+    );
+}
+
+#[tokio::test]
+async fn orchestrator_runs_all_agents_in_one_wave_when_multi_wave_disabled() {
+    // Same setup as above but multi_wave=false: every agent should
+    // run in wave 1, regardless of profile.wave.
+    let mut by_agent: std::collections::HashMap<String, Vec<Finding>> =
+        std::collections::HashMap::new();
+    by_agent.insert(
+        "wave1-agent".to_string(),
+        test_findings("src/main.rs", "wave1-agent"),
+    );
+    by_agent.insert(
+        "wave2-agent".to_string(),
+        vec![Finding {
+            file: "src/main.rs".to_string(),
+            line: 2,
+            end_line: None,
+            severity: Severity::Error,
+            title: "Distinct wave-2 finding".to_string(),
+            message: "Wave-2 reviewer flagged something only it cares about.".to_string(),
+            suggestion: None,
+            agent: "wave2-agent".to_string(),
+            evidence: Vec::new(),
+        }],
+    );
+    let provider = Arc::new(RecordingPerAgentMock {
+        findings_by_agent: by_agent,
+        prompts: tokio::sync::Mutex::new(Vec::new()),
+    });
+
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["wave1-agent".to_string(), "wave2-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider.clone(),
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false, // verify
+        false, // multi_wave OFF
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("wave1-agent"), test_agent_wave2("wave2-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, false, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    // Both agents should have run.
+    let agents_seen: std::collections::HashSet<&str> =
+        result.findings.iter().map(|f| f.agent.as_str()).collect();
+    assert!(agents_seen.contains("wave1-agent"));
+    assert!(agents_seen.contains("wave2-agent"));
+
+    // Neither prompt should reference wave-1 findings (no second wave
+    // ran, so no addendum is built).
+    let prompts = provider.prompts.lock().await;
+    for (name, prompt) in prompts.iter() {
+        assert!(
+            !prompt.to_lowercase().contains("wave-1 findings"),
+            "{name}'s prompt should not mention wave-1 findings, got:\n{prompt}",
+        );
+    }
+}
