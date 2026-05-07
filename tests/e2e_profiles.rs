@@ -242,6 +242,7 @@ async fn run_review_collecting_audit(
         false,
         false,
         true, // audit_enabled
+        None,
     );
 
     orchestrator
@@ -322,6 +323,7 @@ async fn run_review(repo_path: &Path, profile_names: &[&str], config: &Config) -
         false,
         false,
         false,
+        None,
     );
 
     let result = orchestrator
@@ -651,6 +653,7 @@ async fn e2e_custom_profile() {
         false,
         false,
         false,
+        None,
     );
 
     let result = orchestrator
@@ -776,6 +779,7 @@ async fn e2e_custom_tool_agentic() {
             false,
             false,
             false,
+            None,
         );
 
         // agentic=true, max_turns=5, max_tool_calls=10
@@ -958,6 +962,7 @@ async fn e2e_builtin_tool_agentic() {
             false,
             false,
             false,
+            None,
         );
 
         // agentic=true, max_turns=5, max_tool_calls=10
@@ -1189,6 +1194,7 @@ async fn e2e_cache_prior_findings() {
         false,
         false,
         false,
+        None,
     );
 
     let result_v1 = orch1
@@ -1257,6 +1263,7 @@ async fn e2e_cache_prior_findings() {
         false,
         false,
         false,
+        None,
     );
 
     let result_v2 = orch2
@@ -1369,6 +1376,7 @@ async fn e2e_agentic_mode() {
             false,
             false,
             false,
+            None,
         );
 
         // agentic=true, max_turns=5, max_tool_calls=10
@@ -1478,6 +1486,7 @@ async fn e2e_audit_log_real_run() {
             auto_mode: None,
             review_scope: "HEAD".to_string(),
             nitpik_version: env!("CARGO_PKG_VERSION").to_string(),
+            timeout_secs: 0,
         },
         tasks: result.task_audits.clone(),
         verify: result.verify_audit.clone(),

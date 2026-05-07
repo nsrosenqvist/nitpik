@@ -197,6 +197,11 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = 5)]
     pub max_concurrent: usize,
 
+    /// Per-attempt timeout in seconds for each file × agent review call.
+    /// Retries get a fresh budget. Set to 0 to disable.
+    #[arg(long, value_name = "SECONDS", default_value_t = crate::constants::DEFAULT_AGENT_TIMEOUT_SECS)]
+    pub timeout: u64,
+
     /// Disable result caching.
     #[arg(long, default_value_t = false)]
     pub no_cache: bool,
@@ -433,6 +438,7 @@ mod tests {
             scan_threats: false,
             threat_rules: None,
             max_concurrent: 5,
+            timeout: crate::constants::DEFAULT_AGENT_TIMEOUT_SECS,
             no_cache: false,
             no_prior_context: false,
             max_prior_findings: None,

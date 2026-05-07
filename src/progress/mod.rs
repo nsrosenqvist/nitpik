@@ -43,8 +43,8 @@ pub enum TaskStatus {
 /// Trait for progress reporting, enabling testable and pluggable
 /// progress displays (live terminal, quiet/no-op, custom CI, etc.).
 pub trait ProgressReporter: Send + Sync {
-    /// Update the status of a single file review task.
-    fn update(&self, file: &str, status: TaskStatus);
+    /// Update the status of a single review task (one file × agent pair).
+    fn update(&self, file: &str, agent: &str, status: TaskStatus);
     /// Print the initial progress display.
     fn start(&self);
     /// Clear progress and print the final summary.
@@ -60,9 +60,12 @@ pub struct ProgressTracker {
     enabled: bool,
 }
 
+/// Composite key identifying a single review task (file × agent).
+type TaskKey = (String, String);
+
 struct ProgressState {
-    /// file → status (sorted for stable rendering).
-    files: BTreeMap<String, TaskStatus>,
+    /// (file, agent) → status (sorted for stable rendering).
+    tasks: BTreeMap<TaskKey, TaskStatus>,
     /// Number of lines we last printed (for clearing).
     rendered_lines: usize,
     /// Agent names for the header.
@@ -77,14 +80,18 @@ impl ProgressTracker {
     /// `files` is the list of file paths being reviewed.
     /// `agents` is the list of agent profile names.
     /// `enabled` controls whether output is printed.
+    ///
+    /// Pre-populates one task slot per (file × agent) combination.
     pub fn new(files: &[String], agents: &[String], enabled: bool) -> Self {
-        let mut file_map = BTreeMap::new();
+        let mut tasks = BTreeMap::new();
         for f in files {
-            file_map.insert(f.clone(), TaskStatus::Pending);
+            for a in agents {
+                tasks.insert((f.clone(), a.clone()), TaskStatus::Pending);
+            }
         }
         Self {
             inner: Mutex::new(ProgressState {
-                files: file_map,
+                tasks,
                 rendered_lines: 0,
                 agents: agents.to_vec(),
                 last_render: Instant::now(),
@@ -93,15 +100,18 @@ impl ProgressTracker {
         }
     }
 
-    /// Update the status of a file and re-render if enough time has elapsed.
+    /// Update the status of a single file × agent task and re-render
+    /// if enough time has elapsed.
     ///
     /// Renders immediately for terminal states (Done, Failed) to ensure
     /// the final status is always visible. For transient states, renders
     /// at most once per 100ms to avoid excessive terminal I/O.
-    pub fn update(&self, file: &str, status: TaskStatus) {
+    pub fn update(&self, file: &str, agent: &str, status: TaskStatus) {
         let is_terminal_state = matches!(status, TaskStatus::Done | TaskStatus::Failed(_));
         let mut state = self.inner.lock().unwrap();
-        state.files.insert(file.to_string(), status);
+        state
+            .tasks
+            .insert((file.to_string(), agent.to_string()), status);
         if self.enabled {
             let elapsed = state.last_render.elapsed();
             if is_terminal_state || elapsed.as_millis() >= 100 {
@@ -132,22 +142,24 @@ impl ProgressTracker {
         Self::clear_lines(state.rendered_lines);
         state.rendered_lines = 0;
 
-        // Print final status for each file
+        // Print final status for each task (file × agent)
         let stderr = io::stderr();
         let mut handle = stderr.lock();
-        for (file, status) in &state.files {
+        let width = terminal_width();
+        for ((file, agent), status) in &state.tasks {
             let icon = match status {
                 TaskStatus::Done => "✔".green().bold().to_string(),
                 TaskStatus::Failed(_) => "✖".red().bold().to_string(),
                 _ => "✔".green().bold().to_string(),
             };
-            let file_display = file.dimmed();
+            let label = format_task_label(file, agent);
             let status_text = match status {
                 TaskStatus::Done => "done".green().to_string(),
-                TaskStatus::Failed(reason) => format!("{}", reason.red()),
+                TaskStatus::Failed(reason) => sanitize_status_text(reason).red().to_string(),
                 _ => "done".green().to_string(),
             };
-            let _ = writeln!(handle, "  {icon} {file_display} {status_text}");
+            let line = format!("  {icon} {label} {status_text}");
+            let _ = writeln!(handle, "{}", truncate_visible(&line, width));
         }
 
         // Tool-call audit summary (if any tools were invoked)
@@ -191,6 +203,7 @@ impl ProgressTracker {
     fn render(state: &mut ProgressState) {
         let stderr = io::stderr();
         let mut handle = stderr.lock();
+        let width = terminal_width();
 
         // Clear previous lines
         Self::clear_lines(state.rendered_lines);
@@ -198,10 +211,9 @@ impl ProgressTracker {
         let mut lines = 0;
 
         // Header
-        let file_count = state.files.len();
+        let file_count = unique_files(&state.tasks);
         let agents_str = state.agents.join(", ");
-        let _ = writeln!(
-            handle,
+        let header = format!(
             "  {} Reviewing {file_count} file(s) with {} [{}]",
             "▸".cyan().bold(),
             if state.agents.len() == 1 {
@@ -211,10 +223,11 @@ impl ProgressTracker {
             },
             agents_str.dimmed(),
         );
+        let _ = writeln!(handle, "{}", truncate_visible(&header, width));
         lines += 1;
 
-        // File list
-        for (file, status) in &state.files {
+        // Task list (file × agent)
+        for ((file, agent), status) in &state.tasks {
             let (icon, status_text) = match status {
                 TaskStatus::Pending => ("○".dimmed().to_string(), "waiting".dimmed().to_string()),
                 TaskStatus::InProgress => (
@@ -226,9 +239,10 @@ impl ProgressTracker {
                     format!("calling {tool}…").cyan().to_string(),
                 ),
                 TaskStatus::Done => ("✔".green().bold().to_string(), "done".green().to_string()),
-                TaskStatus::Failed(reason) => {
-                    ("✖".red().bold().to_string(), reason.red().to_string())
-                }
+                TaskStatus::Failed(reason) => (
+                    "✖".red().bold().to_string(),
+                    sanitize_status_text(reason).red().to_string(),
+                ),
                 TaskStatus::Retrying {
                     attempt,
                     max,
@@ -236,16 +250,17 @@ impl ProgressTracker {
                     backoff_secs,
                 } => (
                     "⟳".yellow().bold().to_string(),
-                    format!("{reason}, retrying in {backoff_secs}s ({attempt}/{max})")
-                        .yellow()
-                        .to_string(),
+                    format!(
+                        "{}, retrying in {backoff_secs}s ({attempt}/{max})",
+                        sanitize_status_text(reason)
+                    )
+                    .yellow()
+                    .to_string(),
                 ),
             };
-            let _ = writeln!(
-                handle,
-                "    {icon} {file} {status_text}",
-                file = file.dimmed()
-            );
+            let label = format_task_label(file, agent);
+            let line = format!("    {icon} {label} {status_text}");
+            let _ = writeln!(handle, "{}", truncate_visible(&line, width));
             lines += 1;
         }
 
@@ -268,9 +283,102 @@ impl ProgressTracker {
     }
 }
 
+/// Collapse newlines and tabs and truncate so a status reason always renders
+/// on a single terminal line. Multi-line errors (e.g. provider responses
+/// containing tool-call payloads) would otherwise corrupt the cursor-based
+/// redraw used by `clear_lines`.
+fn sanitize_status_text(reason: &str) -> String {
+    const MAX_LEN: usize = 200;
+    let mut out = String::with_capacity(reason.len().min(MAX_LEN + 1));
+    let mut prev_space = false;
+    for ch in reason.chars() {
+        let mapped = if matches!(ch, '\n' | '\r' | '\t') {
+            ' '
+        } else {
+            ch
+        };
+        if mapped == ' ' {
+            if prev_space {
+                continue;
+            }
+            prev_space = true;
+        } else {
+            prev_space = false;
+        }
+        out.push(mapped);
+        if out.chars().count() >= MAX_LEN {
+            out.push('…');
+            break;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Format a task label as `file (agent)` with the file dimmed.
+fn format_task_label(file: &str, agent: &str) -> String {
+    format!("{} {}", file.dimmed(), format!("({agent})").dimmed())
+}
+
+/// Count the number of distinct file paths across all tracked tasks.
+fn unique_files(tasks: &BTreeMap<TaskKey, TaskStatus>) -> usize {
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for (f, _) in tasks.keys() {
+        seen.insert(f.as_str());
+    }
+    seen.len()
+}
+
+/// Determine the current terminal width in columns. Falls back to 100 if
+/// the size cannot be detected (e.g. piped output, non-tty).
+fn terminal_width() -> usize {
+    terminal_size::terminal_size()
+        .map(|(w, _)| w.0 as usize)
+        .unwrap_or(100)
+        .max(40)
+}
+
+/// Truncate a string containing ANSI escape sequences so its visible
+/// width does not exceed `max_cols`. Preserves any active SGR styling
+/// by appending a reset (`\x1b[0m`) when truncation occurs.
+///
+/// This is critical for the cursor-based progress redraw: a single
+/// long status line that wraps onto a second visual row would leave
+/// stale text on the terminal because `clear_lines` only undoes
+/// logical (newline-terminated) lines, not wrapped continuations.
+fn truncate_visible(s: &str, max_cols: usize) -> String {
+    let mut visible = 0usize;
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            // Copy the entire ANSI escape sequence (CSI: ESC [ ... letter)
+            out.push(ch);
+            if let Some(&'[') = chars.peek() {
+                out.push(chars.next().unwrap());
+                for c in chars.by_ref() {
+                    out.push(c);
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if visible >= max_cols.saturating_sub(1) {
+            // Drop remaining text; close any active styling.
+            out.push('…');
+            out.push_str("\x1b[0m");
+            return out;
+        }
+        out.push(ch);
+        visible += 1;
+    }
+    out
+}
+
 impl ProgressReporter for ProgressTracker {
-    fn update(&self, file: &str, status: TaskStatus) {
-        self.update(file, status);
+    fn update(&self, file: &str, agent: &str, status: TaskStatus) {
+        self.update(file, agent, status);
     }
 
     fn start(&self) {
@@ -287,12 +395,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sanitize_status_text_collapses_newlines() {
+        let input = "line one\nline two\r\n\tline three";
+        let out = sanitize_status_text(input);
+        assert!(!out.contains('\n'));
+        assert!(!out.contains('\r'));
+        assert!(!out.contains('\t'));
+        assert_eq!(out, "line one line two line three");
+    }
+
+    #[test]
+    fn sanitize_status_text_truncates_long_input() {
+        let input = "x".repeat(500);
+        let out = sanitize_status_text(&input);
+        // <= MAX_LEN chars plus the ellipsis marker
+        assert!(out.chars().count() <= 201);
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
     fn tracker_disabled_no_panic() {
         let tracker =
             ProgressTracker::new(&["file.rs".to_string()], &["backend".to_string()], false);
         tracker.start();
-        tracker.update("file.rs", TaskStatus::InProgress);
-        tracker.update("file.rs", TaskStatus::Done);
+        tracker.update("file.rs", "backend", TaskStatus::InProgress);
+        tracker.update("file.rs", "backend", TaskStatus::Done);
         tracker.finish();
     }
 
@@ -301,15 +428,25 @@ mod tests {
         let tracker = ProgressTracker::new(
             &["a.rs".to_string(), "b.rs".to_string()],
             &["backend".to_string()],
-            false, // disabled to avoid terminal output in tests
+            false,
         );
-        tracker.update("a.rs", TaskStatus::InProgress);
-        tracker.update("a.rs", TaskStatus::Done);
-        tracker.update("b.rs", TaskStatus::Failed("API error".to_string()));
+        tracker.update("a.rs", "backend", TaskStatus::InProgress);
+        tracker.update("a.rs", "backend", TaskStatus::Done);
+        tracker.update(
+            "b.rs",
+            "backend",
+            TaskStatus::Failed("API error".to_string()),
+        );
 
         let state = tracker.inner.lock().unwrap();
-        assert_eq!(state.files["a.rs"], TaskStatus::Done);
-        assert!(matches!(&state.files["b.rs"], TaskStatus::Failed(_)));
+        assert_eq!(
+            state.tasks[&("a.rs".to_string(), "backend".to_string())],
+            TaskStatus::Done
+        );
+        assert!(matches!(
+            &state.tasks[&("b.rs".to_string(), "backend".to_string())],
+            TaskStatus::Failed(_)
+        ));
     }
 
     #[test]
@@ -318,6 +455,7 @@ mod tests {
             ProgressTracker::new(&["retry.rs".to_string()], &["backend".to_string()], false);
         tracker.update(
             "retry.rs",
+            "backend",
             TaskStatus::Retrying {
                 attempt: 1,
                 max: 3,
@@ -327,7 +465,7 @@ mod tests {
         );
 
         let state = tracker.inner.lock().unwrap();
-        match &state.files["retry.rs"] {
+        match &state.tasks[&("retry.rs".to_string(), "backend".to_string())] {
             TaskStatus::Retrying {
                 attempt,
                 max,
@@ -353,13 +491,12 @@ mod tests {
     #[test]
     fn tracker_finish_with_findings_no_panic() {
         let tracker = ProgressTracker::new(&["a.rs".to_string()], &["backend".to_string()], false);
-        tracker.update("a.rs", TaskStatus::Done);
-        // Finish with nonzero findings should not print "No issues found."
+        tracker.update("a.rs", "backend", TaskStatus::Done);
         tracker.finish();
     }
 
     #[test]
-    fn tracker_multiple_agents() {
+    fn tracker_multiple_agents_pre_populates_cartesian_product() {
         let tracker = ProgressTracker::new(
             &["a.rs".to_string()],
             &["backend".to_string(), "security".to_string()],
@@ -367,16 +504,53 @@ mod tests {
         );
         let state = tracker.inner.lock().unwrap();
         assert_eq!(state.agents.len(), 2);
-        assert_eq!(state.agents[0], "backend");
-        assert_eq!(state.agents[1], "security");
+        // 1 file × 2 agents = 2 tasks pre-populated.
+        assert_eq!(state.tasks.len(), 2);
+        assert!(
+            state
+                .tasks
+                .contains_key(&("a.rs".to_string(), "backend".to_string()))
+        );
+        assert!(
+            state
+                .tasks
+                .contains_key(&("a.rs".to_string(), "security".to_string()))
+        );
     }
 
     #[test]
-    fn tracker_update_unknown_file_adds_it() {
+    fn tracker_update_unknown_task_adds_it() {
         let tracker = ProgressTracker::new(&["a.rs".to_string()], &["backend".to_string()], false);
-        // Updating a file not in the initial list should insert it.
-        tracker.update("unknown.rs", TaskStatus::Done);
+        // Updating an (file, agent) pair not in the initial list should insert it.
+        tracker.update("unknown.rs", "frontend", TaskStatus::Done);
         let state = tracker.inner.lock().unwrap();
-        assert_eq!(state.files["unknown.rs"], TaskStatus::Done);
+        assert_eq!(
+            state.tasks[&("unknown.rs".to_string(), "frontend".to_string())],
+            TaskStatus::Done
+        );
+    }
+
+    #[test]
+    fn truncate_visible_keeps_short_lines_intact() {
+        let s = "hello world";
+        assert_eq!(truncate_visible(s, 80), "hello world");
+    }
+
+    #[test]
+    fn truncate_visible_caps_long_lines_with_ellipsis() {
+        let s = "x".repeat(120);
+        let out = truncate_visible(&s, 40);
+        // Ends with ellipsis + ANSI reset, no embedded newlines.
+        assert!(out.contains('…'));
+        assert!(!out.contains('\n'));
+    }
+
+    #[test]
+    fn truncate_visible_preserves_ansi_escapes_in_visible_portion() {
+        let s = "\x1b[31mred\x1b[0m and \x1b[32mgreen\x1b[0m text";
+        // Plenty of room — should keep all escapes.
+        let out = truncate_visible(s, 80);
+        assert!(out.contains("\x1b[31m"));
+        assert!(out.contains("\x1b[32m"));
     }
 }

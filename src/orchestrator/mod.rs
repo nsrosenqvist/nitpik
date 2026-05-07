@@ -16,6 +16,7 @@ pub mod verify;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::Semaphore;
@@ -98,6 +99,9 @@ pub struct ReviewOrchestrator {
     /// When `true`, collect per-task audit data
     /// (status, retries, tool calls, …) into `ReviewResult.task_audits`.
     audit_enabled: bool,
+    /// Per-attempt timeout for `provider.review` calls. `None` disables.
+    /// Retries get a fresh budget. Set via `--timeout`.
+    timeout: Option<Duration>,
 }
 
 impl ReviewOrchestrator {
@@ -114,6 +118,7 @@ impl ReviewOrchestrator {
         verify: bool,
         multi_wave: bool,
         audit_enabled: bool,
+        timeout: Option<Duration>,
     ) -> Self {
         Self {
             provider,
@@ -126,6 +131,7 @@ impl ReviewOrchestrator {
             verify,
             multi_wave,
             audit_enabled,
+            timeout,
         }
     }
 
@@ -428,6 +434,7 @@ impl ReviewOrchestrator {
                 max_tool_calls,
                 audit_enabled: self.audit_enabled,
                 wave: wave_number,
+                timeout: self.timeout,
             }));
         }
 
@@ -517,6 +524,7 @@ struct ReviewTaskParams {
     max_tool_calls: usize,
     audit_enabled: bool,
     wave: u8,
+    timeout: Option<Duration>,
 }
 
 /// Execute a single file×agent review task with caching and retries.
@@ -541,6 +549,7 @@ async fn execute_review_task(
         max_tool_calls,
         audit_enabled,
         wave,
+        timeout,
     } = params;
     let mut audit = audit_enabled.then(|| TaskAudit {
         agent: agent.profile.name.clone(),
@@ -565,7 +574,7 @@ async fn execute_review_task(
                 &review_scope,
             )
             .await;
-        progress.update(&file_path, TaskStatus::Done);
+        progress.update(&file_path, &agent.profile.name, TaskStatus::Done);
         if let Some(a) = audit.as_mut() {
             a.status = AuditTaskStatus::CacheHit;
         }
@@ -597,7 +606,7 @@ async fn execute_review_task(
         }
     };
 
-    progress.update(&file_path, TaskStatus::InProgress);
+    progress.update(&file_path, &agent.profile.name, TaskStatus::InProgress);
     let _permit = sem.acquire().await.expect("semaphore closed");
 
     // Per-task tool-call buffer for the audit log (None when audit is off).
@@ -614,6 +623,8 @@ async fn execute_review_task(
             max_tool_calls,
             &progress,
             &file_path,
+            &agent.profile.name,
+            timeout,
         ),
     )
     .await;
@@ -634,7 +645,7 @@ async fn execute_review_task(
                     &review_scope,
                 )
                 .await;
-            progress.update(&file_path, TaskStatus::Done);
+            progress.update(&file_path, &agent.profile.name, TaskStatus::Done);
             if let Some(a) = audit.as_mut() {
                 a.status = AuditTaskStatus::Done;
                 a.tokens = tokens;
@@ -643,7 +654,11 @@ async fn execute_review_task(
             (findings, false, tokens, model, audit)
         }
         Err((err_msg, retries)) => {
-            progress.update(&file_path, TaskStatus::Failed(err_msg.clone()));
+            progress.update(
+                &file_path,
+                &agent.profile.name,
+                TaskStatus::Failed(err_msg.clone()),
+            );
             if let Some(a) = audit.as_mut() {
                 a.status = AuditTaskStatus::Failed;
                 a.retries = retries;
@@ -670,18 +685,21 @@ async fn with_retry(
     max_tool_calls: usize,
     progress: &Arc<dyn ProgressReporter>,
     file_path: &str,
+    agent_name: &str,
+    timeout: Option<Duration>,
 ) -> Result<(Vec<Finding>, TokenUsage, usize), (String, usize)> {
     let mut last_err = None;
 
     let sink: LoopEventSink = {
         let progress = Arc::clone(progress);
         let file_path = file_path.to_string();
+        let agent_name = agent_name.to_string();
         Arc::new(move |ev| match ev {
             LoopEvent::ToolCallStart { tool, .. } => {
-                progress.update(&file_path, TaskStatus::ToolCalling { tool });
+                progress.update(&file_path, &agent_name, TaskStatus::ToolCalling { tool });
             }
             LoopEvent::ToolCallEnd { .. } => {
-                progress.update(&file_path, TaskStatus::InProgress);
+                progress.update(&file_path, &agent_name, TaskStatus::InProgress);
             }
             _ => {}
         })
@@ -689,13 +707,34 @@ async fn with_retry(
 
     for attempt in 0..=MAX_RETRIES {
         let call = provider.review(agent, prompt, agentic, max_turns, max_tool_calls);
-        match events::scope(Some(Arc::clone(&sink)), call).await {
+        let scoped = events::scope(Some(Arc::clone(&sink)), call);
+        // Per-attempt timeout. On elapsed, synthesize an `ApiError`
+        // so the existing "timed out" retry classification kicks in
+        // without a dedicated error variant.
+        let outcome = match timeout {
+            Some(t) => match tokio::time::timeout(t, scoped).await {
+                Ok(res) => res,
+                Err(_) => Err(crate::providers::ProviderError::ApiError(format!(
+                    "review attempt timed out after {}s",
+                    t.as_secs()
+                ))),
+            },
+            None => scoped.await,
+        };
+        match outcome {
             Ok(outcome) => return Ok((outcome.findings, outcome.tokens, attempt as usize)),
             Err(ref e) if is_retryable(e) && attempt < MAX_RETRIES => {
-                let backoff = retry_backoff(attempt);
                 let reason = classify_error(e).unwrap_or("Transient error").to_string();
+                // Malformed tool calls aren't a load/availability problem — they're
+                // a one-off model glitch, so a re-roll without delay is fine.
+                let backoff = if reason == "Malformed tool call from model" {
+                    Duration::ZERO
+                } else {
+                    retry_backoff(attempt)
+                };
                 progress.update(
                     file_path,
+                    agent_name,
                     TaskStatus::Retrying {
                         attempt: attempt + 1,
                         max: MAX_RETRIES + 1,
@@ -703,8 +742,10 @@ async fn with_retry(
                         backoff_secs: backoff.as_secs(),
                     },
                 );
-                tokio::time::sleep(backoff).await;
-                progress.update(file_path, TaskStatus::InProgress);
+                if !backoff.is_zero() {
+                    tokio::time::sleep(backoff).await;
+                }
+                progress.update(file_path, agent_name, TaskStatus::InProgress);
                 last_err = Some(format!("{e}"));
             }
             Err(e) => {

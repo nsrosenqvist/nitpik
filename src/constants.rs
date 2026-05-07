@@ -138,6 +138,14 @@ pub const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_secs(
 /// Maximum backoff delay between retries.
 pub const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// Default per-attempt timeout for a single file × agent review call.
+///
+/// Wraps the entire LLM call (including all agentic turns and tool
+/// roundtrips) so a stuck or hung provider connection cannot block a
+/// review indefinitely. On timeout the call is treated as a retryable
+/// error so the standard retry policy applies.
+pub const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 300;
+
 // ── HTTP constants ──────────────────────────────────────────────────
 
 /// Default total request timeout for outgoing HTTP calls.

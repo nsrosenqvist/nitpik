@@ -216,6 +216,7 @@ async fn orchestrator_returns_findings_from_mock_provider() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -260,6 +261,7 @@ async fn orchestrator_returns_empty_for_no_issues() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -313,6 +315,7 @@ async fn orchestrator_aggregates_token_usage_across_tasks() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -385,6 +388,7 @@ async fn orchestrator_splits_token_usage_by_model() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -433,6 +437,7 @@ async fn orchestrator_zero_tokens_when_all_failed() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -469,6 +474,7 @@ async fn orchestrator_errors_on_empty_diffs() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -508,6 +514,7 @@ async fn orchestrator_skips_binary_files() {
         false,
         false,
         false,
+        None,
     );
 
     let mut binary_diff = test_diff("image.png", "");
@@ -562,6 +569,7 @@ async fn orchestrator_handles_multiple_agents_and_files() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -640,6 +648,7 @@ async fn orchestrator_handles_provider_errors_gracefully() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -720,6 +729,7 @@ async fn cache_prevents_duplicate_calls() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -956,6 +966,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
         false,
         false,
         false,
+        None,
     );
 
     let result2 = orchestrator
@@ -1095,6 +1106,7 @@ async fn no_prior_context_flag_suppresses_injection() {
         false,
         false,
         false,
+        None,
     );
 
     let new_content = format!("let new_npc_{} = 2;", std::process::id());
@@ -1243,6 +1255,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -1364,6 +1377,7 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
         false,
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -1761,6 +1775,7 @@ async fn orchestrator_verify_drops_findings_via_critic() {
         true,  // verify
         false, // multi_wave
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -1838,6 +1853,7 @@ async fn orchestrator_verify_fail_open_when_triage_errors() {
         true,  // verify on, but triage fails
         false, // multi_wave
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -1906,6 +1922,7 @@ async fn orchestrator_no_verify_leaves_findings_untouched() {
         false, // verify off
         false,
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -2035,6 +2052,7 @@ async fn orchestrator_multi_wave_feeds_wave1_findings_into_wave2() {
         false, // verify
         true,  // multi_wave
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -2133,6 +2151,7 @@ async fn orchestrator_runs_all_agents_in_one_wave_when_multi_wave_disabled() {
         false, // verify
         false, // multi_wave OFF
         false,
+        None,
     );
 
     let context = ReviewContext {
@@ -2189,6 +2208,7 @@ async fn orchestrator_collects_task_audits_when_audit_enabled() {
         false,
         false,
         true, // audit_enabled
+        None,
     );
 
     let context = ReviewContext {
@@ -2237,6 +2257,7 @@ async fn orchestrator_skips_audit_collection_when_disabled() {
         false,
         false,
         false, // audit_enabled OFF
+        None,
     );
 
     let context = ReviewContext {
@@ -2277,6 +2298,7 @@ async fn orchestrator_records_failed_task_in_audit() {
         false,
         false,
         true,
+        None,
     );
 
     let context = ReviewContext {
@@ -2338,6 +2360,7 @@ async fn orchestrator_populates_verify_audit_when_critic_drops() {
         true, // verify ON
         false,
         true, // audit
+        None,
     );
 
     let context = ReviewContext {
@@ -2390,6 +2413,7 @@ async fn audit_log_end_to_end_writes_valid_json_to_disk() {
         false,
         false,
         true, // audit_enabled
+        None,
     );
 
     let context = ReviewContext {
@@ -2423,6 +2447,7 @@ async fn audit_log_end_to_end_writes_valid_json_to_disk() {
             auto_mode: Some("hybrid".to_string()),
             review_scope: "main".to_string(),
             nitpik_version: "0.0.0-test".to_string(),
+            timeout_secs: 0,
         },
         tasks: result.task_audits.clone(),
         verify: result.verify_audit.clone(),
@@ -2476,4 +2501,131 @@ async fn audit_log_end_to_end_writes_valid_json_to_disk() {
     // Token totals are present.
     assert!(parsed["tokens"]["input"].as_u64().is_some());
     assert!(parsed["tokens"]["output"].as_u64().is_some());
+}
+
+// ---------------------------------------------------------------------------
+// Per-attempt timeout
+// ---------------------------------------------------------------------------
+
+/// A provider whose `review` sleeps longer than any reasonable test timeout
+/// so we can observe the orchestrator's per-attempt timeout / retry behavior.
+struct SlowProvider {
+    sleep: std::time::Duration,
+}
+
+#[async_trait]
+impl ReviewProvider for SlowProvider {
+    async fn review(
+        &self,
+        _agent: &AgentDefinition,
+        _prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<ReviewOutcome, ProviderError> {
+        tokio::time::sleep(self.sleep).await;
+        Ok(ReviewOutcome {
+            findings: vec![],
+            tokens: Default::default(),
+        })
+    }
+
+    async fn triage(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(TriageOutcome::default())
+    }
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn orchestrator_times_out_slow_provider_and_marks_failed() {
+    // Provider sleeps far longer than the per-attempt timeout, so every
+    // retry is forced to time out. Tokio's paused clock auto-advances
+    // through the orchestrator's retry backoffs so the test stays fast
+    // even though the real-world wall-clock would be ~MAX_RETRIES × backoff.
+    let provider = Arc::new(SlowProvider {
+        sleep: std::time::Duration::from_secs(60),
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["slow-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        false,
+        Some(std::time::Duration::from_millis(50)),
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let result = orchestrator
+        .run(&context, &[test_agent("slow-agent")], 4, false, 10, 50)
+        .await
+        .expect("orchestrator should return Ok with failed_tasks > 0");
+
+    assert_eq!(result.failed_tasks, 1, "task should be marked failed");
+    assert!(
+        result.findings.is_empty(),
+        "no findings expected from a timed-out task"
+    );
+}
+
+#[tokio::test]
+async fn orchestrator_completes_when_timeout_is_disabled() {
+    // With timeout=None the orchestrator must wait for the provider
+    // even if it is slow. Use a very short sleep so the test is fast.
+    let provider = Arc::new(SlowProvider {
+        sleep: std::time::Duration::from_millis(20),
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["slow-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        false,
+        None, // timeout disabled
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let result = orchestrator
+        .run(&context, &[test_agent("slow-agent")], 4, false, 10, 50)
+        .await
+        .expect("run should succeed");
+    assert_eq!(result.failed_tasks, 0);
 }

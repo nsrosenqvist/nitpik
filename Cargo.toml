@@ -49,6 +49,7 @@ walkdir = "2"
 
 # Terminal output
 colored = "3"
+terminal_size = "0.4"
 
 # Hashing (cache keys)
 sha2 = "0.10"
@@ -90,6 +91,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 serial_test = "3"
 filetime = "0.2"
+tokio = { version = "1", features = ["full", "test-util"] }
 
 [profile.release]
 lto = true

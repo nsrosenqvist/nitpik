@@ -61,6 +61,14 @@ pub fn classify_error(err: &ProviderError) -> Option<&'static str> {
                 Some("Connection error")
             } else if msg_lower.contains("temporarily") || msg_lower.contains("try again") {
                 Some("Temporary API error")
+            } else if msg_lower.contains("malformedfunctioncall")
+                || msg_lower.contains("malformed function call")
+            {
+                // Gemini occasionally emits Python-style pseudocode instead of a
+                // proper functionCall payload, which its own API then rejects
+                // with finish_reason=MalformedFunctionCall. A re-roll usually
+                // produces a well-formed call.
+                Some("Malformed tool call from model")
             } else {
                 None
             }
@@ -421,6 +429,15 @@ That's all."#;
     fn classify_error_parse_error() {
         let err = ProviderError::ParseError("could not parse JSON".into());
         assert_eq!(classify_error(&err), Some("Failed to parse LLM response"));
+    }
+
+    #[test]
+    fn classify_error_malformed_function_call_is_retryable() {
+        let err = ProviderError::ApiError(
+            "ResponseError: Gemini candidate missing content (finish_reason=MalformedFunctionCall, finish_message=Malformed function call: print(default_api.submit_findings(...)))".into(),
+        );
+        assert_eq!(classify_error(&err), Some("Malformed tool call from model"));
+        assert!(is_retryable(&err));
     }
 
     #[test]

@@ -345,6 +345,7 @@ async fn create_orchestrator(
     verify: bool,
     multi_wave: bool,
     audit_enabled: bool,
+    timeout: Option<std::time::Duration>,
 ) -> Result<(Arc<dyn ReviewProvider>, orchestrator::ReviewOrchestrator)> {
     let provider: Arc<dyn ReviewProvider> = Arc::new(
         RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
@@ -366,6 +367,7 @@ async fn create_orchestrator(
         verify,
         multi_wave,
         audit_enabled,
+        timeout,
     );
     Ok((provider, orchestrator))
 }
@@ -484,6 +486,11 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         args.verify,
         args.multi_wave,
         audit_path.is_some(),
+        if args.timeout == 0 {
+            None
+        } else {
+            Some(std::time::Duration::from_secs(args.timeout))
+        },
     )
     .await?;
 
@@ -653,6 +660,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             auto_mode: Some(auto_mode_str.to_string()),
             review_scope: diff::git::detect_branch(repo_root_path, &Env::real()).await,
             nitpik_version: constants::VERSION.to_string(),
+            timeout_secs: args.timeout,
         };
         let document = audit::RunAudit {
             schema: 1,

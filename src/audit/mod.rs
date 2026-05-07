@@ -70,6 +70,9 @@ pub struct ConfigSummary {
     pub auto_mode: Option<String>,
     pub review_scope: String,
     pub nitpik_version: String,
+    /// Per-attempt timeout in seconds for each file × agent review
+    /// call. `0` means timeouts were disabled.
+    pub timeout_secs: u64,
 }
 
 /// Audit data for a single file × agent task.
@@ -308,6 +311,7 @@ mod tests {
                 auto_mode: None,
                 review_scope: "main".into(),
                 nitpik_version: "0.0.0".into(),
+                timeout_secs: 0,
             },
             tasks: vec![],
             verify: None,
@@ -347,6 +351,7 @@ mod tests {
                 auto_mode: None,
                 review_scope: "".into(),
                 nitpik_version: "0.0.0".into(),
+                timeout_secs: 0,
             },
             tasks: vec![],
             verify: None,
