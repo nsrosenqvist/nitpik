@@ -8,7 +8,6 @@ use crate::models::AgentDefinition;
 use crate::models::context::ReviewContext;
 use crate::models::diff::FileDiff;
 use crate::models::finding::Finding;
-
 /// LLM review instructions appended to every prompt.
 ///
 /// Contains five placeholder slots filled by `format!()` in `build_prompt()`:
@@ -75,6 +74,42 @@ Example finding:
 If there are no issues, return an empty array: []
 ";
 
+/// Build the **cacheable** static context block appended to the
+/// agent's system prompt.
+///
+/// Contains content that is identical across every file×agent task
+/// in a single review run: project documentation and the diff's
+/// commit history. Moving these out of the per-task user prompt
+/// lets providers' prompt caches reuse the system prefix on every
+/// task after the first.
+///
+/// Returns an empty string when neither block has content; callers
+/// can append unconditionally.
+pub fn build_system_addendum(context: &ReviewContext<'_>) -> String {
+    let mut out = String::new();
+
+    if !context.baseline.project_docs.is_empty() {
+        out.push_str("## Project Documentation\n\n");
+        for (name, content) in &context.baseline.project_docs {
+            out.push_str(&format!("### {name}\n\n{content}\n\n"));
+        }
+    }
+
+    if !context.baseline.commit_log.is_empty() {
+        out.push_str("## Commit History\n\n");
+        out.push_str(
+            "The following commits are included in this diff (newest first). \
+             Use them to understand the author's intent behind the changes:\n\n",
+        );
+        for commit in &context.baseline.commit_log {
+            out.push_str(&format!("- {commit}\n"));
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
 /// Build the user prompt for a single file review.
 pub fn build_prompt(
     diff: &FileDiff<'_>,
@@ -85,27 +120,6 @@ pub fn build_prompt(
     agentic: bool,
 ) -> String {
     let mut prompt = String::with_capacity(50_000);
-
-    // Project docs context
-    if !context.baseline.project_docs.is_empty() {
-        prompt.push_str("## Project Documentation\n\n");
-        for (name, content) in &context.baseline.project_docs {
-            prompt.push_str(&format!("### {name}\n\n{content}\n\n"));
-        }
-    }
-
-    // Commit log context
-    if !context.baseline.commit_log.is_empty() {
-        prompt.push_str("## Commit History\n\n");
-        prompt.push_str(
-            "The following commits are included in this diff (newest first). \
-             Use them to understand the author's intent behind the changes:\n\n",
-        );
-        for commit in &context.baseline.commit_log {
-            prompt.push_str(&format!("- {commit}\n"));
-        }
-        prompt.push('\n');
-    }
 
     // Full file content (if available)
     let file_path = diff.path();
@@ -628,29 +642,48 @@ mod tests {
             repo_root: "/tmp".into(),
             is_path_scan: false,
         };
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
 
-        let prompt = build_prompt(
-            &diff,
-            &context,
-            &agent,
-            std::slice::from_ref(&agent),
-            None,
-            false,
-        );
-        assert!(prompt.contains("## Commit History"));
-        assert!(prompt.contains("abc1234 Fix SQL injection in login"));
-        assert!(prompt.contains("def5678 Add input validation"));
-        assert!(prompt.contains("author's intent"));
+        // Commit log is part of the cacheable system addendum, not the
+        // user prompt: it is identical across every file in the run.
+        let addendum = build_system_addendum(&context);
+        assert!(addendum.contains("## Commit History"));
+        assert!(addendum.contains("abc1234 Fix SQL injection in login"));
+        assert!(addendum.contains("def5678 Add input validation"));
+        assert!(addendum.contains("author's intent"));
     }
 
     #[test]
     fn build_prompt_omits_empty_commit_log() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        assert!(!build_system_addendum(&context).contains("Commit History"));
+    }
 
-        let prompt = build_prompt(
+    #[test]
+    fn system_addendum_includes_project_docs() {
+        let diff = make_simple_diff("test.rs");
+        let context = ReviewContext {
+            diffs: vec![diff.clone()],
+            baseline: BaselineContext {
+                project_docs: {
+                    let mut m = indexmap::IndexMap::new();
+                    m.insert("REVIEW.md".into(), "Use snake_case for files".into());
+                    m
+                },
+                ..BaselineContext::default()
+            },
+            repo_root: "/tmp".into(),
+            is_path_scan: false,
+        };
+        let addendum = build_system_addendum(&context);
+        assert!(addendum.contains("## Project Documentation"));
+        assert!(addendum.contains("### REVIEW.md"));
+        assert!(addendum.contains("snake_case"));
+
+        // And the user prompt no longer carries them — caching depends
+        // on the user prompt varying per task while system stays stable.
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let user_prompt = build_prompt(
             &diff,
             &context,
             &agent,
@@ -658,6 +691,14 @@ mod tests {
             None,
             false,
         );
-        assert!(!prompt.contains("Commit History"));
+        assert!(!user_prompt.contains("## Project Documentation"));
+        assert!(!user_prompt.contains("snake_case"));
+    }
+
+    #[test]
+    fn system_addendum_empty_when_no_static_context() {
+        let diff = make_simple_diff("test.rs");
+        let context = make_simple_context(&diff);
+        assert_eq!(build_system_addendum(&context), "");
     }
 }

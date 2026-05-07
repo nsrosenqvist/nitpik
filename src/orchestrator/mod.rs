@@ -34,7 +34,7 @@ use crate::providers::response::{classify_error, is_retryable, retry_backoff};
 
 use crate::constants::MAX_RETRIES;
 
-use prompt::{build_prompt, build_prompt_with_prior};
+use prompt::{build_prompt, build_prompt_with_prior, build_system_addendum};
 use scope::filter_to_diff_scope;
 
 /// Errors from the orchestrator.
@@ -152,7 +152,16 @@ impl ReviewOrchestrator {
         }
         tasks.sort_by_key(|t| t.line_count);
 
-        for Task { chunk, agent, .. } in tasks {
+        // Static system addendum (project docs + commit log) is
+        // identical across every task in this run. Build once and
+        // splice into each task's agent system prompt so providers
+        // can cache the system prefix.
+        let system_addendum = build_system_addendum(context);
+
+        for Task {
+            chunk, mut agent, ..
+        } in tasks
+        {
             let provider = Arc::clone(&self.provider);
             let sem = Arc::clone(&semaphore);
             let cache = Arc::clone(&self.cache);
@@ -167,6 +176,21 @@ impl ReviewOrchestrator {
                 .unwrap_or_else(|| self.config.provider.resolved_model())
                 .to_string();
             let file_path = chunk.path().to_string();
+
+            // Augment the per-task agent's system prompt with the
+            // static (run-wide) context. The result remains constant
+            // across every file for the same agent, satisfying the
+            // cacheability requirement.
+            if !system_addendum.is_empty() {
+                if !agent.system_prompt.ends_with("\n\n") {
+                    if agent.system_prompt.ends_with('\n') {
+                        agent.system_prompt.push('\n');
+                    } else {
+                        agent.system_prompt.push_str("\n\n");
+                    }
+                }
+                agent.system_prompt.push_str(&system_addendum);
+            }
 
             let base_prompt = build_prompt(&chunk, context, &agent, agents, None, agentic);
             let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
