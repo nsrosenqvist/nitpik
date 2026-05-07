@@ -562,6 +562,9 @@ async fn execute_review_task(
         tokens: TokenUsage::default(),
         tool_calls: Vec::new(),
         findings_emitted: 0,
+        turns: 0,
+        terminated_via_tool: None,
+        self_repair_attempted: false,
     });
     // Check cache first
     if let Some(cached) = cache.get(&cache_key).await {
@@ -634,7 +637,12 @@ async fn execute_review_task(
     }
 
     match retry_result {
-        Ok((findings, tokens, retries)) => {
+        Ok((outcome, retries)) => {
+            let crate::providers::ReviewOutcome {
+                findings,
+                tokens,
+                diagnostics,
+            } = outcome;
             cache.put(&cache_key, &findings).await;
             cache
                 .put_sidecar(
@@ -650,6 +658,9 @@ async fn execute_review_task(
                 a.status = AuditTaskStatus::Done;
                 a.tokens = tokens;
                 a.retries = retries;
+                a.turns = diagnostics.turns;
+                a.terminated_via_tool = diagnostics.terminated_via_tool;
+                a.self_repair_attempted = diagnostics.self_repair_attempted;
             }
             (findings, false, tokens, model, audit)
         }
@@ -671,10 +682,11 @@ async fn execute_review_task(
 
 /// Retry a provider review call with exponential backoff.
 ///
-/// Returns `Ok((findings, tokens, retries))` on success or
-/// `Err((message, retries))` when retries are exhausted or a
-/// non-retryable error is encountered. `retries` is the number of
-/// retry attempts performed (0 = succeeded on first attempt).
+/// Returns `Ok((outcome, retries))` on success or `Err((message, retries))`
+/// when retries are exhausted or a non-retryable error is encountered.
+/// `retries` is the number of retry attempts performed (0 = succeeded on
+/// first attempt). `outcome.diagnostics` carries agent-loop signals
+/// (turns, terminal-tool fire, self-repair) for the audit log.
 #[allow(clippy::too_many_arguments)] // Thin extraction from spawn closure; a one-shot struct adds noise.
 async fn with_retry(
     provider: &Arc<dyn ReviewProvider>,
@@ -687,7 +699,7 @@ async fn with_retry(
     file_path: &str,
     agent_name: &str,
     timeout: Option<Duration>,
-) -> Result<(Vec<Finding>, TokenUsage, usize), (String, usize)> {
+) -> Result<(crate::providers::ReviewOutcome, usize), (String, usize)> {
     let mut last_err = None;
 
     let sink: LoopEventSink = {
@@ -728,7 +740,7 @@ async fn with_retry(
             None => scoped.await,
         };
         match outcome {
-            Ok(outcome) => return Ok((outcome.findings, outcome.tokens, attempt as usize)),
+            Ok(outcome) => return Ok((outcome, attempt as usize)),
             Err(ref e) if is_retryable(e) && attempt < MAX_RETRIES => {
                 let reason = classify_error(e).unwrap_or("Transient error").to_string();
                 // Malformed tool calls aren't a load/availability problem — they're

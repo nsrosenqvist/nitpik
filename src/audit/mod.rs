@@ -96,6 +96,30 @@ pub struct TaskAudit {
     pub tool_calls: Vec<ToolCallRecord>,
     /// Number of findings the agent emitted (before deduplication).
     pub findings_emitted: usize,
+    /// Number of completion calls (turns) on the successful attempt.
+    /// `0` for non-agentic calls and cache hits.
+    #[serde(skip_serializing_if = "is_zero_usize")]
+    pub turns: usize,
+    /// Set when the loop terminated because the model invoked the
+    /// terminal tool (typically `submit_findings`). When `None` for
+    /// an agentic task the model emitted prose without calling the
+    /// terminal tool — usually a model-quality issue.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminated_via_tool: Option<String>,
+    /// True when the loop fired a self-repair correction because the
+    /// model returned text without calling the terminal tool. A
+    /// frequent self-repair rate signals the chosen model handles
+    /// the structured-output contract poorly.
+    #[serde(skip_serializing_if = "is_false")]
+    pub self_repair_attempted: bool,
+}
+
+fn is_zero_usize(v: &usize) -> bool {
+    *v == 0
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Final terminal state of a review task.

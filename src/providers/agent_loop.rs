@@ -22,7 +22,6 @@ use rig::OneOrMany;
 use rig::completion::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use rig::completion::{CompletionModel, ToolDefinition, Usage};
 use rig::tool::ToolDyn;
-use serde_json::Value;
 
 use super::ProviderError;
 use super::events::{self, LoopEvent};
@@ -31,23 +30,28 @@ use super::events::{self, LoopEvent};
 #[derive(Debug, Clone)]
 pub struct LoopOutcome {
     /// Concatenated text from the final assistant turn (one string per
-    /// `AssistantContent::Text`, joined with newlines).
+    /// `AssistantContent::Text`, joined with newlines). Empty when the
+    /// loop terminated via the terminal tool.
     pub final_text: String,
     /// Aggregated token usage across every round.
     pub usage: Usage,
-    /// Full conversation history excluding the system preamble.
-    /// Order: initial user prompt, then alternating assistant /
-    /// tool-result messages per round, ending with the final
-    /// assistant message that contained no tool calls.
+    /// Full conversation history excluding the system preamble. Order:
+    /// initial user prompt, then alternating assistant / tool-result
+    /// messages per round. Used by the agent loop's own tests to
+    /// verify message assembly; production callers read the typed
+    /// fields below instead.
     pub history: Vec<Message>,
     /// Number of completion calls made (one per turn).
     pub turns: usize,
     /// Set when the loop terminated because the model invoked the
     /// configured [`terminal_tool`](LoopConfig::terminal_tool).
+    /// `None` means the loop exited because the model emitted text
+    /// without a tool call (or hit the turn cap).
     pub terminated_via_tool: Option<String>,
     /// True when the loop appended a self-repair correction message
     /// because the model returned text without calling the terminal
-    /// tool. At most one repair is attempted per run.
+    /// tool. At most one repair is attempted per run. Useful as a
+    /// model-quality signal in the audit log.
     pub self_repair_attempted: bool,
 }
 
@@ -65,9 +69,6 @@ pub struct LoopConfig {
     /// was a tool call, [`final_text`](LoopOutcome::final_text) is
     /// empty and the caller's parser will surface the issue.
     pub max_turns: usize,
-    /// Provider-specific extras forwarded verbatim (e.g. Anthropic
-    /// `cache_control` blocks). Sent every turn.
-    pub additional_params: Option<Value>,
     /// Optional terminal tool name. When the model calls a tool with
     /// this name the loop exits immediately after recording the tool
     /// result, without making another completion call. Used to wire
@@ -89,16 +90,9 @@ impl LoopConfig {
             temperature: Some(0.0),
             max_tokens,
             max_turns: max_turns.max(1),
-            additional_params: None,
             terminal_tool: None,
             self_repair_message: None,
         }
-    }
-
-    /// Attach provider-specific extra params.
-    pub fn with_additional_params(mut self, params: Option<Value>) -> Self {
-        self.additional_params = params;
-        self
     }
 
     /// Mark a tool name as terminal: calling it ends the loop.
@@ -171,9 +165,6 @@ where
 
         if let Some(temp) = config.temperature {
             builder = builder.temperature(temp);
-        }
-        if let Some(ref params) = config.additional_params {
-            builder = builder.additional_params(params.clone());
         }
 
         let resp = builder.send().await.map_err(|e| {
@@ -367,6 +358,7 @@ mod tests {
     use rig::completion::message::{Reasoning, ToolCall, ToolFunction};
     use rig::completion::{CompletionError, CompletionRequest, CompletionResponse};
     use serde::{Deserialize, Serialize};
+    use serde_json::Value;
     use std::future::Future;
     use std::sync::Mutex;
 
@@ -762,18 +754,6 @@ mod tests {
             assert_eq!(req.tools[0].name, "echo");
             assert_eq!(req.max_tokens, Some(1024));
         }
-    }
-
-    #[tokio::test]
-    async fn forwards_additional_params() {
-        let model = MockModel::new(vec![MockTurn::Text("done".into())]);
-        let extra = serde_json::json!({"cache_control": "ephemeral"});
-        let cfg = LoopConfig::new("p", 1024, 5).with_additional_params(Some(extra.clone()));
-        run_agent_loop(model.clone(), "p".into(), vec![], cfg)
-            .await
-            .unwrap();
-        let seen = model.seen_requests.lock().unwrap();
-        assert_eq!(seen[0].additional_params, Some(extra));
     }
 
     #[tokio::test]

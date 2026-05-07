@@ -19,7 +19,7 @@ use nitpik::models::finding::{Finding, Severity};
 use nitpik::orchestrator::ReviewOrchestrator;
 use nitpik::progress::ProgressTracker;
 use nitpik::providers::{
-    ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict,
+    AgentDiagnostics, ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict,
 };
 
 /// A mock review provider that returns canned findings.
@@ -54,6 +54,7 @@ impl ReviewProvider for MockProvider {
         Ok(ReviewOutcome {
             findings: self.canned_findings.clone(),
             tokens: Default::default(),
+            ..Default::default()
         })
     }
 
@@ -86,6 +87,7 @@ impl ReviewProvider for UsageMockProvider {
         Ok(ReviewOutcome {
             findings: self.findings.clone(),
             tokens: self.tokens_per_call,
+            ..Default::default()
         })
     }
 
@@ -692,6 +694,7 @@ async fn cache_prevents_duplicate_calls() {
             Ok(ReviewOutcome {
                 findings: self.findings.clone(),
                 tokens: Default::default(),
+                ..Default::default()
             })
         }
 
@@ -803,11 +806,13 @@ async fn prior_findings_injected_on_cache_invalidation() {
                 Ok(ReviewOutcome {
                     findings: self.followup_findings.clone(),
                     tokens: Default::default(),
+                    ..Default::default()
                 })
             } else {
                 Ok(ReviewOutcome {
                     findings: self.initial_findings.clone(),
                     tokens: Default::default(),
+                    ..Default::default()
                 })
             }
         }
@@ -1037,6 +1042,7 @@ async fn no_prior_context_flag_suppresses_injection() {
             Ok(ReviewOutcome {
                 findings: vec![],
                 tokens: Default::default(),
+                ..Default::default()
             })
         }
 
@@ -1201,6 +1207,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
                     evidence: Vec::new(),
                 }],
                 tokens: Default::default(),
+                ..Default::default()
             })
         }
 
@@ -1331,6 +1338,7 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
                     evidence: Vec::new(),
                 }],
                 tokens: Default::default(),
+                ..Default::default()
             })
         }
 
@@ -1516,6 +1524,7 @@ impl ReviewProvider for TriageMockProvider {
         Ok(ReviewOutcome {
             findings: vec![],
             tokens: Default::default(),
+            ..Default::default()
         })
     }
 
@@ -1723,6 +1732,7 @@ impl ReviewProvider for ReviewAndTriageMock {
         Ok(ReviewOutcome {
             findings: self.findings.clone(),
             tokens: Default::default(),
+            ..Default::default()
         })
     }
 
@@ -1816,6 +1826,7 @@ impl ReviewProvider for ReviewOkTriageFailMock {
         Ok(ReviewOutcome {
             findings: self.findings.clone(),
             tokens: Default::default(),
+            ..Default::default()
         })
     }
 
@@ -1993,6 +2004,7 @@ impl ReviewProvider for RecordingPerAgentMock {
         Ok(ReviewOutcome {
             findings,
             tokens: Default::default(),
+            ..Default::default()
         })
     }
 
@@ -2233,6 +2245,92 @@ async fn orchestrator_collects_task_audits_when_audit_enabled() {
     assert_eq!(task.retries, 0);
     assert_eq!(task.findings_emitted, 2);
     assert!(task.error.is_none());
+}
+
+/// Provider that fills `ReviewOutcome::diagnostics` so we can verify
+/// agent-loop signals propagate into the audit log.
+struct DiagnosticsProvider {
+    findings: Vec<Finding>,
+    diagnostics: AgentDiagnostics,
+}
+
+#[async_trait::async_trait]
+impl ReviewProvider for DiagnosticsProvider {
+    async fn review(
+        &self,
+        _agent: &nitpik::models::AgentDefinition,
+        _prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<ReviewOutcome, ProviderError> {
+        Ok(ReviewOutcome {
+            findings: self.findings.clone(),
+            tokens: Default::default(),
+            diagnostics: self.diagnostics.clone(),
+        })
+    }
+
+    async fn triage(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(TriageOutcome::default())
+    }
+}
+
+#[tokio::test]
+async fn audit_records_agent_loop_diagnostics() {
+    // The provider returns diagnostics indicating the model went 3
+    // turns, terminated via submit_findings, and needed a self-repair.
+    let provider = Arc::new(DiagnosticsProvider {
+        findings: test_findings("src/main.rs", "test-agent"),
+        diagnostics: AgentDiagnostics {
+            turns: 3,
+            terminated_via_tool: Some("submit_findings".to_string()),
+            self_repair_attempted: true,
+        },
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(
+        &["src/main.rs".to_string()],
+        &["test-agent".to_string()],
+        false,
+    ));
+    let orchestrator = ReviewOrchestrator::new(
+        provider,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        true, // audit_enabled
+        None,
+    );
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 42;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("test-agent")];
+    let result = orchestrator
+        .run(&context, &agents, 4, true, 10, 50)
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(result.task_audits.len(), 1);
+    let task = &result.task_audits[0];
+    assert_eq!(task.turns, 3);
+    assert_eq!(task.terminated_via_tool.as_deref(), Some("submit_findings"));
+    assert!(task.self_repair_attempted);
 }
 
 #[tokio::test]
@@ -2527,6 +2625,7 @@ impl ReviewProvider for SlowProvider {
         Ok(ReviewOutcome {
             findings: vec![],
             tokens: Default::default(),
+            ..Default::default()
         })
     }
 

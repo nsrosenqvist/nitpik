@@ -29,7 +29,9 @@ use crate::tools::{
     SUBMIT_FINDINGS_TOOL_NAME, SearchTextTool, SubmitFindingsTool,
 };
 
-use super::{ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict};
+use super::{
+    AgentDiagnostics, ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict,
+};
 
 /// Maximum tokens per LLM completion response.
 ///
@@ -66,7 +68,6 @@ struct AgenticConfig {
 /// by providers that don't, in which case the response parser handles
 /// markdown-fenced or prose-prefixed JSON.
 struct CallArgs<'a> {
-    model: &'a str,
     system_prompt: &'a str,
     user_prompt: &'a str,
     label: &'a str,
@@ -76,9 +77,23 @@ struct CallArgs<'a> {
     agentic: Option<AgenticConfig>,
 }
 
-/// Dispatch a single LLM call through a rig-core client.
+/// Raw output from one provider call. Returned to [`RigProvider`] so
+/// it can convert the text into typed findings/verdicts and forward
+/// the tokens + diagnostics to the orchestrator.
+struct CallResult {
+    text: String,
+    tokens: TokenUsage,
+    diagnostics: AgentDiagnostics,
+}
+
+/// Dispatch a single LLM call against a pre-built model handle.
 ///
-/// In non-agentic mode the agent is built with `output_schema::<T>()`,
+/// The handle is built per-provider in [`RigProvider::call`] so each
+/// provider can apply its own pre-flight tweaks (e.g. Anthropic's
+/// `with_automatic_caching()`) without leaking provider-specific
+/// types into this generic body.
+///
+/// In non-agentic mode the request is built with `output_schema::<T>()`,
 /// so providers that support native structured output constrain the
 /// response server-side. In agentic mode the schema is **not** set
 /// because at least Gemini rejects function calling combined with a
@@ -87,15 +102,12 @@ struct CallArgs<'a> {
 /// silently ignore it. The agentic prompt itself instructs the LLM to
 /// return JSON, and [`parse_with_fallbacks`] handles markdown-fenced
 /// or prose-prefixed responses.
-async fn dispatch_review<C: CompletionClient, T: JsonSchema>(
-    client: &C,
-    args: CallArgs<'_>,
-) -> Result<(String, TokenUsage), ProviderError>
+async fn dispatch_review<M, T>(model: M, args: CallArgs<'_>) -> Result<CallResult, ProviderError>
 where
-    <C as CompletionClient>::CompletionModel: 'static,
+    M: CompletionModel + 'static,
+    T: JsonSchema,
 {
     let CallArgs {
-        model,
         system_prompt,
         user_prompt,
         label,
@@ -103,27 +115,23 @@ where
         agentic,
     } = args;
 
-    // The agent builder's type changes once tools are registered
-    // (NoToolConfig → WithBuilderTools), so the agentic and non-agentic
-    // branches construct separate builders and await independently.
     if let Some(cfg) = agentic {
         // The terminal tool is registered first so the LLM sees it
         // alongside the exploration tools and so call ordering in
         // logs is deterministic.
         let (submit_tool, findings_sink) = SubmitFindingsTool::new();
-        let mut tools: Vec<std::sync::Arc<dyn rig::tool::ToolDyn>> = vec![
-            std::sync::Arc::new(submit_tool),
-            std::sync::Arc::new(ReadFileTool::new(cfg.repo_root.clone())),
-            std::sync::Arc::new(ReadFilesTool::new(cfg.repo_root.clone())),
-            std::sync::Arc::new(SearchTextTool::new(cfg.repo_root.clone())),
-            std::sync::Arc::new(ListDirectoryTool::new(cfg.repo_root.clone())),
-            std::sync::Arc::new(GlobTool::new(cfg.repo_root.clone())),
+        let mut tools: Vec<Arc<dyn rig::tool::ToolDyn>> = vec![
+            Arc::new(submit_tool),
+            Arc::new(ReadFileTool::new(cfg.repo_root.clone())),
+            Arc::new(ReadFilesTool::new(cfg.repo_root.clone())),
+            Arc::new(SearchTextTool::new(cfg.repo_root.clone())),
+            Arc::new(ListDirectoryTool::new(cfg.repo_root.clone())),
+            Arc::new(GlobTool::new(cfg.repo_root.clone())),
         ];
         for custom_tool in cfg.custom_tools {
-            tools.push(std::sync::Arc::new(custom_tool));
+            tools.push(Arc::new(custom_tool));
         }
 
-        let model_handle = client.completion_model(model);
         let loop_cfg = super::agent_loop::LoopConfig::new(
             system_prompt.to_string(),
             max_tokens,
@@ -140,36 +148,47 @@ where
         let budget = cfg.tool_budget.clone();
         let prompt_owned = user_prompt.to_string();
         let outcome = crate::tools::budget::scope(budget, async move {
-            super::agent_loop::run_agent_loop(model_handle, prompt_owned, tools, loop_cfg).await
+            super::agent_loop::run_agent_loop(model, prompt_owned, tools, loop_cfg).await
         })
         .await
         .map_err(|e| ProviderError::ApiError(format!("{label} agentic error: {e}")))?;
 
         let tokens: TokenUsage = outcome.usage.into();
+        let diagnostics = AgentDiagnostics {
+            turns: outcome.turns,
+            terminated_via_tool: outcome.terminated_via_tool,
+            self_repair_attempted: outcome.self_repair_attempted,
+        };
 
         // If the LLM called submit_findings, return its captured
-        // structured payload as JSON so the existing parser takes the
+        // structured payload as JSON so the caller's parser takes the
         // happy path without falling back to text scraping.
         let captured = findings_sink.lock().expect("findings sink poisoned").take();
         if let Some(findings) = captured {
-            let json = serde_json::to_string(&findings).map_err(|e| {
+            let text = serde_json::to_string(&findings).map_err(|e| {
                 ProviderError::ApiError(format!(
                     "{label} failed to serialize submitted findings: {e}"
                 ))
             })?;
-            return Ok((json, tokens));
+            return Ok(CallResult {
+                text,
+                tokens,
+                diagnostics,
+            });
         }
 
         // No terminal tool call. Fall back to whatever text the model
         // produced; the caller's parser can still rescue JSON the
         // model emitted as prose.
-        Ok((outcome.final_text, tokens))
+        Ok(CallResult {
+            text: outcome.final_text,
+            tokens,
+            diagnostics,
+        })
     } else {
         // Non-agentic path: drive `completion_request` directly so we
-        // can read `CompletionResponse::usage`. Equivalent to the
-        // previous `agent.prompt()` flow but with token accounting.
-        let model_handle = client.completion_model(model);
-        let request = model_handle
+        // can read `CompletionResponse::usage`.
+        let request = model
             .completion_request(user_prompt.to_string())
             .preamble(system_prompt.to_string())
             .temperature(0.0)
@@ -195,7 +214,11 @@ where
                 text.push_str(&t.text);
             }
         }
-        Ok((text, tokens))
+        Ok(CallResult {
+            text,
+            tokens,
+            diagnostics: AgentDiagnostics::default(),
+        })
     }
 }
 
@@ -264,11 +287,23 @@ impl RigProvider {
     /// `T` is the JSON-schema-deriving type that constrains the model's
     /// final response (e.g. `Vec<Finding>` for review,
     /// `Vec<TriageVerdict>` for triage). Each match arm constructs the
-    /// concrete provider client and forwards to [`dispatch_review`].
+    /// concrete provider client, builds the model handle (applying any
+    /// provider-specific tweaks such as Anthropic prompt caching), and
+    /// forwards to [`dispatch_review`].
+    ///
+    /// **Caching note.** Most providers do prompt caching implicitly
+    /// server-side as long as repeat calls share an identical prefix
+    /// (OpenAI, Azure, Gemini 2.5, DeepSeek, …) — no opt-in needed and
+    /// the savings show up in `usage.cached_input_tokens` automatically.
+    /// Anthropic is the exception: caching is opt-in via
+    /// [`with_automatic_caching`] on the model handle, applied below.
+    ///
+    /// [`with_automatic_caching`]: rig::providers::anthropic::completion::CompletionModel::with_automatic_caching
     async fn call<T: JsonSchema>(
         &self,
+        model_id: &str,
         args: CallArgs<'_>,
-    ) -> Result<(String, TokenUsage), ProviderError> {
+    ) -> Result<CallResult, ProviderError> {
         // Ollama does not require an API key; all other providers do.
         let api_key = if self.config.name == ProviderName::Ollama {
             self.config.api_key.as_deref().unwrap_or("")
@@ -284,66 +319,68 @@ impl RigProvider {
                         .build(),
                     "Anthropic",
                 )?;
-                dispatch_review::<_, T>(&client, args).await
+                // Anthropic caching is opt-in; everyone else is implicit.
+                let model = client.completion_model(model_id).with_automatic_caching();
+                dispatch_review::<_, T>(model, args).await
             }
             ProviderName::OpenAI => {
                 let client = self.build_openai_client(api_key)?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Cohere => {
                 let client: providers::cohere::Client =
                     map_client_err(providers::cohere::Client::new(api_key), "Cohere")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Gemini => {
                 let client: providers::gemini::Client =
                     map_client_err(providers::gemini::Client::new(api_key), "Gemini")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Perplexity => {
                 let client: providers::perplexity::Client =
                     map_client_err(providers::perplexity::Client::new(api_key), "Perplexity")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::DeepSeek => {
                 let client: providers::deepseek::Client =
                     map_client_err(providers::deepseek::Client::new(api_key), "DeepSeek")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::XAI => {
                 let client: providers::xai::Client =
                     map_client_err(providers::xai::Client::new(api_key), "xAI")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Groq => {
                 let client: providers::groq::Client =
                     map_client_err(providers::groq::Client::new(api_key), "Groq")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::HuggingFace => {
                 let client: providers::huggingface::Client =
                     map_client_err(providers::huggingface::Client::new(api_key), "HuggingFace")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Hyperbolic => {
                 let client: providers::hyperbolic::Client =
                     map_client_err(providers::hyperbolic::Client::new(api_key), "Hyperbolic")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Mira => {
                 let client: providers::mira::Client =
                     map_client_err(providers::mira::Client::new(api_key), "Mira")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Mistral => {
                 let client: providers::mistral::Client =
                     map_client_err(providers::mistral::Client::new(api_key), "Mistral")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Moonshot => {
                 let client: providers::moonshot::Client =
                     map_client_err(providers::moonshot::Client::new(api_key), "Moonshot")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Ollama => {
                 let mut builder =
@@ -352,17 +389,17 @@ impl RigProvider {
                     builder = builder.base_url(base_url);
                 }
                 let client: providers::ollama::Client = map_client_err(builder.build(), "Ollama")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::OpenRouter => {
                 let client: providers::openrouter::Client =
                     map_client_err(providers::openrouter::Client::new(api_key), "OpenRouter")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Together => {
                 let client: providers::together::Client =
                     map_client_err(providers::together::Client::new(api_key), "Together")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Azure => {
                 let base_url = self.require_base_url()?;
@@ -375,12 +412,12 @@ impl RigProvider {
                         .build(),
                     "Azure",
                 )?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::Galadriel => {
                 let client: providers::galadriel::Client =
                     map_client_err(providers::galadriel::Client::new(api_key), "Galadriel")?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
             ProviderName::OpenAICompatible => {
                 let base_url = self.require_base_url()?;
@@ -391,7 +428,7 @@ impl RigProvider {
                         .build(),
                     "OpenAI-compatible",
                 )?;
-                dispatch_review::<_, T>(&client, args).await
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
         }
     }
@@ -447,19 +484,25 @@ impl ReviewProvider for RigProvider {
             (agent.system_prompt.as_str(), None)
         };
 
-        let (response, tokens) = self
-            .call::<Vec<Finding>>(CallArgs {
+        let result = self
+            .call::<Vec<Finding>>(
                 model,
-                system_prompt,
-                user_prompt: prompt,
-                label: "Review",
-                max_tokens: MAX_TOKENS,
-                agentic: agentic_cfg,
-            })
+                CallArgs {
+                    system_prompt,
+                    user_prompt: prompt,
+                    label: "Review",
+                    max_tokens: MAX_TOKENS,
+                    agentic: agentic_cfg,
+                },
+            )
             .await?;
 
-        let findings = parse_findings_response(&response)?;
-        Ok(ReviewOutcome { findings, tokens })
+        let findings = parse_findings_response(&result.text)?;
+        Ok(ReviewOutcome {
+            findings,
+            tokens: result.tokens,
+            diagnostics: result.diagnostics,
+        })
     }
 
     async fn triage(
@@ -467,26 +510,31 @@ impl ReviewProvider for RigProvider {
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
-        let (response, tokens) = self
-            .call::<Vec<TriageVerdict>>(CallArgs {
-                model: self.config.resolved_model(),
-                system_prompt,
-                user_prompt,
-                label: "Triage",
-                max_tokens: MAX_TOKENS,
-                agentic: None,
-            })
+        let result = self
+            .call::<Vec<TriageVerdict>>(
+                self.config.resolved_model(),
+                CallArgs {
+                    system_prompt,
+                    user_prompt,
+                    label: "Triage",
+                    max_tokens: MAX_TOKENS,
+                    agentic: None,
+                },
+            )
             .await?;
 
-        if response.trim().is_empty() {
+        if result.text.trim().is_empty() {
             return Ok(TriageOutcome {
                 verdicts: Vec::new(),
-                tokens,
+                tokens: result.tokens,
             });
         }
 
-        let verdicts = parse_with_fallbacks::<Vec<TriageVerdict>>(&response)?;
-        Ok(TriageOutcome { verdicts, tokens })
+        let verdicts = parse_with_fallbacks::<Vec<TriageVerdict>>(&result.text)?;
+        Ok(TriageOutcome {
+            verdicts,
+            tokens: result.tokens,
+        })
     }
 }
 

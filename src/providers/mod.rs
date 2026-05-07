@@ -44,8 +44,8 @@ pub struct TriageVerdict {
     pub index: usize,
     /// One of "confirmed", "dismissed", or "downgraded".
     pub classification: String,
-    /// Free-form rationale; included to mirror the prompt schema but
-    /// currently unused by callers.
+    /// Free-form rationale. Surfaced to the audit log when the critic
+    /// drops a finding so users can see why.
     #[serde(default)]
     pub rationale: Option<String>,
 }
@@ -60,6 +60,29 @@ pub struct ReviewOutcome {
     pub findings: Vec<Finding>,
     /// Token usage aggregated across every LLM round.
     pub tokens: TokenUsage,
+    /// Diagnostic flags from the agent loop. Default (all-zero) for
+    /// non-agentic calls; agentic calls fill these so the audit log
+    /// can show how the model behaved.
+    pub diagnostics: AgentDiagnostics,
+}
+
+/// Per-call agent-loop diagnostics, surfaced to the audit log.
+///
+/// All fields are zero/`None`/`false` for non-agentic calls.
+#[derive(Debug, Clone, Default)]
+pub struct AgentDiagnostics {
+    /// Number of completion calls made on this attempt (one per turn).
+    pub turns: usize,
+    /// Set when the loop terminated because the model invoked the
+    /// configured terminal tool (typically `submit_findings`). When
+    /// `None` for an agentic call, the model emitted prose without
+    /// calling the terminal tool — usually a model-quality issue.
+    pub terminated_via_tool: Option<String>,
+    /// True when the loop appended a self-repair correction message
+    /// because the model returned text without calling the terminal
+    /// tool. Frequent self-repairs indicate the chosen model handles
+    /// the structured-output contract poorly.
+    pub self_repair_attempted: bool,
 }
 
 /// Outcome of a single `ReviewProvider::triage` call.
