@@ -8,6 +8,7 @@
 //! rig-core types directly.
 
 pub mod agent_loop;
+pub mod events;
 pub mod response;
 pub mod rig;
 

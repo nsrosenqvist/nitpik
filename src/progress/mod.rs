@@ -23,6 +23,10 @@ pub enum TaskStatus {
     Pending,
     /// Currently being reviewed.
     InProgress,
+    /// Currently invoking a specific tool. Displayed as a transient
+    /// substate of `InProgress`; the orchestrator switches back to
+    /// `InProgress` once the tool returns.
+    ToolCalling { tool: String },
     /// Completed successfully.
     Done,
     /// Failed after retries.
@@ -216,6 +220,10 @@ impl ProgressTracker {
                 TaskStatus::InProgress => (
                     "◌".cyan().bold().to_string(),
                     "reviewing…".cyan().to_string(),
+                ),
+                TaskStatus::ToolCalling { tool } => (
+                    "◌".cyan().bold().to_string(),
+                    format!("calling {tool}…").cyan().to_string(),
                 ),
                 TaskStatus::Done => ("✔".green().bold().to_string(), "done".green().to_string()),
                 TaskStatus::Failed(reason) => {

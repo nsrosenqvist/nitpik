@@ -16,6 +16,7 @@
 //! result string so it can react and try a different approach.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use rig::OneOrMany;
 use rig::completion::message::{AssistantContent, Message, ToolResultContent, UserContent};
@@ -24,6 +25,7 @@ use rig::tool::ToolDyn;
 use serde_json::Value;
 
 use super::ProviderError;
+use super::events::{self, LoopEvent};
 
 /// Result of a successful agent loop run.
 #[derive(Debug, Clone)]
@@ -158,6 +160,8 @@ where
             .expect("history always has at least the user prompt");
         let prior = &history[..history.len() - 1];
 
+        events::emit(LoopEvent::TurnStart { turn: turns + 1 });
+
         let mut builder = model
             .completion_request(prompt_msg)
             .preamble(config.preamble.clone())
@@ -178,6 +182,11 @@ where
 
         usage += resp.usage;
         turns += 1;
+        events::emit(LoopEvent::TurnEnd {
+            turn: turns,
+            input_tokens: resp.usage.input_tokens,
+            output_tokens: resp.usage.output_tokens,
+        });
 
         let assistant_msg = Message::Assistant {
             id: resp.message_id.clone(),
@@ -324,13 +333,25 @@ async fn execute_tool_calls(
         let args = serde_json::to_string(&call.function.arguments)
             .unwrap_or_else(|e| format!("{{\"_serialization_error\":\"{e}\"}}"));
 
-        let output = match find_tool(tools, &name) {
+        events::emit(LoopEvent::ToolCallStart {
+            tool: name.clone(),
+            args_summary: events::summarize_args(&args, 80),
+        });
+        let started = Instant::now();
+
+        let (output, ok) = match find_tool(tools, &name) {
             Some(tool) => match tool.call(args).await {
-                Ok(text) => text,
-                Err(err) => format!("tool error: {err}"),
+                Ok(text) => (text, true),
+                Err(err) => (format!("tool error: {err}"), false),
             },
-            None => format!("error: unknown tool '{name}'"),
+            None => (format!("error: unknown tool '{name}'"), false),
         };
+
+        events::emit(LoopEvent::ToolCallEnd {
+            tool: name.clone(),
+            ok,
+            duration: started.elapsed(),
+        });
         out.push((id, call_id, output));
     }
     out
@@ -868,5 +889,102 @@ mod tests {
     fn reasoning_variant_is_not_a_tool_call() {
         let r = AssistantContent::Reasoning(Reasoning::new("x"));
         assert!(!matches!(r, AssistantContent::ToolCall(_)));
+    }
+
+    #[tokio::test]
+    async fn emits_event_stream_for_tool_call_then_text() {
+        let model = MockModel::new(vec![
+            MockTurn::ToolCall {
+                id: "call_1".into(),
+                name: "echo".into(),
+                args: serde_json::json!({"text": "hi"}),
+            },
+            MockTurn::Text("done".into()),
+        ]);
+        let log: Arc<Mutex<Vec<LoopEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_clone = Arc::clone(&log);
+        let sink: events::LoopEventSink = Arc::new(move |ev| {
+            log_clone.lock().unwrap().push(ev);
+        });
+
+        let outcome = events::scope(
+            Some(sink),
+            run_agent_loop(
+                model,
+                "use echo".into(),
+                vec![echo_tool()],
+                LoopConfig::new("p", 1024, 5),
+            ),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.turns, 2);
+        let evs = log.lock().unwrap();
+        // Expected sequence:
+        //   TurnStart(1), TurnEnd(1), ToolCallStart(echo), ToolCallEnd(echo, ok),
+        //   TurnStart(2), TurnEnd(2)
+        assert_eq!(evs.len(), 6, "events: {evs:?}");
+        assert!(matches!(evs[0], LoopEvent::TurnStart { turn: 1 }));
+        assert!(matches!(
+            evs[1],
+            LoopEvent::TurnEnd {
+                turn: 1,
+                input_tokens: 10,
+                output_tokens: 5
+            }
+        ));
+        match &evs[2] {
+            LoopEvent::ToolCallStart { tool, args_summary } => {
+                assert_eq!(tool, "echo");
+                assert!(args_summary.contains("hi"));
+            }
+            other => panic!("expected ToolCallStart, got {other:?}"),
+        }
+        match &evs[3] {
+            LoopEvent::ToolCallEnd { tool, ok, .. } => {
+                assert_eq!(tool, "echo");
+                assert!(*ok);
+            }
+            other => panic!("expected ToolCallEnd, got {other:?}"),
+        }
+        assert!(matches!(evs[4], LoopEvent::TurnStart { turn: 2 }));
+        assert!(matches!(evs[5], LoopEvent::TurnEnd { turn: 2, .. }));
+    }
+
+    #[tokio::test]
+    async fn emits_failed_tool_call_with_ok_false() {
+        let model = MockModel::new(vec![
+            MockTurn::ToolCall {
+                id: "x".into(),
+                name: "no_such_tool".into(),
+                args: serde_json::json!({}),
+            },
+            MockTurn::Text("recovered".into()),
+        ]);
+        let log: Arc<Mutex<Vec<LoopEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_clone = Arc::clone(&log);
+        let sink: events::LoopEventSink = Arc::new(move |ev| {
+            log_clone.lock().unwrap().push(ev);
+        });
+
+        events::scope(
+            Some(sink),
+            run_agent_loop(
+                model,
+                "missing".into(),
+                vec![echo_tool()],
+                LoopConfig::new("p", 1024, 5),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let evs = log.lock().unwrap();
+        let end = evs.iter().find_map(|e| match e {
+            LoopEvent::ToolCallEnd { tool, ok, .. } => Some((tool.clone(), *ok)),
+            _ => None,
+        });
+        assert_eq!(end, Some(("no_such_tool".to_string(), false)));
     }
 }

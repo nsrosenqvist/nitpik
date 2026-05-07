@@ -29,6 +29,7 @@ use crate::models::context::ReviewContext;
 use crate::models::finding::Finding;
 use crate::progress::{ProgressReporter, TaskStatus};
 use crate::providers::ReviewProvider;
+use crate::providers::events::{self, LoopEvent, LoopEventSink};
 use crate::providers::response::{classify_error, is_retryable, retry_backoff};
 
 use crate::constants::MAX_RETRIES;
@@ -364,11 +365,23 @@ async fn with_retry(
 ) -> Result<(Vec<Finding>, TokenUsage), String> {
     let mut last_err = None;
 
+    let sink: LoopEventSink = {
+        let progress = Arc::clone(progress);
+        let file_path = file_path.to_string();
+        Arc::new(move |ev| match ev {
+            LoopEvent::ToolCallStart { tool, .. } => {
+                progress.update(&file_path, TaskStatus::ToolCalling { tool });
+            }
+            LoopEvent::ToolCallEnd { .. } => {
+                progress.update(&file_path, TaskStatus::InProgress);
+            }
+            _ => {}
+        })
+    };
+
     for attempt in 0..=MAX_RETRIES {
-        match provider
-            .review(agent, prompt, agentic, max_turns, max_tool_calls)
-            .await
-        {
+        let call = provider.review(agent, prompt, agentic, max_turns, max_tool_calls);
+        match events::scope(Some(Arc::clone(&sink)), call).await {
             Ok(outcome) => return Ok((outcome.findings, outcome.tokens)),
             Err(ref e) if is_retryable(e) && attempt < MAX_RETRIES => {
                 let backoff = retry_backoff(attempt);
