@@ -19,9 +19,9 @@ use schemars::{JsonSchema, schema_for};
 
 use crate::config::ProviderConfig;
 use crate::models::TokenUsage;
-use crate::models::agent::CustomToolDefinition;
 use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
+use crate::orchestrator::prompt::build_agentic_system_prompt;
 use crate::providers::response::{parse_findings_response, parse_with_fallbacks};
 use crate::tools::budget::ToolBudget;
 use crate::tools::{
@@ -33,11 +33,7 @@ use super::{
     AgentDiagnostics, ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict,
 };
 
-/// Maximum tokens per LLM completion response.
-///
-/// Set high enough to accommodate thinking models (e.g. Gemini 2.5 Pro)
-/// that consume part of the budget for internal reasoning tokens.
-const MAX_TOKENS: u64 = 65536;
+use crate::constants::MAX_COMPLETION_TOKENS;
 
 /// Map a client-construction error into a [`ProviderError`].
 fn map_client_err<T>(
@@ -53,8 +49,8 @@ struct AgenticConfig {
     max_turns: usize,
     custom_tools: Vec<CustomCommandTool>,
     /// Hard cap on tool calls scoped to this single review task.
-    /// `0` disables enforcement (the budget is still installed so
-    /// observers like the audit log can read `used()`).
+    /// `0` disables enforcement; the budget is still installed so
+    /// every tool call goes through `try_consume` for consistency.
     tool_budget: Arc<ToolBudget>,
 }
 
@@ -491,7 +487,7 @@ impl ReviewProvider for RigProvider {
                     system_prompt,
                     user_prompt: prompt,
                     label: "Review",
-                    max_tokens: MAX_TOKENS,
+                    max_tokens: MAX_COMPLETION_TOKENS,
                     agentic: agentic_cfg,
                 },
             )
@@ -517,7 +513,7 @@ impl ReviewProvider for RigProvider {
                     system_prompt,
                     user_prompt,
                     label: "Triage",
-                    max_tokens: MAX_TOKENS,
+                    max_tokens: MAX_COMPLETION_TOKENS,
                     agentic: None,
                 },
             )
@@ -536,99 +532,6 @@ impl ReviewProvider for RigProvider {
             tokens: result.tokens,
         })
     }
-}
-
-/// Enhance the system prompt for agentic mode.
-///
-/// Appends instructions that tell the LLM to proactively use tools
-/// for codebase exploration before finalising its review findings.
-/// The base profile prompt is preserved unchanged; the agentic
-/// supplement is appended so it applies regardless of profile.
-///
-/// Custom tools from the agent profile are included alongside the
-/// built-in tools so the LLM knows they are available.
-fn build_agentic_system_prompt(
-    base_prompt: &str,
-    custom_tools: &[CustomToolDefinition],
-    agentic_instructions: Option<&str>,
-) -> String {
-    let mut prompt = format!(
-        "{base_prompt}\n\n\
-         ## Tool-Assisted Review\n\n\
-         You have access to tools for exploring the repository. \
-         Use them **proactively** to build a thorough understanding of the code \
-         before reporting findings.\n\n\
-         When the diff references imports, function calls, types, or modules you \
-         have not seen, **use your tools to read the relevant source files** instead \
-         of guessing what they contain. Specifically:\n\n\
-         1. **Read referenced files** — if the diff imports from or calls into another \
-         module, use `read_file` to examine it.\n\
-         2. **Batch related reads** — when you need several related files at once, use \
-         `read_files` to fetch them in a single call instead of issuing many `read_file` \
-         requests.\n\
-         3. **Search for usages** — use `search_text` to find callers, implementations, \
-         or tests related to the changed code.\n\
-         4. **Locate files by name** — use `glob` with patterns like `**/*.rs` or \
-         `src/**/handler*.rs` to discover files when you do not know their exact path.\n\
-         5. **Understand the project layout** — use `list_directory` if you are unsure \
-         where a file lives or what a module contains.\n\
-         6. **Verify before reporting** — do not flag an issue unless you have confirmed \
-         it by reading the relevant code. False positives from guessing are worse \
-         than a missed finding.\n"
-    );
-
-    // Append custom tool guidance
-    let mut tool_number = 7;
-    for tool in custom_tools {
-        prompt.push_str(&format!(
-            "         {tool_number}. **Use `{}`** — {}\n",
-            tool.name, tool.description
-        ));
-        tool_number += 1;
-    }
-
-    prompt.push_str(
-        "\n\
-         All tool paths are **relative to the repository root** \
-         (e.g., `src/models/finding.rs`, not an absolute path).\n\n\
-         ### Example tool calls\n\n\
-         - List the repo root: `list_directory` with `{{\"path\": \".\"}}`\n\
-         - Read a file: `read_file` with `{{\"path\": \"src/handler.rs\"}}`\n\
-         - Read several files at once: `read_files` with `{{\"files\": [{{\"path\": \"src/a.rs\"}}, {{\"path\": \"src/b.rs\"}}]}}`\n\
-         - Find files by pattern: `glob` with `{{\"pattern\": \"**/*.rs\"}}`\n\
-         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n",
-    );
-
-    // Append custom tool examples
-    for tool in custom_tools {
-        if let Some(first_param) = tool.parameters.first() {
-            prompt.push_str(&format!(
-                "         - {}: `{}` with `{{\"{}\":\"...\"}}`\n",
-                tool.description, tool.name, first_param.name
-            ));
-        } else {
-            prompt.push_str(&format!(
-                "         - {}: `{}` with `{{}}`\n",
-                tool.description, tool.name
-            ));
-        }
-    }
-    // Profile-specific agentic guidance (from frontmatter `agentic_instructions`)
-    if let Some(instructions) = agentic_instructions {
-        prompt.push_str(&format!(
-            "\n### Profile-Specific Tool Guidance\n\n{instructions}\n"
-        ));
-    }
-    prompt.push_str(
-        "\n## Reporting Findings\n\n\
-         When your review is complete, call the `submit_findings` tool **exactly \
-         once** with your full list of findings. The tool's schema is the \
-         authoritative shape — do not write findings as prose or as JSON in your \
-         message text. If the diff has no issues, call `submit_findings` with an \
-         empty array.\n",
-    );
-
-    prompt
 }
 
 /// Re-export response parsing and retry utilities for backward compatibility.
@@ -679,70 +582,6 @@ mod tests {
     }
 
     #[test]
-    fn agentic_system_prompt_includes_tool_instructions() {
-        let base = "You are a backend reviewer.";
-        let enhanced = build_agentic_system_prompt(base, &[], None);
-
-        assert!(enhanced.starts_with(base));
-        assert!(enhanced.contains("Tool-Assisted Review"));
-        assert!(enhanced.contains("read_file"));
-        assert!(enhanced.contains("read_files"));
-        assert!(enhanced.contains("search_text"));
-        assert!(enhanced.contains("glob"));
-        assert!(enhanced.contains("list_directory"));
-        assert!(enhanced.contains("relative to the repository root"));
-        assert!(enhanced.contains("proactively"));
-    }
-
-    #[test]
-    fn agentic_system_prompt_includes_custom_tools() {
-        use crate::models::agent::{CustomToolDefinition, ToolParameter};
-
-        let tools = vec![
-            CustomToolDefinition {
-                name: "run_tests".to_string(),
-                description: "Run the test suite".to_string(),
-                command: "cargo test".to_string(),
-                parameters: vec![ToolParameter {
-                    name: "filter".to_string(),
-                    param_type: "string".to_string(),
-                    description: "Test name filter".to_string(),
-                    required: false,
-                }],
-            },
-            CustomToolDefinition {
-                name: "lint".to_string(),
-                description: "Run the linter".to_string(),
-                command: "cargo clippy".to_string(),
-                parameters: vec![],
-            },
-        ];
-
-        let enhanced = build_agentic_system_prompt("Base prompt.", &tools, None);
-
-        assert!(
-            enhanced.contains("Use `run_tests`"),
-            "numbered list should include run_tests"
-        );
-        assert!(
-            enhanced.contains("Use `lint`"),
-            "numbered list should include lint"
-        );
-        assert!(
-            enhanced.contains("`run_tests` with"),
-            "examples should include run_tests"
-        );
-        assert!(
-            enhanced.contains("`lint` with"),
-            "examples should include lint"
-        );
-        assert!(
-            enhanced.contains("\"filter\""),
-            "run_tests example should reference filter param"
-        );
-    }
-
-    #[test]
     fn require_base_url_missing() {
         let config = ProviderConfig {
             name: ProviderName::OpenAICompatible,
@@ -772,25 +611,5 @@ mod tests {
             provider.require_base_url().unwrap(),
             "https://my-api.example.com"
         );
-    }
-
-    #[test]
-    fn agentic_prompt_includes_profile_tool_guidance() {
-        let base = "You are a code reviewer.";
-        let instructions = "Use search_text to trace data flow before flagging injection risks.";
-        let result = build_agentic_system_prompt(base, &[], Some(instructions));
-
-        assert!(result.contains("Profile-Specific Tool Guidance"));
-        assert!(result.contains(instructions));
-        assert!(result.contains(base));
-    }
-
-    #[test]
-    fn agentic_prompt_without_profile_guidance() {
-        let base = "You are a code reviewer.";
-        let result = build_agentic_system_prompt(base, &[], None);
-
-        assert!(!result.contains("Profile-Specific Tool Guidance"));
-        assert!(result.contains(base));
     }
 }

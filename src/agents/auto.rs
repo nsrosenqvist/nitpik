@@ -493,6 +493,33 @@ pub enum HeuristicConfidence {
     Low,
 }
 
+/// Strategy for selecting reviewer profiles when `--profile auto` is used.
+///
+/// The CLI parses this via clap's `ValueEnum`; serialization yields the
+/// kebab-case form used both on the command line and in the audit log
+/// `ConfigSummary`, keeping a single source of truth for the spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoMode {
+    /// Pure file/path/dependency heuristics (no LLM call).
+    Heuristic,
+    /// Always call the LLM to pick profiles.
+    Llm,
+    /// Heuristics first; consult the LLM only when heuristics are
+    /// inconclusive (default).
+    Hybrid,
+}
+
+impl std::fmt::Display for AutoMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            AutoMode::Heuristic => "heuristic",
+            AutoMode::Llm => "llm",
+            AutoMode::Hybrid => "hybrid",
+        })
+    }
+}
+
 /// Heuristic profile selection that also reports its own confidence.
 ///
 /// Returns `(profiles, confidence)`. Confidence is `Low` when the

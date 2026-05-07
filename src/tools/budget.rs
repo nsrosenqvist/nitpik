@@ -45,12 +45,15 @@ impl ToolBudget {
         })
     }
 
-    /// Number of calls already counted toward the budget.
+    /// Number of calls already counted toward the budget. Test-only
+    /// observability; production code reads neither used nor max.
+    #[cfg(test)]
     pub fn used(&self) -> usize {
         self.used.load(Ordering::Relaxed)
     }
 
-    /// Maximum the budget allows. `0` = unlimited.
+    /// Maximum the budget allows. `0` = unlimited. Test-only.
+    #[cfg(test)]
     pub fn max(&self) -> usize {
         self.max
     }
@@ -108,7 +111,9 @@ pub fn try_consume(tool_name: &str) -> Result<(), String> {
 }
 
 /// Snapshot of the active budget (used / max), or `None` when no
-/// budget is installed.
+/// budget is installed. Test-only observability — production code
+/// reads token usage from the audit log instead.
+#[cfg(test)]
 pub fn snapshot() -> Option<(usize, usize)> {
     TOOL_BUDGET.try_with(|b| (b.used(), b.max())).ok()
 }

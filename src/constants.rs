@@ -146,6 +146,13 @@ pub const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(60);
 /// error so the standard retry policy applies.
 pub const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 300;
 
+/// Per-call ceiling on completion response tokens.
+///
+/// Sized for thinking models (e.g. Gemini 2.5 Pro, Claude with extended
+/// thinking) that consume part of the budget for internal reasoning
+/// tokens. Models without thinking will rarely come close to this cap.
+pub const MAX_COMPLETION_TOKENS: u64 = 65536;
+
 // ── HTTP constants ──────────────────────────────────────────────────
 
 /// Default total request timeout for outgoing HTTP calls.

@@ -2542,7 +2542,7 @@ async fn audit_log_end_to_end_writes_valid_json_to_disk() {
             profiles: vec!["test-agent".to_string()],
             multi_wave: false,
             verify: false,
-            auto_mode: Some("hybrid".to_string()),
+            auto_mode: Some(nitpik::agents::auto::AutoMode::Hybrid),
             review_scope: "main".to_string(),
             nitpik_version: "0.0.0-test".to_string(),
             timeout_secs: 0,

@@ -647,11 +647,6 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     // Write audit log artifact (opt-in via --audit-log / NITPIK_AUDIT_LOG / TOML).
     if let Some(ref path) = audit_path {
-        let auto_mode_str = match args.auto_mode {
-            cli::args::AutoMode::Heuristic => "heuristic",
-            cli::args::AutoMode::Llm => "llm",
-            cli::args::AutoMode::Hybrid => "hybrid",
-        };
         let profile_names: Vec<String> =
             agent_defs.iter().map(|a| a.profile.name.clone()).collect();
         let summary = audit::ConfigSummary {
@@ -664,7 +659,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             profiles: profile_names,
             multi_wave: args.multi_wave,
             verify: args.verify,
-            auto_mode: Some(auto_mode_str.to_string()),
+            auto_mode: Some(args.auto_mode),
             review_scope: diff::git::detect_branch(repo_root_path, &Env::real()).await,
             nitpik_version: constants::VERSION.to_string(),
             timeout_secs: args.timeout,
@@ -834,15 +829,12 @@ fn setup_progress(
     let file_names: Vec<String> = diffs.iter().map(|d| d.path().to_string()).collect();
     let agent_names: Vec<String> = agents.iter().map(|a| a.profile.name.clone()).collect();
     // Tool-log pane is hidden when --agent is off (no tools can fire).
-    // Cap matches the plan: max(8, max_concurrent).
-    let log_cap = std::cmp::max(8, args.max_concurrent);
-    let progress = Arc::new(ProgressTracker::with_options(
-        &file_names,
-        &agent_names,
-        show_progress,
-        agentic,
-        log_cap,
-    ));
+    // Ring-buffer cap matches the plan: max(8, max_concurrent).
+    let progress = Arc::new(
+        ProgressTracker::new(&file_names, &agent_names, show_progress)
+            .with_tool_log(agentic)
+            .with_log_cap(std::cmp::max(8, args.max_concurrent)),
+    );
 
     if show_info {
         let claims_ref = license_claims.as_ref().map(|(c, _)| c);
@@ -1007,7 +999,7 @@ async fn select_auto_profiles(
     diffs: &[models::FileDiff<'_>],
     repo_root_path: &Path,
 ) -> Result<Vec<String>> {
-    use cli::args::AutoMode;
+    use agents::auto::AutoMode;
     let (heuristic, confidence) =
         agents::auto::auto_select_profiles_with_confidence(diffs, repo_root_path);
 

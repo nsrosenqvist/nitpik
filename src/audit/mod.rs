@@ -67,7 +67,8 @@ pub struct ConfigSummary {
     pub profiles: Vec<String>,
     pub multi_wave: bool,
     pub verify: bool,
-    pub auto_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_mode: Option<crate::agents::auto::AutoMode>,
     pub review_scope: String,
     pub nitpik_version: String,
     /// Per-attempt timeout in seconds for each file × agent review
@@ -223,11 +224,7 @@ task_local! {
 /// Run `f` with `buffer` installed as the current task's tool-call
 /// sink. Tool calls recorded inside `f` (via [`record`]) are appended
 /// to `buffer` in invocation order. Outside any scope, [`record`] is
-/// a no-op for audit purposes.
-///
-/// Tool calls are still pushed into the global `ToolCallLog` queue
-/// for the live progress display — the per-task buffer is purely
-/// additive.
+/// a no-op.
 pub async fn scope<F: std::future::Future>(buffer: Option<TaskToolBuffer>, f: F) -> F::Output {
     TASK_BUFFER.scope(buffer, f).await
 }

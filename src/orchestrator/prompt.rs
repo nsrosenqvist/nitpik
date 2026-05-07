@@ -5,18 +5,15 @@
 //! evolved independently of concurrency infrastructure.
 
 use crate::models::AgentDefinition;
+use crate::models::agent::CustomToolDefinition;
 use crate::models::context::ReviewContext;
 use crate::models::diff::FileDiff;
 use crate::models::finding::Finding;
 /// LLM review instructions appended to every prompt.
 ///
-/// Contains five placeholder slots filled by `format!()` in `build_prompt()`:
-/// 1. agent name
-/// 2. agent description
-/// 3. coordination note
-/// 4. file path (for the `"file"` JSON field)
-/// 5. agent name (for the `"agent"` JSON field)
-/// 6. agent name (in the example finding)
+/// Four placeholder tokens are substituted in `build_prompt()` via
+/// `str::replace`: `{file}`, `{agent_name}`, `{agent_desc}`, and
+/// `{coordination}`. Each may appear multiple times in the template.
 const REVIEW_INSTRUCTIONS: &str = "\
 Review the diff above for file `{file}`. \
 You are the **{agent_name}** reviewer: {agent_desc}
@@ -352,6 +349,94 @@ pub fn build_prompt_with_prior(base_prompt: &str, findings: &[Finding]) -> Strin
     } else {
         prompt.push_str(&format_prior_findings_section(findings));
     }
+    prompt
+}
+
+/// Augment a profile's system prompt with agentic-mode tool guidance.
+///
+/// The base prompt is preserved unchanged; the supplement is appended
+/// so it applies regardless of profile. Custom tools from the agent's
+/// frontmatter appear alongside the built-ins. Profile-specific
+/// `agentic_instructions` (if any) are spliced in after the generic
+/// guidance and before the closing `Reporting Findings` section.
+pub fn build_agentic_system_prompt(
+    base_prompt: &str,
+    custom_tools: &[CustomToolDefinition],
+    agentic_instructions: Option<&str>,
+) -> String {
+    let mut prompt = format!(
+        "{base_prompt}\n\n\
+         ## Tool-Assisted Review\n\n\
+         You have access to tools for exploring the repository. \
+         Use them **proactively** to build a thorough understanding of the code \
+         before reporting findings.\n\n\
+         When the diff references imports, function calls, types, or modules you \
+         have not seen, **use your tools to read the relevant source files** instead \
+         of guessing what they contain. Specifically:\n\n\
+         1. **Read referenced files** — if the diff imports from or calls into another \
+         module, use `read_file` to examine it.\n\
+         2. **Batch related reads** — when you need several related files at once, use \
+         `read_files` to fetch them in a single call instead of issuing many `read_file` \
+         requests.\n\
+         3. **Search for usages** — use `search_text` to find callers, implementations, \
+         or tests related to the changed code.\n\
+         4. **Locate files by name** — use `glob` with patterns like `**/*.rs` or \
+         `src/**/handler*.rs` to discover files when you do not know their exact path.\n\
+         5. **Understand the project layout** — use `list_directory` if you are unsure \
+         where a file lives or what a module contains.\n\
+         6. **Verify before reporting** — do not flag an issue unless you have confirmed \
+         it by reading the relevant code. False positives from guessing are worse \
+         than a missed finding.\n"
+    );
+
+    let mut tool_number = 7;
+    for tool in custom_tools {
+        prompt.push_str(&format!(
+            "         {tool_number}. **Use `{}`** — {}\n",
+            tool.name, tool.description
+        ));
+        tool_number += 1;
+    }
+
+    prompt.push_str(
+        "\n\
+         All tool paths are **relative to the repository root** \
+         (e.g., `src/models/finding.rs`, not an absolute path).\n\n\
+         ### Example tool calls\n\n\
+         - List the repo root: `list_directory` with `{{\"path\": \".\"}}`\n\
+         - Read a file: `read_file` with `{{\"path\": \"src/handler.rs\"}}`\n\
+         - Read several files at once: `read_files` with `{{\"files\": [{{\"path\": \"src/a.rs\"}}, {{\"path\": \"src/b.rs\"}}]}}`\n\
+         - Find files by pattern: `glob` with `{{\"pattern\": \"**/*.rs\"}}`\n\
+         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n",
+    );
+
+    for tool in custom_tools {
+        if let Some(first_param) = tool.parameters.first() {
+            prompt.push_str(&format!(
+                "         - {}: `{}` with `{{\"{}\":\"...\"}}`\n",
+                tool.description, tool.name, first_param.name
+            ));
+        } else {
+            prompt.push_str(&format!(
+                "         - {}: `{}` with `{{}}`\n",
+                tool.description, tool.name
+            ));
+        }
+    }
+    if let Some(instructions) = agentic_instructions {
+        prompt.push_str(&format!(
+            "\n### Profile-Specific Tool Guidance\n\n{instructions}\n"
+        ));
+    }
+    prompt.push_str(
+        "\n## Reporting Findings\n\n\
+         When your review is complete, call the `submit_findings` tool **exactly \
+         once** with your full list of findings. The tool's schema is the \
+         authoritative shape — do not write findings as prose or as JSON in your \
+         message text. If the diff has no issues, call `submit_findings` with an \
+         empty array.\n",
+    );
+
     prompt
 }
 
@@ -704,5 +789,89 @@ mod tests {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
         assert_eq!(build_system_addendum(&context), "");
+    }
+
+    #[test]
+    fn agentic_system_prompt_includes_tool_instructions() {
+        let base = "You are a backend reviewer.";
+        let enhanced = build_agentic_system_prompt(base, &[], None);
+
+        assert!(enhanced.starts_with(base));
+        assert!(enhanced.contains("Tool-Assisted Review"));
+        assert!(enhanced.contains("read_file"));
+        assert!(enhanced.contains("read_files"));
+        assert!(enhanced.contains("search_text"));
+        assert!(enhanced.contains("glob"));
+        assert!(enhanced.contains("list_directory"));
+        assert!(enhanced.contains("relative to the repository root"));
+        assert!(enhanced.contains("proactively"));
+    }
+
+    #[test]
+    fn agentic_system_prompt_includes_custom_tools() {
+        use crate::models::agent::ToolParameter;
+
+        let tools = vec![
+            CustomToolDefinition {
+                name: "run_tests".to_string(),
+                description: "Run the test suite".to_string(),
+                command: "cargo test".to_string(),
+                parameters: vec![ToolParameter {
+                    name: "filter".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Test name filter".to_string(),
+                    required: false,
+                }],
+            },
+            CustomToolDefinition {
+                name: "lint".to_string(),
+                description: "Run the linter".to_string(),
+                command: "cargo clippy".to_string(),
+                parameters: vec![],
+            },
+        ];
+
+        let enhanced = build_agentic_system_prompt("Base prompt.", &tools, None);
+
+        assert!(
+            enhanced.contains("Use `run_tests`"),
+            "numbered list should include run_tests"
+        );
+        assert!(
+            enhanced.contains("Use `lint`"),
+            "numbered list should include lint"
+        );
+        assert!(
+            enhanced.contains("`run_tests` with"),
+            "examples should include run_tests"
+        );
+        assert!(
+            enhanced.contains("`lint` with"),
+            "examples should include lint"
+        );
+        assert!(
+            enhanced.contains("\"filter\""),
+            "run_tests example should reference filter param"
+        );
+    }
+
+    #[test]
+    fn agentic_prompt_includes_profile_tool_guidance() {
+        let base = "You are a code reviewer.";
+        let instructions = "Use search_text to trace data flow before flagging injection risks.";
+        let result = build_agentic_system_prompt(base, &[], Some(instructions));
+
+        assert!(result.contains("Profile-Specific Tool Guidance"));
+        assert!(result.contains(instructions));
+        assert!(result.contains(base));
+    }
+
+    #[test]
+    fn agentic_prompt_without_profile_guidance() {
+        let base = "You are a code reviewer.";
+        let result = build_agentic_system_prompt(base, &[], None);
+
+        assert!(!result.contains("Profile-Specific Tool Guidance"));
+        assert!(result.contains(base));
     }
 }

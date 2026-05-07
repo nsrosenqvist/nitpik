@@ -4,18 +4,17 @@
 //!
 //! Owns the built-in tool implementations (`ReadFileTool`,
 //! `SearchTextTool`, `ListDirectoryTool`) and the `CustomCommandTool`
-//! runtime. Each tool implements rig-core's `Tool` trait. The
-//! `ToolCallLog` audit log also lives here.
+//! runtime. Each tool implements rig-core's `Tool` trait.
 //!
-//! Tools execute filesystem and subprocess operations on behalf
-//! of the LLM — they never interpret review findings or diffs.
+//! Tools execute filesystem and subprocess operations on behalf of the
+//! LLM — they never interpret review findings or diffs.
 //!
-//! ## Tool-call audit log
+//! ## Tool-call accounting
 //!
-//! Every tool invocation is recorded in a process-global
-//! [`ToolCallLog`] so that the progress display and post-review
-//! summary can show what the LLM explored. Tools call
-//! [`ToolCallLog::record`] at the start of their `call()` method.
+//! Every tool invocation calls [`finish_tool_call`], which forwards
+//! the entry to the audit module's per-task buffer. The progress
+//! module tracks counts independently via the agent loop's event
+//! stream, so this layer has no global state of its own.
 
 pub mod budget;
 pub mod custom_command;
@@ -37,7 +36,6 @@ pub use read_files::ReadFilesTool;
 pub use search_text::SearchTextTool;
 pub use submit_findings::{SUBMIT_FINDINGS_TOOL_NAME, SubmitFindingsTool};
 
-use crossbeam_queue::SegQueue;
 use std::time::{Duration, Instant};
 
 /// A single recorded tool invocation.
@@ -53,67 +51,26 @@ pub struct ToolCallEntry {
     pub duration: Duration,
 }
 
-/// Process-global append-only log of tool invocations.
-///
-/// Uses a lock-free `SegQueue` so `record()` never blocks under
-/// parallel agentic tool use.
-pub struct ToolCallLog;
-
-/// Global lock-free tool call log.
-static TOOL_CALL_QUEUE: SegQueue<ToolCallEntry> = SegQueue::new();
-
-impl ToolCallLog {
-    /// Record a tool invocation (lock-free push).
-    ///
-    /// In addition to the process-global queue (consumed by the live
-    /// progress display), the entry is mirrored into the current
-    /// task's audit buffer if one is installed via
-    /// [`crate::audit::scope`]. The audit mirror is a no-op outside
-    /// any scope.
-    pub fn record(entry: ToolCallEntry) {
-        crate::audit::record(&entry);
-        TOOL_CALL_QUEUE.push(entry);
-    }
-
-    /// Take all recorded entries, draining the log.
-    pub fn drain() -> Vec<ToolCallEntry> {
-        let mut entries = Vec::new();
-        while let Some(entry) = TOOL_CALL_QUEUE.pop() {
-            entries.push(entry);
-        }
-        entries
-    }
-
-    /// Read all recorded entries without clearing.
-    ///
-    /// Note: this drains and re-pushes entries, so it is not truly
-    /// non-destructive under concurrent writes. Use only when no
-    /// tools are actively running (e.g., post-review summary).
-    pub fn snapshot() -> Vec<ToolCallEntry> {
-        let entries = Self::drain();
-        for entry in &entries {
-            TOOL_CALL_QUEUE.push(entry.clone());
-        }
-        entries
-    }
-}
-
 /// Convenience helper: time a tool call and record the result.
 ///
-/// Returns `(start_instant, ())` — call `finish_tool_call` with the
-/// start instant after the call completes.
+/// Returns the start `Instant` — call [`finish_tool_call`] with it
+/// after the call completes.
 pub fn start_tool_call() -> Instant {
     Instant::now()
 }
 
 /// Complete a tool call recording.
+///
+/// Forwards the entry to [`crate::audit::record`], which appends it
+/// to the current task's audit buffer when an audit scope is active.
+/// Outside a scope this is a no-op.
 pub fn finish_tool_call(
     start: Instant,
     tool_name: &str,
     args_summary: impl Into<String>,
     result_summary: impl Into<String>,
 ) {
-    ToolCallLog::record(ToolCallEntry {
+    crate::audit::record(&ToolCallEntry {
         tool_name: tool_name.to_string(),
         args_summary: args_summary.into(),
         result_summary: result_summary.into(),

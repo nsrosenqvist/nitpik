@@ -445,7 +445,13 @@ impl ReviewOrchestrator {
         let mut audits: Vec<TaskAudit> = Vec::new();
         while let Some(result) = join_set.join_next().await {
             match result {
-                Ok((f, fail, tokens, model, audit)) => {
+                Ok(TaskOutput {
+                    findings: f,
+                    failed: fail,
+                    tokens,
+                    model,
+                    audit,
+                }) => {
                     let emitted = f.len();
                     findings.extend(f);
                     total_tokens += tokens;
@@ -527,10 +533,25 @@ struct ReviewTaskParams {
     timeout: Option<Duration>,
 }
 
+/// Output of a single file × agent task. Aggregated by the wave
+/// dispatcher into the run-wide totals.
+struct TaskOutput {
+    findings: Vec<Finding>,
+    /// True when the task failed after exhausting retries (or was
+    /// non-retryable). Cache hits and successful runs both yield
+    /// `false`.
+    failed: bool,
+    tokens: TokenUsage,
+    /// The model that produced the result. The dispatcher uses this
+    /// as the per-model token-usage bucket key.
+    model: String,
+    /// Per-task audit record, populated only when the orchestrator
+    /// was constructed with `audit_enabled = true`.
+    audit: Option<TaskAudit>,
+}
+
 /// Execute a single file×agent review task with caching and retries.
-async fn execute_review_task(
-    params: ReviewTaskParams,
-) -> (Vec<Finding>, bool, TokenUsage, String, Option<TaskAudit>) {
+async fn execute_review_task(params: ReviewTaskParams) -> TaskOutput {
     let ReviewTaskParams {
         provider,
         cache,
@@ -581,7 +602,13 @@ async fn execute_review_task(
         if let Some(a) = audit.as_mut() {
             a.status = AuditTaskStatus::CacheHit;
         }
-        return (cached, false, TokenUsage::default(), model, audit);
+        return TaskOutput {
+            findings: cached,
+            failed: false,
+            tokens: TokenUsage::default(),
+            model,
+            audit,
+        };
     }
 
     // Cache miss — resolve prior findings for the prompt
@@ -621,13 +648,15 @@ async fn execute_review_task(
             &provider,
             &agent,
             &prompt,
-            agentic,
-            max_turns,
-            max_tool_calls,
+            RetryConfig {
+                agentic,
+                max_turns,
+                max_tool_calls,
+                timeout,
+            },
             &progress,
             &file_path,
             &agent.profile.name,
-            timeout,
         ),
     )
     .await;
@@ -662,7 +691,13 @@ async fn execute_review_task(
                 a.terminated_via_tool = diagnostics.terminated_via_tool;
                 a.self_repair_attempted = diagnostics.self_repair_attempted;
             }
-            (findings, false, tokens, model, audit)
+            TaskOutput {
+                findings,
+                failed: false,
+                tokens,
+                model,
+                audit,
+            }
         }
         Err((err_msg, retries)) => {
             progress.update(
@@ -675,9 +710,26 @@ async fn execute_review_task(
                 a.retries = retries;
                 a.error = Some(err_msg);
             }
-            (Vec::new(), true, TokenUsage::default(), model, audit)
+            TaskOutput {
+                findings: Vec::new(),
+                failed: true,
+                tokens: TokenUsage::default(),
+                model,
+                audit,
+            }
         }
     }
+}
+
+/// Static knobs for [`with_retry`]. Bundled so the function signature
+/// stays at a manageable arity — the per-attempt `Duration` ceiling
+/// and the agentic-loop budget all share a lifetime with the parent
+/// task, but logically describe one config object.
+struct RetryConfig {
+    agentic: bool,
+    max_turns: usize,
+    max_tool_calls: usize,
+    timeout: Option<Duration>,
 }
 
 /// Retry a provider review call with exponential backoff.
@@ -687,18 +739,14 @@ async fn execute_review_task(
 /// `retries` is the number of retry attempts performed (0 = succeeded on
 /// first attempt). `outcome.diagnostics` carries agent-loop signals
 /// (turns, terminal-tool fire, self-repair) for the audit log.
-#[allow(clippy::too_many_arguments)] // Thin extraction from spawn closure; a one-shot struct adds noise.
 async fn with_retry(
     provider: &Arc<dyn ReviewProvider>,
     agent: &AgentDefinition,
     prompt: &str,
-    agentic: bool,
-    max_turns: usize,
-    max_tool_calls: usize,
+    cfg: RetryConfig,
     progress: &Arc<dyn ProgressReporter>,
     file_path: &str,
     agent_name: &str,
-    timeout: Option<Duration>,
 ) -> Result<(crate::providers::ReviewOutcome, usize), (String, usize)> {
     let mut last_err = None;
 
@@ -724,12 +772,18 @@ async fn with_retry(
     };
 
     for attempt in 0..=MAX_RETRIES {
-        let call = provider.review(agent, prompt, agentic, max_turns, max_tool_calls);
+        let call = provider.review(
+            agent,
+            prompt,
+            cfg.agentic,
+            cfg.max_turns,
+            cfg.max_tool_calls,
+        );
         let scoped = events::scope(Some(Arc::clone(&sink)), call);
         // Per-attempt timeout. On elapsed, synthesize an `ApiError`
         // so the existing "timed out" retry classification kicks in
         // without a dedicated error variant.
-        let outcome = match timeout {
+        let outcome = match cfg.timeout {
             Some(t) => match tokio::time::timeout(t, scoped).await {
                 Ok(res) => res,
                 Err(_) => Err(crate::providers::ProviderError::ApiError(format!(

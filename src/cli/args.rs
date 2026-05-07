@@ -286,17 +286,9 @@ pub struct ReviewArgs {
     pub debug_prompt: bool,
 }
 
-/// Strategy for selecting reviewer profiles when `--profile auto` is used.
-#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
-pub enum AutoMode {
-    /// Pure file/path/dependency heuristics (no LLM call).
-    Heuristic,
-    /// Always call the LLM to pick profiles.
-    Llm,
-    /// Heuristics first; consult the LLM only when heuristics are
-    /// inconclusive (default).
-    Hybrid,
-}
+// `AutoMode` is the domain enum, owned by the agents/auto module that
+// interprets it. We re-export here so CLI parsing reads naturally.
+pub use crate::agents::auto::AutoMode;
 
 /// Output format options.
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]

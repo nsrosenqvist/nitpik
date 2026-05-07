@@ -20,8 +20,9 @@ use std::time::{Duration, Instant};
 use colored::Colorize;
 
 /// Default cap on the number of entries kept in the live tool-call
-/// log. Plan note: should be `max(8, max_concurrent)`. Callers that
-/// want a different cap can use [`ProgressTracker::with_options`].
+/// log. Callers that want a different cap (e.g. matching
+/// `max_concurrent` for high-parallelism runs) override it with
+/// [`ProgressTracker::with_log_cap`].
 const TOOL_LOG_DEFAULT_CAP: usize = 8;
 
 /// Background re-render cadence. Low enough that elapsed counters
@@ -148,6 +149,10 @@ struct ProgressState {
     live_log: VecDeque<ToolActivity>,
     /// Cap for `live_log`.
     log_cap: usize,
+    /// Unbounded count of tool-call starts seen this run, for the
+    /// final `▸ N tool calls` rollup. Independent from `live_log`
+    /// so the rollup count is accurate even after eviction.
+    tool_calls_total: usize,
 }
 
 /// One tool-call entry shown in the live activity pane.
@@ -165,22 +170,10 @@ impl ProgressTracker {
     /// Create a new progress tracker with default options.
     ///
     /// Pre-populates one task slot per (file × agent) combination.
+    /// The `Tool calls` pane is shown by default and the live log is
+    /// capped at [`TOOL_LOG_DEFAULT_CAP`]; override either with the
+    /// builder methods on the returned value.
     pub fn new(files: &[String], agents: &[String], enabled: bool) -> Self {
-        Self::with_options(files, agents, enabled, true, TOOL_LOG_DEFAULT_CAP)
-    }
-
-    /// Create a new progress tracker with explicit options.
-    ///
-    /// `show_tool_log` hides the `Tool calls` pane entirely when false
-    /// (e.g. when `--agent` is off and no tools can fire). `log_cap`
-    /// is the ring-buffer size for the tool log.
-    pub fn with_options(
-        files: &[String],
-        agents: &[String],
-        enabled: bool,
-        show_tool_log: bool,
-        log_cap: usize,
-    ) -> Self {
         let mut tasks = BTreeMap::new();
         for f in files {
             for a in agents {
@@ -195,16 +188,39 @@ impl ProgressTracker {
             rendered_lines: 0,
             last_render: now,
             started_at: now,
-            live_log: VecDeque::with_capacity(log_cap.max(1) + 1),
-            log_cap: log_cap.max(1),
+            live_log: VecDeque::with_capacity(TOOL_LOG_DEFAULT_CAP + 1),
+            log_cap: TOOL_LOG_DEFAULT_CAP,
+            tool_calls_total: 0,
         }));
         Self {
             inner,
             enabled,
-            show_tool_log,
+            show_tool_log: true,
             ticker: Mutex::new(None),
             stop: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Show or hide the `Tool calls` pane. Set to `false` for non-
+    /// agentic runs where no tools can fire — saves screen space.
+    #[must_use]
+    pub fn with_tool_log(mut self, show: bool) -> Self {
+        self.show_tool_log = show;
+        self
+    }
+
+    /// Override the ring-buffer cap for the live tool log. Useful when
+    /// `max_concurrent` is high enough that the default cap of
+    /// [`TOOL_LOG_DEFAULT_CAP`] would evict in-flight entries.
+    #[must_use]
+    pub fn with_log_cap(self, cap: usize) -> Self {
+        let cap = cap.max(1);
+        if let Ok(mut state) = self.inner.lock() {
+            let current_len = state.live_log.len();
+            state.log_cap = cap;
+            state.live_log.reserve(cap.saturating_sub(current_len));
+        }
+        self
     }
 
     /// Update the status of a single file × agent task and re-render
@@ -245,6 +261,7 @@ impl ProgressTracker {
     /// Push a "tool started" entry into the live activity pane.
     pub fn tool_started(&self, file: &str, agent: &str, tool: &str, args_summary: &str) {
         let mut state = self.inner.lock().unwrap();
+        state.tool_calls_total += 1;
         state.live_log.push_front(ToolActivity {
             file: file.to_string(),
             agent: agent.to_string(),
@@ -408,20 +425,17 @@ impl ProgressTracker {
         // Total only — the per-call detail is already on screen during
         // the run via the live `Tool calls` pane and the audit log,
         // so listing every entry here would just duplicate output and
-        // grow unbounded for long agentic runs.
-        let tool_calls = crate::tools::ToolCallLog::drain();
-        if !tool_calls.is_empty() {
+        // grow unbounded for long agentic runs. Sourced from the
+        // tracker's own counter, not a global tool log, so progress
+        // stays inside its bounded context.
+        let total = state.tool_calls_total;
+        if total > 0 {
             let _ = writeln!(handle);
             let _ = writeln!(
                 handle,
                 "  {} {}",
                 "▸".cyan().bold(),
-                format!(
-                    "{} tool call{}",
-                    tool_calls.len(),
-                    if tool_calls.len() == 1 { "" } else { "s" }
-                )
-                .dimmed(),
+                format!("{} tool call{}", total, if total == 1 { "" } else { "s" }).dimmed(),
             );
         }
 
@@ -1019,13 +1033,8 @@ mod tests {
 
     #[test]
     fn live_log_caps_at_capacity_and_evicts_oldest_finished() {
-        let tracker = ProgressTracker::with_options(
-            &["a.rs".to_string()],
-            &["backend".to_string()],
-            false,
-            true,
-            5,
-        );
+        let tracker = ProgressTracker::new(&["a.rs".to_string()], &["backend".to_string()], false)
+            .with_log_cap(5);
         for i in 0..(5 + 3) {
             let tool = format!("tool_{i}");
             tracker.tool_started("a.rs", "backend", &tool, "");
@@ -1044,13 +1053,8 @@ mod tests {
 
     #[test]
     fn live_log_eviction_prefers_finished_over_running() {
-        let tracker = ProgressTracker::with_options(
-            &["a.rs".to_string()],
-            &["backend".to_string()],
-            false,
-            true,
-            5,
-        );
+        let tracker = ProgressTracker::new(&["a.rs".to_string()], &["backend".to_string()], false)
+            .with_log_cap(5);
         tracker.tool_started("a.rs", "backend", "long_running", "args");
         for i in 0..(5 + 1) {
             let tool = format!("done_{i}");

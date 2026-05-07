@@ -40,7 +40,9 @@ pub struct TruncationOutcome {
 }
 
 impl TruncationOutcome {
-    /// `true` when the entire input fit within the limits.
+    /// `true` when the entire input fit within the limits. Test-only
+    /// helper; production code reads `truncated` directly.
+    #[cfg(test)]
     pub fn fits(&self) -> bool {
         !self.truncated
     }

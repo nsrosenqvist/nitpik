@@ -162,7 +162,12 @@ impl Tool for ReadFileTool {
 }
 
 /// Result of a successful [`read_file`] call.
+///
+/// The `total_lines` and `lines_included` fields are populated for
+/// completeness and exercised by tests; production code only reads
+/// `content` and `truncated`.
 #[derive(Debug, Clone)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct ReadFileOutput {
     /// Rendered output: line-numbered content, optionally followed by
     /// a truncation footer.
@@ -173,8 +178,6 @@ pub struct ReadFileOutput {
     pub total_lines: usize,
     /// Number of lines included in `content`.
     pub lines_included: usize,
-    /// 1-based line number of the first line in `content`.
-    pub start_line: usize,
 }
 
 /// Read a file from the repository, with path sanitization, size limits,
@@ -231,7 +234,6 @@ pub async fn read_file(
             truncated: false,
             total_lines: 0,
             lines_included: 0,
-            start_line: 1,
         });
     }
 
@@ -255,7 +257,6 @@ pub async fn read_file(
             truncated: false,
             total_lines: total,
             lines_included: 0,
-            start_line: req_start,
         });
     }
 
@@ -314,7 +315,6 @@ pub async fn read_file(
         truncated,
         total_lines: total,
         lines_included: outcome.lines_included,
-        start_line: req_start,
     })
 }
 

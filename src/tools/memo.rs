@@ -97,35 +97,10 @@ pub fn clear() {
     }
 }
 
-/// Current cache size — useful for diagnostics and tests.
+/// Current cache size. Test-only observability.
+#[cfg(test)]
 pub fn len() -> usize {
     MEMO.read().map(|m| m.len()).unwrap_or(0)
-}
-
-/// Combined "look up, run on miss, store on hit" helper.
-///
-/// `tool` is the static tool name. `args` must be `Serialize`. `compute`
-/// is the actual tool body — it runs only when the cache misses. On
-/// success the result is stored and returned; on error the result is
-/// returned untouched so callers can propagate it.
-pub async fn cached<F, Fut, T, E>(
-    tool: &'static str,
-    args: &T,
-    compute: F,
-) -> (Result<String, E>, bool)
-where
-    T: serde::Serialize,
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<String, E>>,
-{
-    if let Some(hit) = lookup(tool, args) {
-        return (Ok(hit), true);
-    }
-    let result = compute().await;
-    if let Ok(ref s) = result {
-        store(tool, args, s.clone());
-    }
-    (result, false)
 }
 
 #[cfg(test)]
@@ -209,52 +184,6 @@ mod tests {
         assert!(lookup("read_file", &args).is_some());
         clear();
         assert!(lookup("read_file", &args).is_none());
-        assert_eq!(len(), 0);
-    }
-
-    #[tokio::test]
-    #[serial(memo)]
-    async fn cached_runs_compute_once() {
-        clear();
-        let args = Args {
-            path: "x".into(),
-            n: 7,
-        };
-        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
-        let c1 = counter.clone();
-        let (r1, hit1) = cached::<_, _, _, ()>("read_file", &args, move || async move {
-            c1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok("computed".to_string())
-        })
-        .await;
-        assert_eq!(r1.unwrap(), "computed");
-        assert!(!hit1);
-
-        let c2 = counter.clone();
-        let (r2, hit2) = cached::<_, _, _, ()>("read_file", &args, move || async move {
-            c2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok("ignored".to_string())
-        })
-        .await;
-        assert_eq!(r2.unwrap(), "computed");
-        assert!(hit2);
-
-        // compute() ran exactly once.
-        assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    #[serial(memo)]
-    async fn cached_does_not_store_errors() {
-        clear();
-        let args = Args {
-            path: "y".into(),
-            n: 0,
-        };
-        let (r, hit) = cached::<_, _, _, &str>("read_file", &args, || async { Err("nope") }).await;
-        assert!(r.is_err());
-        assert!(!hit);
         assert_eq!(len(), 0);
     }
 }
