@@ -626,7 +626,7 @@ async fn execute_review_task(params: ReviewTaskParams) -> TaskOutput {
             .await;
         match prior {
             Some(mut findings) if !findings.is_empty() => {
-                findings.sort_by(|a, b| b.severity.cmp(&a.severity));
+                findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
                 if let Some(cap) = max_prior_findings {
                     findings.truncate(cap);
                 }

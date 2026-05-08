@@ -389,13 +389,11 @@ pub fn build_agentic_system_prompt(
          than a missed finding.\n"
     );
 
-    let mut tool_number = 7;
-    for tool in custom_tools {
+    for (tool_number, tool) in (7..).zip(custom_tools.iter()) {
         prompt.push_str(&format!(
             "         {tool_number}. **Use `{}`** — {}\n",
             tool.name, tool.description
         ));
-        tool_number += 1;
     }
 
     prompt.push_str(

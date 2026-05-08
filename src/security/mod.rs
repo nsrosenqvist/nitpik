@@ -28,7 +28,7 @@ pub fn scan_and_redact(
 
     // Process matches in reverse order to maintain string indices
     let mut sorted_matches = matches;
-    sorted_matches.sort_by(|a, b| b.start.cmp(&a.start));
+    sorted_matches.sort_by_key(|m| std::cmp::Reverse(m.start));
 
     for m in &sorted_matches {
         findings.push(Finding {
