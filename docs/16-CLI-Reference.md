@@ -37,7 +37,7 @@ Run a code review.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--profile <NAMES>` | `general` | Comma-separated list of profile names, file paths, or `auto`. Built-in: `backend`, `frontend`, `architect`, `security`, `general`. |
+| `--profile <NAMES>` | `auto` | Comma-separated list of profile names, file paths, or `auto`. Built-in: `backend`, `frontend`, `architect`, `security`, `general`. The default `auto` picks reviewers from the diff via heuristics — see `--auto-mode`. |
 | `--profile-dir <DIR>` | — | Directory to resolve bare profile names from. |
 | `--tag <TAGS>` | — | Comma-separated tags. All profiles (built-in and custom) whose tags match are included. Combines with `--profile`. |
 | `--auto-mode <MODE>` | `hybrid` | How `--profile auto` picks reviewers: `heuristic` (rules only, no LLM call), `llm` (always ask the model), `hybrid` (heuristics first, fall back to LLM when inconclusive). |

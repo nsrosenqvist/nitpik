@@ -659,7 +659,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             profiles: profile_names,
             multi_wave: args.multi_wave,
             verify: args.verify,
-            auto_mode: Some(args.auto_mode),
+            auto_mode: args.auto_mode,
             review_scope: diff::git::detect_branch(repo_root_path, &Env::real()).await,
             nitpik_version: constants::VERSION.to_string(),
             timeout_secs: args.timeout,
@@ -938,6 +938,9 @@ async fn resolve_agents(
     };
 
     let used_auto = profile_names.iter().any(|p| p == "auto");
+    if !used_auto && args.auto_mode.is_some() {
+        eprintln!("warning: --auto-mode is ignored because --profile does not include 'auto'");
+    }
     let profiles = if used_auto {
         select_auto_profiles(args, config, diffs, repo_root_path).await?
     } else {
@@ -1003,7 +1006,7 @@ async fn select_auto_profiles(
     let (heuristic, confidence) =
         agents::auto::auto_select_profiles_with_confidence(diffs, repo_root_path);
 
-    let need_llm = match args.auto_mode {
+    let need_llm = match args.auto_mode.unwrap_or(AutoMode::Hybrid) {
         AutoMode::Heuristic => false,
         AutoMode::Llm => true,
         AutoMode::Hybrid => confidence == agents::auto::HeuristicConfidence::Low,

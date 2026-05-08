@@ -127,7 +127,9 @@ pub struct ReviewArgs {
 
     // --- Profile ---
     /// Comma-separated profiles: built-in names, file paths, or "auto".
-    /// Built-in: frontend, backend, architect, security, general
+    /// Built-in: frontend, backend, architect, security, general.
+    /// Defaults to `auto`, which selects profiles from the diff via
+    /// heuristics (see `--auto-mode`).
     #[arg(long, default_value = DEFAULT_PROFILE, value_delimiter = ',')]
     pub profile: Vec<String>,
 
@@ -236,14 +238,16 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub show_dropped: bool,
 
-    /// Strategy for `--profile auto` selection.
+    /// Strategy for `--profile auto` selection. Only meaningful when
+    /// `--profile` includes `auto`; passing this flag without `auto`
+    /// emits a warning and the value is ignored.
     ///
     /// - `heuristic`: file/path/dependency rules only (no LLM call).
     /// - `llm`: ask the model to pick profiles for every diff.
     /// - `hybrid` (default): use heuristics; only consult the LLM when
     ///   the heuristic is inconclusive (e.g. selects only `general`).
-    #[arg(long, value_enum, default_value_t = AutoMode::Hybrid)]
-    pub auto_mode: AutoMode,
+    #[arg(long, value_enum)]
+    pub auto_mode: Option<AutoMode>,
 
     /// Run reviewers in waves. Profiles whose frontmatter declares
     /// `wave: 2` run after wave 1 completes and receive the wave-1
@@ -438,7 +442,7 @@ mod tests {
             no_tokens: false,
             verify: false,
             show_dropped: false,
-            auto_mode: AutoMode::Hybrid,
+            auto_mode: None,
             multi_wave: false,
             audit_log: None,
             no_project_docs: false,

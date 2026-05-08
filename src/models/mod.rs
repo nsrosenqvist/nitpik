@@ -24,7 +24,12 @@ pub use finding::Severity;
 pub use usage::TokenUsage;
 
 /// Default agent profile name used when no profile is specified.
-pub const DEFAULT_PROFILE: &str = "general";
+///
+/// `auto` runs heuristic profile selection (see [`crate::agents::auto`]),
+/// which picks the appropriate language specialist(s) for the diff and
+/// pulls in any `always_include` profiles like `security`. Users who
+/// want a single generic reviewer can pass `--profile general`.
+pub const DEFAULT_PROFILE: &str = "auto";
 
 /// The resolved input mode for the review.
 #[derive(Debug, Clone)]

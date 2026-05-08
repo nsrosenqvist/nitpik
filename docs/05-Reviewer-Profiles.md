@@ -2,6 +2,8 @@
 
 Profiles are specialist reviewers — each with its own focus areas, system prompt, and severity guidelines. Run one or several in parallel to get targeted feedback from different perspectives.
 
+By default nitpik runs `--profile auto`, which picks the right specialists for each diff (see [Auto-Selection](#auto-selection) below). Pass `--profile <name>` to override.
+
 ---
 
 ## Built-in Profiles
@@ -70,7 +72,7 @@ When multiple profiles run together, each one is informed about the others and t
 
 ## Auto-Selection
 
-Let nitpik pick profiles based on the files in your diff:
+When `--profile` is not specified, nitpik runs `auto`. You can also request it explicitly:
 
 ```bash
 nitpik review --diff-base main --profile auto
