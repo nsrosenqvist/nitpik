@@ -168,6 +168,28 @@ pub struct DirListing {
     pub truncated: bool,
 }
 
+/// Returns true if `relative_path` would resolve outside the repo
+/// root by purely logical means (absolute path or `..` segments that
+/// pop past the start), without touching the filesystem.
+fn escapes_repo_root(relative_path: &str) -> bool {
+    use std::path::Component;
+    let mut depth: i32 = 0;
+    for component in Path::new(relative_path).components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => return true,
+            Component::CurDir => {}
+            Component::ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return true;
+                }
+            }
+            Component::Normal(_) => depth += 1,
+        }
+    }
+    false
+}
+
 /// List the contents of a directory in the repository.
 ///
 /// Returns entries sorted with directories first, then files. Capped
@@ -176,14 +198,24 @@ pub struct DirListing {
 pub async fn list_directory(repo_root: &Path, relative_path: &str) -> Result<DirListing, String> {
     let full_path = repo_root.join(relative_path);
 
-    // Security: ensure path is within repo
-    let canonical = full_path
-        .canonicalize()
-        .map_err(|e| format!("directory not found: {relative_path} ({e})"))?;
-
     let repo_canonical = repo_root
         .canonicalize()
         .map_err(|e| format!("invalid repo root: {e}"))?;
+
+    // Logical traversal check first: reject `..` segments that escape
+    // the repo root, and absolute paths, before touching the filesystem.
+    // canonicalize() requires the target to exist, so on platforms
+    // where the tempdir sits deeper than the test's `..` count
+    // (e.g. macOS `/var/folders/...`) a missing-path error would
+    // otherwise mask the traversal.
+    if escapes_repo_root(relative_path) {
+        return Err(format!("path traversal blocked: {relative_path}"));
+    }
+
+    // Security: ensure path is within repo (also catches symlink escapes).
+    let canonical = full_path
+        .canonicalize()
+        .map_err(|e| format!("directory not found: {relative_path} ({e})"))?;
 
     if !canonical.starts_with(&repo_canonical) {
         return Err(format!("path traversal blocked: {relative_path}"));
