@@ -181,7 +181,9 @@ pub struct ThreatConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LicenseConfig {
-    /// License key string (base64-encoded signed payload).
+    /// License key string (format: `nkp_live_…` or `nkp_test_…`).
+    /// Verified online against `nitpik.dev/v1/cli/entitlement`; the
+    /// resulting JWT is cached under `~/.config/nitpik/entitlement.json`.
     pub key: Option<String>,
 }
 

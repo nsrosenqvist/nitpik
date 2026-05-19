@@ -193,116 +193,185 @@ async fn run_license(action: LicenseAction) -> Result<()> {
 
     match action {
         LicenseAction::Activate { key } => {
-            // Verify the key first
-            let claims = license::verify_license_key(&key).context("invalid license key")?;
-            let expiry =
-                license::check_expiry(&claims).context("failed to check license expiry")?;
-
-            if expiry == license::ExpiryStatus::Expired {
-                bail!("this license key has expired ({})", claims.expires_at);
+            if !license::is_valid_key_format(&key) {
+                bail!(
+                    "license key has invalid format (expected nkp_live_… or nkp_test_…)"
+                );
             }
 
-            // Write to global config
-            let config_dir = dirs::config_dir()
-                .map(|d| d.join("nitpik"))
-                .context("could not determine config directory")?;
-            std::fs::create_dir_all(&config_dir)?;
-            let config_path = config_dir.join("config.toml");
+            write_license_key_to_config(&key)?;
+            // Drop any stale cache bound to a previous key.
+            let _ = license::clear_cache();
 
-            // Load existing config or start fresh
-            let mut content = if config_path.exists() {
-                std::fs::read_to_string(&config_path)?
-            } else {
-                String::new()
-            };
-
-            // Append or replace the [license] section
-            if let Some(start) = content.find("[license]") {
-                let rest = &content[start..];
-                let end = rest[1..]
-                    .find("\n[")
-                    .map(|i| start + 1 + i)
-                    .unwrap_or(content.len());
-                content.replace_range(start..end, &format!("[license]\nkey = \"{key}\"\n"));
-            } else {
-                content.push_str(&format!("\n[license]\nkey = \"{key}\"\n"));
+            // Do an initial fetch so the user gets an immediate yes/no.
+            let env = Env::real();
+            let config = Config::load(None, &env).context("failed to load configuration")?;
+            match license::verify_entitlement(&config, &env).await {
+                Some(claims) => {
+                    println!(
+                        "  {} License activated. Plan: {}, type: {:?}.",
+                        "✔".green().bold(),
+                        claims.plan.bold(),
+                        claims.kind,
+                    );
+                }
+                None => {
+                    println!(
+                        "  {} {}",
+                        "⚠".yellow().bold(),
+                        "Key saved, but the initial verification failed. Run `nitpik license refresh` once the issue is resolved.".yellow(),
+                    );
+                }
             }
-
-            std::fs::write(&config_path, &content)?;
-
-            println!(
-                "  {} License activated for {} (expires {})",
-                "✔".green().bold(),
-                claims.customer_name.bold(),
-                claims.expires_at,
-            );
         }
         LicenseAction::Status => {
-            let config =
-                Config::load(None, &Env::real()).context("failed to load configuration")?;
-
-            match config.license.key {
-                Some(ref key) => match license::verify_license_key(key) {
-                    Ok(claims) => {
-                        let expiry =
-                            license::check_expiry(&claims).context("failed to check expiry")?;
-                        println!("  {}  {}", "Customer:".cyan(), claims.customer_name);
-                        println!("  {}       {}", "ID:".cyan(), claims.customer_id);
-                        println!("  {}  {}", "Issued at:".cyan(), claims.issued_at);
-                        println!("  {} {}", "Expires at:".cyan(), claims.expires_at);
-                        match expiry {
-                            license::ExpiryStatus::Valid => {
-                                println!("  {}    {}", "Status:".cyan(), "valid".green());
-                            }
-                            license::ExpiryStatus::ExpiringSoon { days } => {
-                                println!(
-                                    "  {}    {}",
-                                    "Status:".cyan(),
-                                    format!("expires in {days} day(s)").yellow(),
-                                );
-                            }
-                            license::ExpiryStatus::Expired => {
-                                println!("  {}    {}", "Status:".cyan(), "expired".red());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!(
-                            "  {} {}",
-                            "✖".red().bold(),
-                            format!("Invalid license key: {e}").red(),
-                        );
-                    }
-                },
-                None => {
-                    println!("  No license key configured.");
-                    println!("  Use `nitpik license activate <KEY>` to add one.");
-                }
-            }
+            let env = Env::real();
+            let config = Config::load(None, &env).context("failed to load configuration")?;
+            print_license_status(&config, &env).await;
         }
         LicenseAction::Deactivate => {
-            let config_dir = dirs::config_dir()
-                .map(|d| d.join("nitpik"))
-                .context("could not determine config directory")?;
-            let config_path = config_dir.join("config.toml");
-
-            if config_path.exists() {
-                let mut content = std::fs::read_to_string(&config_path)?;
-                if let Some(start) = content.find("[license]") {
-                    let rest = &content[start..];
-                    let end = rest[1..]
-                        .find("\n[")
-                        .map(|i| start + 1 + i)
-                        .unwrap_or(content.len());
-                    content.replace_range(start..end, "");
-                    std::fs::write(&config_path, content.trim_end())?;
+            remove_license_key_from_config()?;
+            let _ = license::clear_cache();
+            println!(
+                "  {} License key removed and cached entitlement cleared.",
+                "✔".green().bold(),
+            );
+        }
+        LicenseAction::Refresh => {
+            let _ = license::clear_cache();
+            let env = Env::real();
+            let config = Config::load(None, &env).context("failed to load configuration")?;
+            match license::verify_entitlement(&config, &env).await {
+                Some(claims) => {
+                    println!(
+                        "  {} Entitlement refreshed. Plan: {}, type: {:?}.",
+                        "✔".green().bold(),
+                        claims.plan.bold(),
+                        claims.kind,
+                    );
+                }
+                None => {
+                    bail!(
+                        "could not refresh the entitlement — see warnings above for the reason"
+                    );
                 }
             }
-
-            println!("  {} License key removed.", "✔".green().bold(),);
         }
     }
 
+    Ok(())
+}
+
+/// Render the current license + entitlement state for the `status` subcommand.
+async fn print_license_status(config: &Config, env: &Env) {
+    use colored::Colorize;
+
+    match config.license.key.as_ref() {
+        Some(key) if license::is_valid_key_format(key) => {
+            println!("  {}   {}…", "Key:".cyan(), &key[..key.len().min(12)]);
+        }
+        Some(_) => {
+            println!(
+                "  {} {}",
+                "✖".red().bold(),
+                "License key has an invalid format.".red(),
+            );
+            return;
+        }
+        None => {
+            println!("  No license key configured.");
+            println!("  Use `nitpik license activate <KEY>` to add one.");
+            return;
+        }
+    }
+
+    match license::verify_entitlement(config, env).await {
+        Some(claims) => {
+            println!("  {} {}", "Plan:".cyan(), claims.plan);
+            println!("  {}  {:?}", "Type:".cyan(), claims.kind);
+            println!(
+                "  {} {}",
+                "Token expires:".cyan(),
+                format_unix_seconds(claims.expires_at),
+            );
+            println!("  {} {}", "Status:".cyan(), "valid".green());
+        }
+        None => {
+            println!(
+                "  {} {}",
+                "Status:".cyan(),
+                "not verified — see warnings above".yellow(),
+            );
+        }
+    }
+}
+
+fn format_unix_seconds(epoch: i64) -> String {
+    let days = epoch.div_euclid(86400);
+    let rem = epoch.rem_euclid(86400);
+    let h = rem / 3600;
+    let mi = (rem % 3600) / 60;
+    let days = days + 719468;
+    let era = if days >= 0 { days } else { days - 146096 } / 146097;
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let mut y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    if m <= 2 {
+        y += 1;
+    }
+    format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02} UTC")
+}
+
+fn write_license_key_to_config(key: &str) -> Result<()> {
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join(constants::CONFIG_DIR))
+        .context("could not determine config directory")?;
+    std::fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join("config.toml");
+
+    let mut content = if config_path.exists() {
+        std::fs::read_to_string(&config_path)?
+    } else {
+        String::new()
+    };
+
+    if let Some(start) = content.find("[license]") {
+        let rest = &content[start..];
+        let end = rest[1..]
+            .find("\n[")
+            .map(|i| start + 1 + i)
+            .unwrap_or(content.len());
+        content.replace_range(start..end, &format!("[license]\nkey = \"{key}\"\n"));
+    } else {
+        content.push_str(&format!("\n[license]\nkey = \"{key}\"\n"));
+    }
+
+    std::fs::write(&config_path, &content)?;
+    Ok(())
+}
+
+fn remove_license_key_from_config() -> Result<()> {
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join(constants::CONFIG_DIR))
+        .context("could not determine config directory")?;
+    let config_path = config_dir.join("config.toml");
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let mut content = std::fs::read_to_string(&config_path)?;
+    if let Some(start) = content.find("[license]") {
+        let rest = &content[start..];
+        let end = rest[1..]
+            .find("\n[")
+            .map(|i| start + 1 + i)
+            .unwrap_or(content.len());
+        content.replace_range(start..end, "");
+        std::fs::write(&config_path, content.trim_end())?;
+    }
     Ok(())
 }
 /// Canonicalize the `--path` directory and locate the git repo root.
@@ -377,9 +446,10 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     let repo_root = resolve_repo_root(&args.path).await?;
     let repo_root_path = Path::new(&repo_root);
 
+    let env_real = Env::real();
     let config =
-        Config::load(Some(repo_root_path), &Env::real()).context("failed to load configuration")?;
-    let license_claims = verify_license(&config);
+        Config::load(Some(repo_root_path), &env_real).context("failed to load configuration")?;
+    let license_claims = verify_license(&config, &env_real).await;
 
     let use_agent = args.agent || config.review.agentic.enabled;
     let scan_secrets = args.scan_secrets || config.secrets.enabled;
@@ -751,34 +821,13 @@ fn print_token_summary(
     let _ = handle.flush();
 }
 
-/// Verify the license key from config, returning claims and optional
-/// days-until-expiry. Exits the process if the license has expired.
-fn verify_license(config: &Config) -> Option<(license::LicenseClaims, Option<i64>)> {
-    let key = config.license.key.as_ref()?;
-    match license::verify_license_key(key) {
-        Ok(claims) => match license::check_expiry(&claims) {
-            Ok(license::ExpiryStatus::Expired) => {
-                use colored::Colorize;
-                eprintln!(
-                    "\n  {} {}\n  {}\n",
-                    "✖".red().bold(),
-                    "Your nitpik license has expired.".red(),
-                    "Renew at https://nitpik.dev or contact support.".dimmed(),
-                );
-                std::process::exit(1);
-            }
-            Ok(license::ExpiryStatus::ExpiringSoon { days }) => Some((claims, Some(days))),
-            Ok(license::ExpiryStatus::Valid) => Some((claims, None)),
-            Err(e) => {
-                eprintln!("Warning: could not check license expiry: {e}");
-                Some((claims, None))
-            }
-        },
-        Err(e) => {
-            eprintln!("Warning: invalid license key: {e}");
-            None
-        }
-    }
+/// Resolve the active entitlement for the current review run.
+///
+/// Returns `None` (and prints stderr warnings) when no valid entitlement
+/// can be established — the review continues in free-tier mode. Never
+/// exits the process; the worst case is "unlicensed run."
+async fn verify_license(config: &Config, env: &Env) -> Option<license::LicenseClaims> {
+    license::verify_entitlement(config, env).await
 }
 
 /// Fire anonymous telemetry heartbeat (non-blocking, fails silently).
@@ -791,7 +840,7 @@ fn fire_telemetry(
     config: &Config,
     diffs: &[models::FileDiff<'_>],
     agents: &[models::AgentDefinition],
-    license_claims: &Option<(license::LicenseClaims, Option<i64>)>,
+    license_claims: &Option<license::LicenseClaims>,
     no_telemetry: bool,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if !config.telemetry.enabled || no_telemetry {
@@ -819,7 +868,7 @@ fn setup_progress(
     diffs: &[models::FileDiff<'_>],
     agents: &[models::AgentDefinition],
     baseline: &models::BaselineContext,
-    license_claims: &Option<(license::LicenseClaims, Option<i64>)>,
+    license_claims: &Option<license::LicenseClaims>,
     agentic: bool,
 ) -> Arc<ProgressTracker> {
     let is_interactive = args.format == OutputFormat::Terminal && std::io::stderr().is_terminal();
@@ -837,32 +886,36 @@ fn setup_progress(
     );
 
     if show_info {
-        let claims_ref = license_claims.as_ref().map(|(c, _)| c);
-        cli::print_banner(claims_ref);
+        cli::print_banner(license_claims.as_ref());
 
-        if let Some((_, Some(days))) = license_claims {
-            use colored::Colorize;
-            use std::io::Write;
-            let stderr = std::io::stderr();
-            let mut handle = stderr.lock();
-            if *days <= 13 {
-                let _ = writeln!(
-                    handle,
-                    "  {} {}",
-                    "⚠".yellow().bold(),
-                    format!("License expires in {days} day(s) — renew at https://nitpik.dev")
+        // Offline tokens have a real wall-clock expiry users must manage —
+        // surface a soft warning when one is approaching its end. Online
+        // entitlements refresh automatically so we stay quiet there.
+        if let Some(claims) = license_claims {
+            if claims.kind == license::TokenKind::Offline {
+                use colored::Colorize;
+                use std::io::Write;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                let days_remaining = (claims.expires_at - now) / 86_400;
+                if (0..=14).contains(&days_remaining) {
+                    let stderr = std::io::stderr();
+                    let mut handle = stderr.lock();
+                    let _ = writeln!(
+                        handle,
+                        "  {} {}",
+                        "⚠".yellow().bold(),
+                        format!(
+                            "Offline token expires in {days_remaining} day(s) — download a fresh one at https://nitpik.dev/account"
+                        )
                         .yellow(),
-                );
-            } else {
-                let _ = writeln!(
-                    handle,
-                    "  {} {}",
-                    "ℹ".dimmed(),
-                    format!("License expires in {days} days").dimmed(),
-                );
+                    );
+                    let _ = writeln!(handle);
+                    let _ = handle.flush();
+                }
             }
-            let _ = writeln!(handle);
-            let _ = handle.flush();
         }
 
         if !baseline.project_docs.is_empty() {

@@ -83,13 +83,15 @@ pub enum CacheAction {
 pub enum LicenseAction {
     /// Store a license key in the global config (~/.config/nitpik/config.toml).
     Activate {
-        /// The license key string.
+        /// The license key string (format: nkp_live_…).
         key: String,
     },
-    /// Show current license status (customer, expiry).
+    /// Show current license status (plan, entitlement expiry).
     Status,
-    /// Remove the license key from the global config.
+    /// Remove the license key and clear the cached entitlement.
     Deactivate,
+    /// Force a fresh entitlement fetch from nitpik.dev, replacing the cache.
+    Refresh,
 }
 
 /// Arguments for the `update` subcommand.

@@ -10,7 +10,7 @@
 
 pub mod args;
 
-use nitpik::license::LicenseClaims;
+use nitpik::license::{LicenseClaims, TokenKind};
 
 /// License banner with ANSI styling for clap help output.
 /// Bold "nitpik", dimmed rest. (Static — used for --help only.)
@@ -18,7 +18,8 @@ pub const LICENSE_BANNER_STYLED: &str = "\x1b[92m●\x1b[0m \x1b[1mnitpik\x1b[0m
 
 /// Print the license/thank-you banner to stderr.
 ///
-/// When `claims` is `Some`, shows a personalized thank-you message.
+/// When `claims` is `Some`, shows a thank-you message scoped to the
+/// current plan and (for offline tokens) the upcoming expiry.
 /// Otherwise shows the default "free for personal use" notice.
 pub fn print_banner(claims: Option<&LicenseClaims>) {
     use colored::Colorize;
@@ -28,16 +29,19 @@ pub fn print_banner(claims: Option<&LicenseClaims>) {
     let _ = writeln!(handle);
     match claims {
         Some(c) => {
+            let suffix = match c.kind {
+                TokenKind::Online => format!("· Licensed ({}). Thank you for supporting nitpik! ♥", c.plan),
+                TokenKind::Offline => format!(
+                    "· Licensed ({}, offline token). Thank you for supporting nitpik! ♥",
+                    c.plan
+                ),
+            };
             let _ = writeln!(
                 handle,
                 "  {} {} {}",
                 "●".bright_green(),
                 "nitpik".bold(),
-                format!(
-                    "· Licensed to {}. Thank you for supporting nitpik! ♥",
-                    c.customer_name
-                )
-                .dimmed(),
+                suffix.dimmed(),
             );
         }
         None => {
@@ -59,27 +63,36 @@ pub fn print_banner(claims: Option<&LicenseClaims>) {
 mod tests {
     use super::*;
 
+    fn sample_online() -> LicenseClaims {
+        LicenseClaims {
+            user_id: "usr_test".into(),
+            subscription_id: "sub_test".into(),
+            plan: "monthly".into(),
+            expires_at: 9_999_999_999,
+            kind: TokenKind::Online,
+            kid: "ed25519-2026-01".into(),
+        }
+    }
+
     #[test]
     fn print_banner_without_license() {
-        // Should not panic when called without claims.
         print_banner(None);
     }
 
     #[test]
     fn print_banner_with_license() {
-        let claims = LicenseClaims {
-            customer_name: "Test User".to_string(),
-            customer_id: "test-id".to_string(),
-            issued_at: "2026-01-01".to_string(),
-            expires_at: "2099-12-31".to_string(),
-        };
-        // Should not panic when called with claims.
-        print_banner(Some(&claims));
+        print_banner(Some(&sample_online()));
+    }
+
+    #[test]
+    fn print_banner_with_offline_token() {
+        let mut c = sample_online();
+        c.kind = TokenKind::Offline;
+        print_banner(Some(&c));
     }
 
     #[test]
     fn license_banner_styled_is_non_empty() {
-        // Const is statically non-empty; just verify it contains the app name.
         assert!(LICENSE_BANNER_STYLED.contains("nitpik"));
     }
 }
