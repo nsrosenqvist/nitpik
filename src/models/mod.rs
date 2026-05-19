@@ -122,6 +122,24 @@ impl ProviderName {
         }
     }
 
+    /// Per-provider cap on `max_tokens` in completion requests, if any.
+    ///
+    /// Some hosted endpoints reject completions above a model-specific
+    /// ceiling that's tighter than the model's own context window
+    /// (e.g. GitHub Models caps `gpt-4.1` at 32 768 completion tokens
+    /// even though the underlying OpenAI deployment accepts more).
+    /// Callers should clamp [`crate::constants::MAX_COMPLETION_TOKENS`]
+    /// to this value before sending.
+    ///
+    /// `None` means use the global default; the provider does not impose
+    /// a stricter cap than the model itself.
+    pub fn max_completion_tokens(self) -> Option<u64> {
+        match self {
+            ProviderName::GitHub => Some(32_768),
+            _ => None,
+        }
+    }
+
     /// Returns the provider-specific environment variable name for the API key.
     ///
     /// These match the env var names used by rig-core's `from_env()` implementations.
@@ -324,6 +342,18 @@ mod tests {
             ProviderName::OpenAICompatible.api_key_env_var(),
             "OPENAI_API_KEY"
         );
+    }
+
+    #[test]
+    fn provider_name_max_completion_tokens() {
+        assert_eq!(
+            ProviderName::GitHub.max_completion_tokens(),
+            Some(32_768),
+            "GitHub Models caps completion tokens at 32k"
+        );
+        assert_eq!(ProviderName::OpenAI.max_completion_tokens(), None);
+        assert_eq!(ProviderName::Anthropic.max_completion_tokens(), None);
+        assert_eq!(ProviderName::OpenAICompatible.max_completion_tokens(), None);
     }
 
     #[test]

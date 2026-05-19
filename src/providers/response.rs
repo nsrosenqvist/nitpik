@@ -11,7 +11,7 @@
 
 use crate::constants::{INITIAL_BACKOFF, MAX_BACKOFF};
 use crate::models::finding::Finding;
-use crate::providers::ProviderError;
+use crate::providers::{ProviderError, TriageVerdict};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
@@ -138,6 +138,28 @@ pub fn parse_findings_response(response: &str) -> Result<Vec<Finding>, ProviderE
     }
 
     parse_with_fallbacks::<Wrapper>(response).map(|w| trim_finding_fields(w.findings))
+}
+
+/// Parse the LLM response text into structured triage verdicts.
+///
+/// Mirrors [`parse_findings_response`]: tries a bare `Vec<TriageVerdict>`
+/// first, then the `{"verdicts": [...]}` wrapper shape that strict
+/// OpenAI-compatible providers (e.g. GitHub Models) require.
+pub fn parse_verdicts_response(response: &str) -> Result<Vec<TriageVerdict>, ProviderError> {
+    if response.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if let Ok(verdicts) = parse_with_fallbacks::<Vec<TriageVerdict>>(response) {
+        return Ok(verdicts);
+    }
+
+    #[derive(Deserialize)]
+    struct Wrapper {
+        verdicts: Vec<TriageVerdict>,
+    }
+
+    parse_with_fallbacks::<Wrapper>(response).map(|w| w.verdicts)
 }
 
 /// Trim trailing whitespace from LLM-generated string fields and cap

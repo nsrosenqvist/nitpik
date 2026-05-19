@@ -34,6 +34,27 @@ pub enum ProviderError {
     NotConfigured(String),
 }
 
+/// JSON-schema wrapper around `Vec<Finding>` for structured-output mode.
+///
+/// OpenAI's structured-output spec requires the response_format schema's
+/// root to be `type: "object"`. The real OpenAI API is lenient and
+/// accepts a top-level `type: "array"` schema, but stricter compatible
+/// endpoints (GitHub Models, future Azure structured mode) reject it
+/// with a 400. Passing this wrapper as the schema type yields a
+/// spec-compliant object schema; [`response::parse_findings_response`]
+/// already accepts both bare-array and wrapped responses.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct FindingsResponse {
+    pub findings: Vec<Finding>,
+}
+
+/// JSON-schema wrapper around `Vec<TriageVerdict>` for structured-output
+/// mode. See [`FindingsResponse`] for the rationale.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct VerdictsResponse {
+    pub verdicts: Vec<TriageVerdict>,
+}
+
 /// Raw triage verdict produced by the LLM for a single threat finding.
 ///
 /// The classification string is kept as-is so the providers layer does

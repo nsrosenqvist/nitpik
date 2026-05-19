@@ -19,19 +19,16 @@ use schemars::{JsonSchema, schema_for};
 
 use crate::config::ProviderConfig;
 use crate::models::TokenUsage;
-use crate::models::finding::Finding;
 use crate::models::{AgentDefinition, ProviderName};
 use crate::orchestrator::prompt::build_agentic_system_prompt;
-use crate::providers::response::{parse_findings_response, parse_with_fallbacks};
+use crate::providers::response::{parse_findings_response, parse_verdicts_response};
 use crate::tools::budget::ToolBudget;
 use crate::tools::{
     CustomCommandTool, GlobTool, ListDirectoryTool, ReadFileTool, ReadFilesTool,
     SUBMIT_FINDINGS_TOOL_NAME, SearchTextTool, SubmitFindingsTool,
 };
 
-use super::{
-    AgentDiagnostics, ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict,
-};
+use super::{AgentDiagnostics, ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome};
 
 use crate::constants::MAX_COMPLETION_TOKENS;
 
@@ -270,6 +267,14 @@ impl RigProvider {
         })
     }
 
+    /// Clamp [`MAX_COMPLETION_TOKENS`] to the provider's per-call cap.
+    fn resolved_max_tokens(&self) -> u64 {
+        match self.config.name.max_completion_tokens() {
+            Some(cap) => MAX_COMPLETION_TOKENS.min(cap),
+            None => MAX_COMPLETION_TOKENS,
+        }
+    }
+
     /// Get the API key or return an error.
     fn api_key(&self) -> Result<&str, ProviderError> {
         self.config
@@ -281,8 +286,12 @@ impl RigProvider {
     /// Make a completion call through rig-core, dispatching on provider once.
     ///
     /// `T` is the JSON-schema-deriving type that constrains the model's
-    /// final response (e.g. `Vec<Finding>` for review,
-    /// `Vec<TriageVerdict>` for triage). Each match arm constructs the
+    /// final response (e.g. [`FindingsResponse`] for review,
+    /// [`VerdictsResponse`] for triage — both wrap their inner array in
+    /// an object so the schema is OpenAI-spec compliant). Each match arm constructs the
+    ///
+    /// [`FindingsResponse`]: crate::providers::FindingsResponse
+    /// [`VerdictsResponse`]: crate::providers::VerdictsResponse
     /// concrete provider client, builds the model handle (applying any
     /// provider-specific tweaks such as Anthropic prompt caching), and
     /// forwards to [`dispatch_review`].
@@ -496,13 +505,13 @@ impl ReviewProvider for RigProvider {
         };
 
         let result = self
-            .call::<Vec<Finding>>(
+            .call::<crate::providers::FindingsResponse>(
                 model,
                 CallArgs {
                     system_prompt,
                     user_prompt: prompt,
                     label: "Review",
-                    max_tokens: MAX_COMPLETION_TOKENS,
+                    max_tokens: self.resolved_max_tokens(),
                     agentic: agentic_cfg,
                 },
             )
@@ -522,13 +531,13 @@ impl ReviewProvider for RigProvider {
         user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
         let result = self
-            .call::<Vec<TriageVerdict>>(
+            .call::<crate::providers::VerdictsResponse>(
                 self.config.resolved_model(),
                 CallArgs {
                     system_prompt,
                     user_prompt,
                     label: "Triage",
-                    max_tokens: MAX_COMPLETION_TOKENS,
+                    max_tokens: self.resolved_max_tokens(),
                     agentic: None,
                 },
             )
@@ -541,7 +550,7 @@ impl ReviewProvider for RigProvider {
             });
         }
 
-        let verdicts = parse_with_fallbacks::<Vec<TriageVerdict>>(&result.text)?;
+        let verdicts = parse_verdicts_response(&result.text)?;
         Ok(TriageOutcome {
             verdicts,
             tokens: result.tokens,
