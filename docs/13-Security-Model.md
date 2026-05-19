@@ -206,9 +206,18 @@ enabled = false
 
 ## License Verification
 
-Commercial license verification is **fully offline**. nitpik embeds an Ed25519 public key in the binary and verifies the license signature locally — there is no license server, no activation callback, and no usage reporting.
+The CLI holds a long-lived API key (format `nkp_live_…`) that it exchanges with `nitpik.dev` for a short-lived Ed25519-signed entitlement JWT, valid for 7 days. The JWT is verified offline against a public key bundled in the nitpik binary — `nitpik.dev` can stop issuing entitlements but cannot forge them.
 
-License keys are stored in `~/.config/nitpik/config.toml` after activation, or read from `NITPIK_LICENSE_KEY`. Expiry is checked against the local clock. See [Licensing](20-Licensing).
+The cached entitlement lives at `~/.config/nitpik/entitlement.json` (mode `0600` on Unix). Cache invalidation is bound to a sha256 fingerprint of the API key, so rotating the key automatically discards stale entitlements.
+
+For air-gapped CI, downloadable offline tokens (30- or 60-day signed JWTs) bypass the fetch entirely when supplied via `NITPIK_OFFLINE_TOKEN`. See [Licensing](20-Licensing).
+
+The only nitpik.dev endpoints the CLI contacts are:
+
+- `POST /v1/cli/entitlement` — exchanges the API key for the entitlement JWT.
+- `POST /v1/heartbeat` — anonymous telemetry (see above).
+
+No diff content, file names, findings, repository URLs, or user identifiers ever leave the machine via these endpoints.
 
 ---
 
@@ -217,6 +226,7 @@ License keys are stored in `~/.config/nitpik/config.toml` after activation, or r
 | Location | Contents | Purpose |
 |---|---|---|
 | `~/.config/nitpik/config.toml` | Provider, model, license key, default flags | Global config. |
+| `~/.config/nitpik/entitlement.json` | Signed entitlement JWT + fingerprint binding it to the current API key | Cached subscription proof. Cleared by `nitpik license deactivate` or `refresh`. |
 | `~/.config/nitpik/cache/` | Findings only (JSON), keyed by content hash | Skip re-reviewing unchanged files. No raw code, prompts, or LLM responses are cached. |
 | `--audit-log <PATH>` artifact | Per-task status, tool-call summaries, token counts, critic decisions, final findings | Opt-in only. No raw diffs, system prompts, or LLM responses. |
 
@@ -252,4 +262,4 @@ Please use [GitHub Private Vulnerability Reporting](https://github.com/nsrosenqv
 - [Agentic Mode](08-Agentic-Mode) — built-in and custom tools
 - [Custom Profiles](07-Custom-Profiles) — `environment` and `tools` frontmatter
 - [Configuration](16-Configuration) — telemetry, secrets, and audit log keys
-- [Licensing](20-Licensing) — offline license verification
+- [Licensing](20-Licensing) — online entitlements, cache, offline tokens

@@ -148,15 +148,16 @@ Manage the result cache.
 
 ## `nitpik license`
 
-Manage the commercial license key.
+Manage the commercial license key and the cached entitlement.
 
 ### Subcommands
 
 | Subcommand | Description |
 |---|---|
-| `nitpik license activate <KEY>` | Store a license key in `~/.config/nitpik/config.toml`. |
-| `nitpik license status` | Show current license status (customer, expiry). |
-| `nitpik license deactivate` | Remove the license key from global config. |
+| `nitpik license activate <KEY>` | Validate the key format, store it in `~/.config/nitpik/config.toml`, and do an initial entitlement fetch. |
+| `nitpik license status` | Show the current plan, entitlement type (online/offline), and expiry. |
+| `nitpik license refresh` | Discard the cached entitlement and fetch a fresh one. |
+| `nitpik license deactivate` | Remove the license key and clear the cached entitlement. |
 
 ---
 

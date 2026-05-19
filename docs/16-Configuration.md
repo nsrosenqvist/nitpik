@@ -106,7 +106,7 @@ The project config overrides the global config, so teams can set project-level s
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `key` | string | *(none)* | Commercial license key. Set by `nitpik license activate`. Can also use `NITPIK_LICENSE_KEY` env var. |
+| `key` | string | *(none)* | Commercial license key (format `nkp_live_…`). Set by `nitpik license activate`. Can also use `NITPIK_LICENSE_KEY` env var. The CLI exchanges this key with `nitpik.dev` for a short-lived entitlement, cached at `~/.config/nitpik/entitlement.json`. See [Licensing](20-Licensing). |
 
 ### `[telemetry]`
 
@@ -151,7 +151,9 @@ nitpik checks for a provider-specific key first, then falls back to `NITPIK_API_
 
 | Variable | Description |
 |---|---|
-| `NITPIK_LICENSE_KEY` | Commercial license key |
+| `NITPIK_LICENSE_KEY` | Commercial license key (`nkp_live_…`). Exchanged with nitpik.dev for a signed entitlement on first use, then cached. |
+| `NITPIK_OFFLINE_TOKEN` | Pre-signed entitlement JWT for air-gapped CI. When set, bypasses the network exchange entirely. Generate one at [nitpik.dev/account](https://nitpik.dev/account). |
+| `NITPIK_API_URL` | Override the nitpik.dev origin used for entitlement fetches (defaults to `https://nitpik.dev`; useful for staging). |
 | `NITPIK_TELEMETRY` | Set `false` to disable telemetry |
 | `NITPIK_AUDIT_LOG` | Path to write a per-run JSON audit log (equivalent to `--audit-log`) |
 
