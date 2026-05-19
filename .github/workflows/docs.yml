@@ -1,12 +1,29 @@
-name: Notify nitpik-web on wiki edit
+name: Publish docs
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
   gollum:
 
 jobs:
-  dispatch:
+  publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - name: Checkout repo
+        if: github.event_name == 'push'
+        uses: actions/checkout@v6
+
+      - name: Sync docs/ to wiki
+        if: github.event_name == 'push'
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        with:
+          path: docs/
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Trigger nitpik-web deploy
         run: |
           curl -sSf -X POST \

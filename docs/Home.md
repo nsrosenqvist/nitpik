@@ -43,7 +43,3 @@ New to nitpik? Start here:
 - **[CLI Reference](18-CLI-Reference)** — every command and flag.
 - **[Troubleshooting](19-Troubleshooting)** — common issues and solutions.
 - **[Licensing](20-Licensing)** — free tier, commercial activation, and license management.
-
----
-
-[Website](https://nitpik.dev) · [GitHub](https://github.com/nsrosenqvist/nitpik) · [Report an Issue](https://github.com/nsrosenqvist/nitpik/issues)
