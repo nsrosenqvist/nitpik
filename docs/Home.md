@@ -1,4 +1,4 @@
-# nitpik Documentation
+# nitpik
 
 AI-powered code reviews for your team. Bring your own model, bring your own API key.
 

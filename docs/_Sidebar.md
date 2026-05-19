@@ -1,8 +1,5 @@
-**[Home](Home)**
-
----
-
 **Getting Started**
+- [Introduction](Home)
 - [Installation](01-Installation)
 - [Quick Start](02-Quick-Start)
 - [LLM Providers](03-Providers)
