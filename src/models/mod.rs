@@ -69,6 +69,8 @@ pub enum ProviderName {
     DeepSeek,
     Galadriel,
     Gemini,
+    #[serde(rename = "github")]
+    GitHub,
     Groq,
     #[serde(rename = "huggingface")]
     HuggingFace,
@@ -104,6 +106,7 @@ impl ProviderName {
             ProviderName::DeepSeek => "deepseek-chat",
             ProviderName::Galadriel => "llama3.1-70b",
             ProviderName::Gemini => "gemini-2.5-flash",
+            ProviderName::GitHub => "openai/gpt-4.1",
             ProviderName::Groq => "llama-3.3-70b-versatile",
             ProviderName::HuggingFace => "meta-llama/Llama-3.1-70B-Instruct",
             ProviderName::Hyperbolic => "meta-llama/Llama-3.1-70B-Instruct",
@@ -130,6 +133,7 @@ impl ProviderName {
             ProviderName::DeepSeek => "DEEPSEEK_API_KEY",
             ProviderName::Galadriel => "GALADRIEL_API_KEY",
             ProviderName::Gemini => "GEMINI_API_KEY",
+            ProviderName::GitHub => "GITHUB_TOKEN",
             ProviderName::Groq => "GROQ_API_KEY",
             ProviderName::HuggingFace => "HUGGINGFACE_API_KEY",
             ProviderName::Hyperbolic => "HYPERBOLIC_API_KEY",
@@ -158,6 +162,7 @@ mod tests {
         assert_eq!(ProviderName::DeepSeek.to_string(), "deepseek");
         assert_eq!(ProviderName::Galadriel.to_string(), "galadriel");
         assert_eq!(ProviderName::Gemini.to_string(), "gemini");
+        assert_eq!(ProviderName::GitHub.to_string(), "github");
         assert_eq!(ProviderName::Groq.to_string(), "groq");
         assert_eq!(ProviderName::HuggingFace.to_string(), "huggingface");
         assert_eq!(ProviderName::Hyperbolic.to_string(), "hyperbolic");
@@ -201,6 +206,10 @@ mod tests {
         assert_eq!(
             "gemini".parse::<ProviderName>().unwrap(),
             ProviderName::Gemini
+        );
+        assert_eq!(
+            "github".parse::<ProviderName>().unwrap(),
+            ProviderName::GitHub
         );
         assert_eq!("groq".parse::<ProviderName>().unwrap(), ProviderName::Groq);
         assert_eq!(
@@ -286,6 +295,7 @@ mod tests {
             "GALADRIEL_API_KEY"
         );
         assert_eq!(ProviderName::Gemini.api_key_env_var(), "GEMINI_API_KEY");
+        assert_eq!(ProviderName::GitHub.api_key_env_var(), "GITHUB_TOKEN");
         assert_eq!(ProviderName::Groq.api_key_env_var(), "GROQ_API_KEY");
         assert_eq!(
             ProviderName::HuggingFace.api_key_env_var(),
@@ -339,6 +349,7 @@ mod tests {
             (ProviderName::DeepSeek, "\"deepseek\""),
             (ProviderName::Galadriel, "\"galadriel\""),
             (ProviderName::Gemini, "\"gemini\""),
+            (ProviderName::GitHub, "\"github\""),
             (ProviderName::Groq, "\"groq\""),
             (ProviderName::HuggingFace, "\"huggingface\""),
             (ProviderName::Hyperbolic, "\"hyperbolic\""),

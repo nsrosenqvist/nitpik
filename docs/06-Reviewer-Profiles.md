@@ -68,7 +68,7 @@ Run multiple profiles in parallel:
 nitpik review --diff-base main --profile backend,security
 ```
 
-When multiple profiles run together, each one is informed about the others and their focus areas. This coordination prevents duplicate findings and keeps each reviewer in its lane. See [How Reviews Work](09-How-Reviews-Work) for details.
+When multiple profiles run together, each one is informed about the others and their focus areas. This coordination prevents duplicate findings and keeps each reviewer in its lane. See [How Reviews Work](10-How-Reviews-Work) for details.
 
 ## Auto-Selection
 
@@ -84,7 +84,7 @@ Auto-selection examines three layers of signals to choose profiles:
 2. **Project root markers** — when JS/TS path signals are absent or one-sided, nitpik checks the repo root for `package.json` dependencies (Express, React, etc.) and config files (`nest-cli.json`, `wrangler.toml`, etc.) to fill in the gaps.
 3. **Architect triggers** — the `architect` profile is added when the diff touches cross-cutting files (CI configs, Dockerfiles, IaC, dependency manifests, API definitions, database migrations) or when the diff is large (many files or many distinct directories).
 
-The `security` profile is always included because its frontmatter sets `always_include: true`. Any custom profile in your `--profile-dir` with the same flag is appended too — see [Always-On Profiles](06-Custom-Profiles#always-on-profiles).
+The `security` profile is always included because its frontmatter sets `always_include: true`. Any custom profile in your `--profile-dir` with the same flag is appended too — see [Always-On Profiles](07-Custom-Profiles#always-on-profiles).
 
 When neither `frontend` nor `backend` signals fire (for example a docs-only, infra-only, or shell-only diff), the `general` profile is used as the catch-all. `general` and the language specialists are mutually exclusive: a strictly-backend or strictly-frontend diff never pulls `general` in alongside the specialist. JS/TS files with no clear signal still default to `frontend` rather than `general`.
 
@@ -140,7 +140,7 @@ This shows each profile's name, description, and tags.
 
 ## Related Pages
 
-- [Custom Profiles](06-Custom-Profiles) — create your own reviewers
-- [How Reviews Work](09-How-Reviews-Work) — multi-agent coordination
-- [Agentic Mode](07-Agentic-Mode) — give profiles access to tools
-- [CLI Reference](16-CLI-Reference) — all profile-related flags
+- [Custom Profiles](07-Custom-Profiles) — create your own reviewers
+- [How Reviews Work](10-How-Reviews-Work) — multi-agent coordination
+- [Agentic Mode](08-Agentic-Mode) — give profiles access to tools
+- [CLI Reference](18-CLI-Reference) — all profile-related flags

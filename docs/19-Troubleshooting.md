@@ -120,5 +120,5 @@ If you see frequent timeouts:
 
 - [Installation](01-Installation) — install methods and requirements
 - [LLM Providers](03-Providers) — provider setup
-- [CI/CD Integration](15-CI-Integration) — platform-specific setup
-- [Caching](10-Caching) — cache management
+- [CI/CD Integration](17-CI-Integration) — platform-specific setup
+- [Caching](11-Caching) — cache management

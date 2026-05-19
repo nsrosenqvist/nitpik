@@ -22,7 +22,7 @@ Every review call sends the following to the configured provider:
 
 - **Diff hunks** — added and removed lines for each changed file.
 - **File content** — the full content of changed files, included as context for the reviewer. Redacted first if `--scan-secrets` is enabled (see below).
-- **Project documentation** — `REVIEW.md`, `NITPIK.md`, or auto-detected docs unless you pass `--no-project-docs`. See [Project Documentation Context](13-Project-Docs).
+- **Project documentation** — `REVIEW.md`, `NITPIK.md`, or auto-detected docs unless you pass `--no-project-docs`. See [Project Documentation Context](12-Project-Docs).
 - **Recent commit messages** — when commit context is enabled.
 - **Prior findings** — when the cache has results from previous reviews on the same files.
 
@@ -74,7 +74,7 @@ The scanner uses 200+ vendored gitleaks-compatible rules plus Shannon entropy ch
 nitpik review --diff-base main --scan-secrets --secrets-rules ./custom-rules.toml
 ```
 
-See [Secret Scanning](11-Secret-Scanning) for the full pattern list, custom rule format, and CI guidance.
+See [Secret Scanning](14-Secret-Scanning) for the full pattern list, custom rule format, and CI guidance.
 
 ---
 
@@ -82,7 +82,7 @@ See [Secret Scanning](11-Secret-Scanning) for the full pattern list, custom rule
 
 `--scan-threats` runs a local regex and entropy pass over the diff to flag obfuscated payloads, suspicious API usage, supply-chain hooks, and homoglyph identifiers. Detection is fully local. An optional second pass uses the LLM to triage flagged findings — only the flagged snippets are sent, never the full file.
 
-See [Threat Scanning](12-Threat-Scanning) for details.
+See [Threat Scanning](15-Threat-Scanning) for details.
 
 ---
 
@@ -208,7 +208,7 @@ enabled = false
 
 Commercial license verification is **fully offline**. nitpik embeds an Ed25519 public key in the binary and verifies the license signature locally — there is no license server, no activation callback, and no usage reporting.
 
-License keys are stored in `~/.config/nitpik/config.toml` after activation, or read from `NITPIK_LICENSE_KEY`. Expiry is checked against the local clock. See [Licensing](18-Licensing).
+License keys are stored in `~/.config/nitpik/config.toml` after activation, or read from `NITPIK_LICENSE_KEY`. Expiry is checked against the local clock. See [Licensing](20-Licensing).
 
 ---
 
@@ -235,7 +235,7 @@ The cache stores only structured findings — the source code that produced them
 - **Use `--no-telemetry`** if your environment forbids outbound non-essential telemetry.
 - **Enable `--scan-secrets`** as a safety net. It is not a replacement for proper secret hygiene, but it catches accidents.
 
-See [CI/CD Integration](15-CI-Integration) for per-platform examples.
+See [CI/CD Integration](17-CI-Integration) for per-platform examples.
 
 ---
 
@@ -247,9 +247,9 @@ Please use [GitHub Private Vulnerability Reporting](https://github.com/nsrosenqv
 
 ## Related Pages
 
-- [Secret Scanning](11-Secret-Scanning)
-- [Threat Scanning](12-Threat-Scanning)
-- [Agentic Mode](07-Agentic-Mode) — built-in and custom tools
-- [Custom Profiles](06-Custom-Profiles) — `environment` and `tools` frontmatter
-- [Configuration](14-Configuration) — telemetry, secrets, and audit log keys
-- [Licensing](18-Licensing) — offline license verification
+- [Secret Scanning](14-Secret-Scanning)
+- [Threat Scanning](15-Threat-Scanning)
+- [Agentic Mode](08-Agentic-Mode) — built-in and custom tools
+- [Custom Profiles](07-Custom-Profiles) — `environment` and `tools` frontmatter
+- [Configuration](16-Configuration) — telemetry, secrets, and audit log keys
+- [Licensing](20-Licensing) — offline license verification

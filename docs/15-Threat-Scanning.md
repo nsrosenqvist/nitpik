@@ -151,7 +151,7 @@ Threat scanning is a **best-effort defense layer**, not a guarantee. The built-i
 
 ## Related Pages
 
-- [Secret Scanning](11-Secret-Scanning) — credential detection and redaction
-- [How Reviews Work](09-How-Reviews-Work) — where threat scanning fits in the pipeline
-- [Configuration](14-Configuration) — full config reference
-- [CI/CD Integration](15-CI-Integration) — enabling threat scanning in pipelines
+- [Secret Scanning](14-Secret-Scanning) — credential detection and redaction
+- [How Reviews Work](10-How-Reviews-Work) — where threat scanning fits in the pipeline
+- [Configuration](16-Configuration) — full config reference
+- [CI/CD Integration](17-CI-Integration) — enabling threat scanning in pipelines

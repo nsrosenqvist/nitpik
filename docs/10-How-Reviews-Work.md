@@ -8,9 +8,9 @@ nitpik assembles each review to give the LLM the best possible context for preci
 
 When you run `nitpik review`, nitpik parses your diff, gathers relevant context for each changed file, runs your chosen reviewer profiles in parallel, and delivers deduplicated findings in your chosen output format.
 
-If `--scan-secrets` is enabled, secrets are detected and redacted **before** any code is sent to the LLM. See [Secret Scanning](11-Secret-Scanning) for details.
+If `--scan-secrets` is enabled, secrets are detected and redacted **before** any code is sent to the LLM. See [Secret Scanning](14-Secret-Scanning) for details.
 
-If `--scan-threats` is enabled, nitpik also scans for malicious patterns (obfuscation, dangerous APIs, supply chain hooks, backdoors) and optionally triages them with the LLM. See [Threat Scanning](12-Threat-Scanning) for details.
+If `--scan-threats` is enabled, nitpik also scans for malicious patterns (obfuscation, dangerous APIs, supply chain hooks, backdoors) and optionally triages them with the LLM. See [Threat Scanning](15-Threat-Scanning) for details.
 
 ## Context
 
@@ -26,7 +26,7 @@ You can tune this with `max_file_lines` and `surrounding_lines` in your config.
 
 nitpik automatically includes your team's conventions and guidelines. If a `REVIEW.md` or `NITPIK.md` exists in your repo root, those are used as focused review context. Otherwise, nitpik falls back to common documentation files like `AGENTS.md`, `CONVENTIONS.md`, and `CONTRIBUTING.md`.
 
-See [Project Documentation](13-Project-Docs) for details on controlling this.
+See [Project Documentation](12-Project-Docs) for details on controlling this.
 
 ### Commit History
 
@@ -62,7 +62,7 @@ Use `--show-dropped` to print the dropped findings (with rationale) to stderr fo
 
 When a file changes and the cached review is invalidated, nitpik carries forward the previous findings so reviews stay consistent across iterations. The LLM won't flip-flop on findings between runs, and it won't re-report issues you've already fixed.
 
-Prior findings are scoped per branch so parallel PRs don't contaminate each other. See [Caching & Prior Findings](10-Caching) for configuration.
+Prior findings are scoped per branch so parallel PRs don't contaminate each other. See [Caching & Prior Findings](11-Caching) for configuration.
 
 ## Post-Processing
 
@@ -75,8 +75,8 @@ Before findings reach you, nitpik applies quality filters:
 
 ## Related Pages
 
-- [Caching & Prior Findings](10-Caching) — content-hash caching and prior findings configuration
-- [Reviewer Profiles](05-Reviewer-Profiles) — choosing and combining profiles
-- [Agentic Mode](07-Agentic-Mode) — giving the LLM tools to explore your codebase
-- [Secret Scanning](11-Secret-Scanning) — how redaction works
-- [Threat Scanning](12-Threat-Scanning) — malicious pattern detection
+- [Caching & Prior Findings](11-Caching) — content-hash caching and prior findings configuration
+- [Reviewer Profiles](06-Reviewer-Profiles) — choosing and combining profiles
+- [Agentic Mode](08-Agentic-Mode) — giving the LLM tools to explore your codebase
+- [Secret Scanning](14-Secret-Scanning) — how redaction works
+- [Threat Scanning](15-Threat-Scanning) — malicious pattern detection

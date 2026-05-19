@@ -434,6 +434,17 @@ enabled = true
     }
 
     #[test]
+    fn parse_toml_config_github_provider() {
+        let toml_str = r#"
+[provider]
+name = "github"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.provider.name, ProviderName::GitHub);
+        assert_eq!(config.provider.resolved_model(), "openai/gpt-4.1");
+    }
+
+    #[test]
     fn merge_overrides_non_default_values() {
         let mut base = Config::default();
         let mut other = Config::default();

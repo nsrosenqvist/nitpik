@@ -206,7 +206,7 @@ Custom commands run in a sandboxed subprocess with these constraints:
 
 Commands are sandboxed to the repository root. If the LLM passes parameter names not declared in the tool definition, they are silently ignored (and logged in the tool-call audit).
 
-See [Agentic Mode](07-Agentic-Mode) for the full agentic review workflow.
+See [Agentic Mode](08-Agentic-Mode) for the full agentic review workflow.
 
 ## Environment Passthrough
 
@@ -235,7 +235,7 @@ All other env vars are stripped unless explicitly listed in `environment`. Exact
 
 ## Related Pages
 
-- [Reviewer Profiles](05-Reviewer-Profiles) — built-in profiles and selection
-- [Agentic Mode](07-Agentic-Mode) — using tools during reviews
-- [Project Documentation](13-Project-Docs) — teaching the reviewer your conventions via `REVIEW.md`
-- [Configuration](14-Configuration) — `--profile-dir` and related settings
+- [Reviewer Profiles](06-Reviewer-Profiles) — built-in profiles and selection
+- [Agentic Mode](08-Agentic-Mode) — using tools during reviews
+- [Project Documentation](12-Project-Docs) — teaching the reviewer your conventions via `REVIEW.md`
+- [Configuration](16-Configuration) — `--profile-dir` and related settings

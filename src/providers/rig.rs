@@ -415,6 +415,21 @@ impl RigProvider {
                     map_client_err(providers::galadriel::Client::new(api_key), "Galadriel")?;
                 dispatch_review::<_, T>(client.completion_model(model_id), args).await
             }
+            ProviderName::GitHub => {
+                let base_url = self
+                    .config
+                    .base_url
+                    .as_deref()
+                    .unwrap_or("https://models.github.ai/inference");
+                let client: providers::openai::CompletionsClient = map_client_err(
+                    providers::openai::CompletionsClient::builder()
+                        .api_key(api_key)
+                        .base_url(base_url)
+                        .build(),
+                    "GitHub Models",
+                )?;
+                dispatch_review::<_, T>(client.completion_model(model_id), args).await
+            }
             ProviderName::OpenAICompatible => {
                 let base_url = self.require_base_url()?;
                 let client: providers::openai::CompletionsClient = map_client_err(

@@ -13,6 +13,7 @@ nitpik is bring-your-own-model. You choose the LLM provider and supply your own 
 | Cohere | `cohere` | `COHERE_API_KEY` |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` |
 | Galadriel | `galadriel` | `GALADRIEL_API_KEY` |
+| GitHub Models | `github` | `GITHUB_TOKEN` |
 | Google Gemini | `gemini` | `GEMINI_API_KEY` |
 | Groq | `groq` | `GROQ_API_KEY` |
 | HuggingFace | `huggingface` | `HUGGINGFACE_API_KEY` |
@@ -71,6 +72,7 @@ model = "claude-sonnet-4-20250514"
 | Cohere | `command-r-plus` |
 | DeepSeek | `deepseek-chat` |
 | Galadriel | `llama3.1-70b` |
+| GitHub Models | `openai/gpt-4.1` |
 | Google Gemini | `gemini-2.5-flash` |
 | Groq | `llama-3.3-70b-versatile` |
 | HuggingFace | `meta-llama/Llama-3.1-70B-Instruct` |
@@ -139,7 +141,7 @@ model: claude-sonnet-4-20250514
 ---
 ```
 
-See [Custom Profiles](06-Custom-Profiles) for the full profile format.
+See [Custom Profiles](07-Custom-Profiles) for the full profile format.
 
 ## Config File Setup
 
@@ -154,7 +156,7 @@ model = "claude-sonnet-4-20250514"
 
 Or in your global config at `~/.config/nitpik/config.toml` to set a default for all repositories.
 
-See [Configuration](14-Configuration) for the full layering order.
+See [Configuration](16-Configuration) for the full layering order.
 
 ## Prompt Caching
 
@@ -170,6 +172,7 @@ the input-token bill substantially on big diffs.
 | OpenAI | yes (automatic) | provider caches prompts ≥ 1024 input tokens |
 | Gemini | yes (implicit) | context cache kicks in above provider thresholds |
 | Azure OpenAI | yes (automatic) | inherits OpenAI's behavior |
+| GitHub Models | unknown | upstream caching behavior not documented |
 | Cohere, DeepSeek, Groq, Mistral, others | none / provider-controlled | no client opt-in |
 
 When cache hits occur, the run summary surfaces them:
@@ -184,6 +187,7 @@ the cache section from the summary.
 
 ## Related Pages
 
+- [GitHub Models](04-GitHub-Models) — free GitHub-hosted inference with `GITHUB_TOKEN`, ideal for CI
 - [Quick Start](02-Quick-Start) — run your first review
-- [Configuration](14-Configuration) — all config options
-- [Custom Profiles](06-Custom-Profiles) — per-profile model overrides
+- [Configuration](16-Configuration) — all config options
+- [Custom Profiles](07-Custom-Profiles) — per-profile model overrides

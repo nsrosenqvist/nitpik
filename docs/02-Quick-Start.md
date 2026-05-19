@@ -69,14 +69,14 @@ Each finding includes:
 
 ## What's Next?
 
-- **Run multiple reviewers** — add `--profile backend,security` to get specialist perspectives. See [Reviewer Profiles](05-Reviewer-Profiles).
-- **Set up CI** — output findings as GitHub annotations, GitLab Code Quality, or Bitbucket Code Insights. See [CI/CD Integration](15-CI-Integration).
-- **Enable secret scanning** — add `--scan-secrets` to detect and redact secrets before they reach the LLM. See [Secret Scanning](11-Secret-Scanning).
-- **Explore agentic mode** — add `--agent` to let the LLM read files and search your codebase for deeper analysis. See [Agentic Mode](07-Agentic-Mode).
-- **Create team config** — drop a `.nitpik.toml` in your repo root. See [Configuration](14-Configuration).
+- **Run multiple reviewers** — add `--profile backend,security` to get specialist perspectives. See [Reviewer Profiles](06-Reviewer-Profiles).
+- **Set up CI** — output findings as GitHub annotations, GitLab Code Quality, or Bitbucket Code Insights. See [CI/CD Integration](17-CI-Integration).
+- **Enable secret scanning** — add `--scan-secrets` to detect and redact secrets before they reach the LLM. See [Secret Scanning](14-Secret-Scanning).
+- **Explore agentic mode** — add `--agent` to let the LLM read files and search your codebase for deeper analysis. See [Agentic Mode](08-Agentic-Mode).
+- **Create team config** — drop a `.nitpik.toml` in your repo root. See [Configuration](16-Configuration).
 
 ## Related Pages
 
 - [Installation](01-Installation) — all install methods
 - [LLM Providers](03-Providers) — provider setup details
-- [Diff Inputs](04-Diff-Inputs) — all the ways to feed code to nitpik
+- [Diff Inputs](05-Diff-Inputs) — all the ways to feed code to nitpik

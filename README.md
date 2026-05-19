@@ -4,7 +4,7 @@
 
 AI-powered code reviews for your team. Bring your own model, bring your own API key. One flat platform fee — no per-seat charges, no usage caps.
 
-[Website](https://nitpik.dev) · [Documentation](https://github.com/nsrosenqvist/nitpik/wiki) · [Security Model](https://github.com/nsrosenqvist/nitpik/wiki/19-Security-Model) · [Get a License](https://nitpik.dev) · `nitpik help`
+[Website](https://nitpik.dev) · [Documentation](https://github.com/nsrosenqvist/nitpik/wiki) · [Security Model](https://github.com/nsrosenqvist/nitpik/wiki/13-Security-Model) · [Get a License](https://nitpik.dev) · `nitpik help`
 
 ---
 
@@ -313,7 +313,7 @@ nitpik review --diff-base main --profile ./team-conventions.md
 nitpik review --diff-base main --profile-dir ./agents --profile team-conventions
 ```
 
-A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`, `general`) replaces that built-in when `--profile-dir` is set — useful for tuning the shipped reviewers to your team without forking the project. Set `always_include: true` in a profile's frontmatter to include it in every `auto` review (the built-in `security` profile uses this; you can opt out by overriding it). See [Custom Profiles → Overriding Built-In Profiles](docs/06-Custom-Profiles.md#overriding-built-in-profiles) and [Always-On Profiles](docs/06-Custom-Profiles.md#always-on-profiles) for details.
+A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`, `general`) replaces that built-in when `--profile-dir` is set — useful for tuning the shipped reviewers to your team without forking the project. Set `always_include: true` in a profile's frontmatter to include it in every `auto` review (the built-in `security` profile uses this; you can opt out by overriding it). See [Custom Profiles → Overriding Built-In Profiles](docs/07-Custom-Profiles.md#overriding-built-in-profiles) and [Always-On Profiles](docs/07-Custom-Profiles.md#always-on-profiles) for details.
 
 Validate a profile before using it:
 

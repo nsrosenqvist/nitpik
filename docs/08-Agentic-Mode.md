@@ -61,7 +61,7 @@ Terminal tool the LLM calls to submit its final findings as structured JSON. Alw
 
 ## Custom Tools
 
-Profiles can define additional CLI tools. See [Custom Profiles — Custom Agentic Tools](06-Custom-Profiles#custom-agentic-tools) for the full format.
+Profiles can define additional CLI tools. See [Custom Profiles — Custom Agentic Tools](07-Custom-Profiles#custom-agentic-tools) for the full format.
 
 ```bash
 nitpik review --diff-base main --profile ./test-aware-reviewer.md --agent
@@ -119,7 +119,7 @@ If your custom profile includes an `agentic_instructions` field in its frontmatt
 
 ## Related Pages
 
-- [Custom Profiles](06-Custom-Profiles) — define custom tools and agentic instructions
-- [Reviewer Profiles](05-Reviewer-Profiles) — choosing profiles
-- [How Reviews Work](09-How-Reviews-Work) — the full review pipeline
-- [Configuration](14-Configuration) — agentic config options
+- [Custom Profiles](07-Custom-Profiles) — define custom tools and agentic instructions
+- [Reviewer Profiles](06-Reviewer-Profiles) — choosing profiles
+- [How Reviews Work](10-How-Reviews-Work) — the full review pipeline
+- [Configuration](16-Configuration) — agentic config options

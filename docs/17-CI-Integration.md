@@ -223,7 +223,7 @@ For CI platforms without a dedicated output format, use `--format checkstyle` to
 nitpik review --diff-base main --format checkstyle | reviewdog -f=checkstyle -reporter=github-pr-review
 ```
 
-See [Output Formats — Checkstyle XML](08-Output-Formats#checkstyle-xml) for details.
+See [Output Formats — Checkstyle XML](09-Output-Formats#checkstyle-xml) for details.
 
 ## Woodpecker CI (Forgejo / Gitea / Codeberg)
 
@@ -305,7 +305,7 @@ Use `--audit-log <PATH>` (or `NITPIK_AUDIT_LOG`) to write a JSON record of the r
 
 ## Related Pages
 
-- [Output Formats](08-Output-Formats) — format details and `--fail-on` behavior
-- [Configuration](14-Configuration) — environment variables and config files
-- [Secret Scanning](11-Secret-Scanning) — enabling secret detection
-- [Caching](10-Caching) — how caching saves API cost
+- [Output Formats](09-Output-Formats) — format details and `--fail-on` behavior
+- [Configuration](16-Configuration) — environment variables and config files
+- [Secret Scanning](14-Secret-Scanning) — enabling secret detection
+- [Caching](11-Caching) — how caching saves API cost

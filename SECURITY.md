@@ -33,4 +33,4 @@ Out of scope: third-party LLM provider APIs, user-authored custom profiles, and 
 
 ## Security Model
 
-For a transparent breakdown of what nitpik sends to LLM providers, how it sandboxes subprocess tools, what it stores on disk, and what it deliberately does not protect against, see the [Security Model](https://github.com/nsrosenqvist/nitpik/wiki/19-Security-Model) wiki page.
+For a transparent breakdown of what nitpik sends to LLM providers, how it sandboxes subprocess tools, what it stores on disk, and what it deliberately does not protect against, see the [Security Model](https://github.com/nsrosenqvist/nitpik/wiki/13-Security-Model) wiki page.

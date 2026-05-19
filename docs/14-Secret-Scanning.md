@@ -87,7 +87,7 @@ Secret scanning is a **best-effort safety net**, not a guarantee. The built-in r
 
 ## Related Pages
 
-- [Threat Scanning](12-Threat-Scanning) — malicious pattern detection (complementary to secret scanning)
-- [How Reviews Work](09-How-Reviews-Work) — where secret scanning fits in the pipeline
-- [Configuration](14-Configuration) — secrets config section
-- [CI/CD Integration](15-CI-Integration) — enabling secret scanning in pipelines
+- [Threat Scanning](15-Threat-Scanning) — malicious pattern detection (complementary to secret scanning)
+- [How Reviews Work](10-How-Reviews-Work) — where secret scanning fits in the pipeline
+- [Configuration](16-Configuration) — secrets config section
+- [CI/CD Integration](17-CI-Integration) — enabling secret scanning in pipelines
