@@ -47,6 +47,10 @@ struct TrustedKey {
 /// To replace this with a production key, run
 /// `node scripts/derive-public-key.mjs --generate` in the nitpik-web
 /// repo and paste the resulting 32-byte raw key bytes here.
+/// Issuer claim the CLI requires on every entitlement JWT. A token
+/// signed by a trusted key but issued by some other service is rejected.
+const EXPECTED_ISS: &str = "https://nitpik.dev";
+
 const TRUSTED_KEYS: &[TrustedKey] = &[TrustedKey {
     kid: "ed25519-2026-01",
     bytes: [
@@ -154,7 +158,6 @@ struct JwtHeader {
 
 #[derive(Deserialize)]
 struct JwtPayload {
-    #[allow(dead_code)]
     iss: String,
     sub: String,
     #[allow(dead_code)]
@@ -167,8 +170,9 @@ struct JwtPayload {
 }
 
 /// Verify a JWT's signature against a bundled public key (selected by
-/// the `kid` header) and parse the claims. Also checks that `exp` is
-/// in the future with ±5 minutes of skew tolerance.
+/// the `kid` header) and parse the claims. Also checks that `iss`
+/// matches [`EXPECTED_ISS`] and that `exp` is in the future with
+/// ±5 minutes of skew tolerance.
 pub fn verify_jwt(jwt: &str) -> Result<LicenseClaims, LicenseError> {
     let parts: Vec<&str> = jwt.trim().split('.').collect();
     if parts.len() != 3 {
@@ -201,6 +205,13 @@ pub fn verify_jwt(jwt: &str) -> Result<LicenseClaims, LicenseError> {
     let payload_bytes = b64url_decode(parts[1])?;
     let payload: JwtPayload = serde_json::from_slice(&payload_bytes)
         .map_err(|e| LicenseError::InvalidClaims(e.to_string()))?;
+
+    if payload.iss != EXPECTED_ISS {
+        return Err(LicenseError::InvalidClaims(format!(
+            "unexpected issuer: {}",
+            payload.iss
+        )));
+    }
 
     // ±5 min skew tolerance.
     let now = current_unix_seconds();
@@ -582,6 +593,22 @@ mod tests {
         );
         let jwt = sign_test_jwt(&sk, "future-key-id", &payload);
         assert!(matches!(verify_jwt(&jwt), Err(LicenseError::UnknownKid(_))));
+    }
+
+    #[test]
+    fn verify_jwt_rejects_wrong_issuer() {
+        let (sk, _) = signing_keypair();
+        let payload = format!(
+            r#"{{"iss":"https://evil.example","sub":"usr_1","iat":0,"exp":{},"subscription_id":"sub_x","plan":"monthly","type":"online"}}"#,
+            future_exp()
+        );
+        let jwt = sign_test_jwt(&sk, "ed25519-2026-01", &payload);
+        match verify_jwt(&jwt) {
+            Err(LicenseError::InvalidClaims(msg)) => {
+                assert!(msg.contains("issuer"), "expected issuer error, got: {msg}");
+            }
+            other => panic!("expected InvalidClaims, got: {other:?}"),
+        }
     }
 
     #[test]
