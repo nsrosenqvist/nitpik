@@ -90,8 +90,171 @@ jobs:
           name: patched-manifest
           path: Cargo.toml
 
-  release:
+  # Bundle the matching nitpik release binary into a platform-specific VSIX so
+  # the Marketplace auto-serves the right one (VS Code >=1.61). Mirrors the
+  # `build` target matrix; platforms without a release binary fall back to the
+  # universal VSIX below (which resolves nitpik from PATH / the `nitpik.path`
+  # setting).
+  package-vscode:
     needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rust_target: x86_64-unknown-linux-gnu
+            vsce_target: linux-x64
+          - rust_target: aarch64-unknown-linux-gnu
+            vsce_target: linux-arm64
+          - rust_target: x86_64-apple-darwin
+            vsce_target: darwin-x64
+          - rust_target: aarch64-apple-darwin
+            vsce_target: darwin-arm64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download nitpik binary for ${{ matrix.rust_target }}
+        uses: actions/download-artifact@v7
+        with:
+          name: nitpik-${{ matrix.rust_target }}
+          path: bin-artifact
+
+      - name: Stage binary into the extension
+        run: |
+          mkdir -p editors/vscode/bin
+          tar xzf "bin-artifact/nitpik-${{ matrix.rust_target }}.tar.gz" -C editors/vscode/bin
+          chmod +x editors/vscode/bin/nitpik
+          # vsce packages on a unix runner, so the executable bit is preserved
+          # in the VSIX zip for both the linux and darwin payloads.
+
+      - name: Sync extension version and license with the tag
+        run: |
+          # Marketplace requires a plain major.minor.patch; drop any pre-release
+          # suffix so an rc tag still produces a valid (un-published) VSIX.
+          VERSION="${GITHUB_REF_NAME#v}"
+          CLEAN_VERSION="${VERSION%%-*}"
+          cd editors/vscode
+          npm version "$CLEAN_VERSION" --no-git-tag-version --allow-same-version
+          cp ../../LICENSE LICENSE
+
+      - name: Build and package VSIX
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run build
+          # --no-dependencies: the extension is a single esbuild bundle, so vsce
+          # must not try to analyze or include node_modules.
+          npx --yes @vscode/vsce@3 package \
+            --target ${{ matrix.vsce_target }} \
+            --no-dependencies \
+            -o "nitpik-${{ matrix.vsce_target }}.vsix"
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: vsix-${{ matrix.vsce_target }}
+          path: editors/vscode/*.vsix
+
+  # Platform-agnostic VSIX with no bundled binary, for any platform the binary
+  # matrix doesn't cover (Windows, Alpine, 32-bit ARM, …). nitpik is resolved
+  # from PATH or the `nitpik.path` setting.
+  package-vscode-universal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sync extension version and license with the tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CLEAN_VERSION="${VERSION%%-*}"
+          cd editors/vscode
+          npm version "$CLEAN_VERSION" --no-git-tag-version --allow-same-version
+          cp ../../LICENSE LICENSE
+
+      - name: Build and package universal VSIX
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run build
+          npx --yes @vscode/vsce@3 package \
+            --no-dependencies \
+            -o "nitpik-universal.vsix"
+
+      - name: Upload universal VSIX artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: vsix-universal
+          path: editors/vscode/*.vsix
+
+  # The Claude Code plugin ships config only (no binary): validate the manifests
+  # and the marketplace catalog, sync the version, and archive the plugin dir.
+  package-claude-code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Sync plugin version with the tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CLEAN_VERSION="${VERSION%%-*}"
+          MANIFEST="editors/claude-code/.claude-plugin/plugin.json"
+          node -e '
+            const fs = require("node:fs");
+            const p = process.argv[1], v = process.argv[2];
+            const m = JSON.parse(fs.readFileSync(p, "utf8"));
+            m.version = v;
+            fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+          ' "$MANIFEST" "$CLEAN_VERSION"
+
+      - name: Validate plugin and marketplace manifests
+        run: |
+          # Hard gate: every manifest must be valid JSON with its required keys,
+          # and the marketplace must point at a real plugin directory.
+          node -e '
+            const fs = require("node:fs");
+            const must = (cond, msg) => { if (!cond) { console.error("✗ " + msg); process.exit(1); } };
+
+            const plugin = JSON.parse(fs.readFileSync("editors/claude-code/.claude-plugin/plugin.json", "utf8"));
+            must(plugin.name, "plugin.json: missing name");
+            must(plugin.version, "plugin.json: missing version");
+
+            const mcp = JSON.parse(fs.readFileSync("editors/claude-code/.mcp.json", "utf8"));
+            must(mcp.mcpServers && mcp.mcpServers.nitpik, ".mcp.json: missing mcpServers.nitpik");
+
+            const market = JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json", "utf8"));
+            must(market.name, "marketplace.json: missing name");
+            must(Array.isArray(market.plugins) && market.plugins.length, "marketplace.json: no plugins");
+            for (const entry of market.plugins) {
+              must(entry.name && entry.source, "marketplace.json: plugin needs name + source");
+              if (typeof entry.source === "string") {
+                must(entry.source.startsWith("./"), `marketplace.json: relative source must start with ./ (${entry.source})`);
+                must(fs.existsSync(entry.source), `marketplace.json: source path not found (${entry.source})`);
+              }
+            }
+            console.log("✓ plugin, mcp, and marketplace manifests valid");
+          '
+
+      - name: Archive plugin
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          (cd editors && zip -r "../nitpik-claude-code-${VERSION}.zip" claude-code)
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: claude-code-plugin
+          path: nitpik-claude-code-*.zip
+
+  release:
+    needs: [build, package-vscode, package-vscode-universal, package-claude-code]
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -108,7 +271,9 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum *.tar.gz > SHA256SUMS
+          # Cover every distributable: CLI tarballs, the VSIX matrix, and the
+          # Claude Code plugin archive.
+          sha256sum *.tar.gz *.vsix *.zip > SHA256SUMS
 
       - name: Generate release notes
         uses: nsrosenqvist/chronikl@v1
@@ -128,6 +293,8 @@ jobs:
           prerelease: ${{ needs.build.outputs.is_prerelease == 'true' }}
           files: |
             artifacts/*.tar.gz
+            artifacts/*.vsix
+            artifacts/*.zip
             artifacts/SHA256SUMS
 
   publish:
@@ -148,6 +315,32 @@ jobs:
         run: cargo publish --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-vscode:
+    # Publish every platform VSIX (plus the universal fallback) to the VS Code
+    # Marketplace in one shot; the Marketplace serves each client the matching
+    # platform build. Stable releases only, matching the other publish jobs.
+    needs: [release, build]
+    if: needs.build.outputs.is_prerelease != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download VSIX artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: vsix-*
+          path: vsix
+          merge-multiple: true
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          npx --yes @vscode/vsce@3 publish \
+            $(printf -- '--packagePath %s ' vsix/*.vsix)
 
   update-homebrew:
     needs: [release, build]

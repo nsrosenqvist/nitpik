@@ -1,0 +1,23 @@
+{
+  "name": "nitpik",
+  "owner": {
+    "name": "Niklas Rosenqvist",
+    "email": "niklas.rosenqvist@proton.me"
+  },
+  "metadata": {
+    "description": "AI-powered code review for Claude Code and other agents.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "nitpik",
+      "source": "./editors/claude-code",
+      "description": "Exposes nitpik's review engine as MCP tools (nitpik_review_diff, nitpik_review_files, nitpik_list_profiles). Requires the nitpik binary on PATH and an active subscription.",
+      "homepage": "https://nitpik.dev",
+      "license": "BUSL-1.1",
+      "author": {
+        "name": "Niklas Rosenqvist"
+      }
+    }
+  ]
+}

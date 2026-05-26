@@ -1,0 +1,15 @@
+# The extension ships as a single esbuild bundle (dist/extension.js) plus,
+# in platform-specific VSIXs, the nitpik binary under bin/. Everything else
+# is build-time only and is excluded from the package.
+
+.vscode/**
+.gitignore
+.vscodeignore
+src/**
+node_modules/**
+esbuild.config.mjs
+tsconfig.json
+package-lock.json
+**/*.ts
+**/*.map
+**/tsconfig.json

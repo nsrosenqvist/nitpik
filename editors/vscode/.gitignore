@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.vsix
+# Staged into the package by CI (bundled binary + license copied from repo root).
+bin/
+LICENSE
