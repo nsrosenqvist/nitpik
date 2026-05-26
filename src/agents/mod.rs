@@ -65,41 +65,40 @@ pub async fn list_all_profiles(
     // Custom profiles from agent_dir take precedence — load them first
     // so we know which built-in names to skip.
     let mut custom_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-    if let Some(dir) = agent_dir {
-        if dir.is_dir() {
-            let mut entries =
-                tokio::fs::read_dir(dir)
-                    .await
-                    .map_err(|e| AgentError::ReadError {
-                        path: dir.display().to_string(),
-                        source: e,
-                    })?;
+    if let Some(dir) = agent_dir
+        && dir.is_dir()
+    {
+        let mut entries = tokio::fs::read_dir(dir)
+            .await
+            .map_err(|e| AgentError::ReadError {
+                path: dir.display().to_string(),
+                source: e,
+            })?;
 
-            while let Some(entry) =
-                entries
-                    .next_entry()
-                    .await
-                    .map_err(|e| AgentError::ReadError {
-                        path: dir.display().to_string(),
-                        source: e,
-                    })?
-            {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "md") {
-                    let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
-                        AgentError::ReadError {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| AgentError::ReadError {
+                path: dir.display().to_string(),
+                source: e,
+            })?
+        {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                let content =
+                    tokio::fs::read_to_string(&path)
+                        .await
+                        .map_err(|e| AgentError::ReadError {
                             path: path.display().to_string(),
                             source: e,
-                        }
-                    })?;
-                    match parser::parse_agent_definition(&content) {
-                        Ok(agent) => {
-                            custom_names.insert(agent.profile.name.clone());
-                            agents.push(agent);
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: skipping {}: {e}", path.display());
-                        }
+                        })?;
+                match parser::parse_agent_definition(&content) {
+                    Ok(agent) => {
+                        custom_names.insert(agent.profile.name.clone());
+                        agents.push(agent);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: skipping {}: {e}", path.display());
                     }
                 }
             }

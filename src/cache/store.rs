@@ -68,10 +68,10 @@ impl FileStore {
     /// Remove all cached entries.
     pub async fn clear(&self) -> Result<CacheStats, std::io::Error> {
         let stats = self.stats().await;
-        if let Some(ref dir) = self.cache_dir {
-            if tokio::fs::try_exists(dir).await.unwrap_or(false) {
-                tokio::fs::remove_dir_all(dir).await?;
-            }
+        if let Some(ref dir) = self.cache_dir
+            && tokio::fs::try_exists(dir).await.unwrap_or(false)
+        {
+            tokio::fs::remove_dir_all(dir).await?;
         }
         stats
     }
@@ -218,10 +218,11 @@ impl FileStore {
             let Ok(modified) = metadata.modified() else {
                 continue;
             };
-            if let Ok(age) = now.duration_since(modified) {
-                if age > max_age && tokio::fs::remove_file(&path).await.is_ok() {
-                    removed += 1;
-                }
+            if let Ok(age) = now.duration_since(modified)
+                && age > max_age
+                && tokio::fs::remove_file(&path).await.is_ok()
+            {
+                removed += 1;
             }
         }
 

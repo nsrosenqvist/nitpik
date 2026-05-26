@@ -159,10 +159,10 @@ pub fn build_prompt(
     }
 
     // Previous findings (if any)
-    if let Some(findings) = previous_findings {
-        if !findings.is_empty() {
-            prompt.push_str(&format_prior_findings_section(findings));
-        }
+    if let Some(findings) = previous_findings
+        && !findings.is_empty()
+    {
+        prompt.push_str(&format_prior_findings_section(findings));
     }
 
     // Instructions

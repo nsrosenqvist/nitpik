@@ -101,8 +101,10 @@ impl NitpikMcpServer {
                 })
             })
             .collect();
-        Ok(serde_json::to_string_pretty(&serde_json::json!({ "profiles": profiles }))
-            .unwrap_or_else(|_| "{}".to_string()))
+        Ok(
+            serde_json::to_string_pretty(&serde_json::json!({ "profiles": profiles }))
+                .unwrap_or_else(|_| "{}".to_string()),
+        )
     }
 }
 

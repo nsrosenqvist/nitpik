@@ -30,7 +30,10 @@ pub fn print_banner(claims: Option<&LicenseClaims>) {
     match claims {
         Some(c) => {
             let suffix = match c.kind {
-                TokenKind::Online => format!("· Licensed ({}). Thank you for supporting nitpik! ♥", c.plan),
+                TokenKind::Online => format!(
+                    "· Licensed ({}). Thank you for supporting nitpik! ♥",
+                    c.plan
+                ),
                 TokenKind::Offline => format!(
                     "· Licensed ({}, offline token). Thank you for supporting nitpik! ♥",
                     c.plan

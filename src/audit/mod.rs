@@ -192,10 +192,10 @@ impl RunAudit {
     ///
     /// The parent directory is created if it does not already exist.
     pub fn write_to(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         let json = self
             .to_json_string()
@@ -233,10 +233,10 @@ pub async fn scope<F: std::future::Future>(buffer: Option<TaskToolBuffer>, f: F)
 /// active. No-op otherwise.
 pub fn record(entry: &ToolCallEntry) {
     let _ = TASK_BUFFER.try_with(|buf| {
-        if let Some(buf) = buf.as_ref() {
-            if let Ok(mut guard) = buf.lock() {
-                guard.push(entry.clone());
-            }
+        if let Some(buf) = buf.as_ref()
+            && let Ok(mut guard) = buf.lock()
+        {
+            guard.push(entry.clone());
         }
     });
 }

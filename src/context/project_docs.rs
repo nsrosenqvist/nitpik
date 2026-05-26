@@ -67,10 +67,10 @@ async fn load_doc_list(
         }
 
         // Check file size before reading
-        if let Ok(metadata) = tokio::fs::metadata(&path).await {
-            if metadata.len() > crate::constants::MAX_DOC_SIZE {
-                continue;
-            }
+        if let Ok(metadata) = tokio::fs::metadata(&path).await
+            && metadata.len() > crate::constants::MAX_DOC_SIZE
+        {
+            continue;
         }
 
         if let Ok(content) = tokio::fs::read_to_string(&path).await {

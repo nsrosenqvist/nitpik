@@ -417,10 +417,10 @@ fn detect_container_environment() -> Option<&'static str> {
     }
 
     // Check cgroup for container indicators
-    if let Ok(cgroup) = fs::read_to_string("/proc/1/cgroup") {
-        if cgroup.contains("docker") || cgroup.contains("containerd") || cgroup.contains("lxc") {
-            return Some("a container");
-        }
+    if let Ok(cgroup) = fs::read_to_string("/proc/1/cgroup")
+        && (cgroup.contains("docker") || cgroup.contains("containerd") || cgroup.contains("lxc"))
+    {
+        return Some("a container");
     }
 
     // Check for container runtime env vars

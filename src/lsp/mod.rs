@@ -162,7 +162,10 @@ impl Backend {
             let Ok(uri) = Url::from_file_path(&abs) else {
                 continue;
             };
-            by_uri.entry(uri).or_default().push(finding_to_diagnostic(f));
+            by_uri
+                .entry(uri)
+                .or_default()
+                .push(finding_to_diagnostic(f));
         }
 
         let new_uris: HashSet<Url> = by_uri.keys().cloned().collect();
@@ -228,7 +231,10 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "nitpik LSP ready — reviews run on demand")
+            .log_message(
+                MessageType::INFO,
+                "nitpik LSP ready — reviews run on demand",
+            )
             .await;
     }
 
@@ -297,7 +303,10 @@ impl LanguageServer for Backend {
             }
             other => {
                 self.client
-                    .show_message(MessageType::ERROR, format!("nitpik: unknown command {other}"))
+                    .show_message(
+                        MessageType::ERROR,
+                        format!("nitpik: unknown command {other}"),
+                    )
                     .await;
             }
         }

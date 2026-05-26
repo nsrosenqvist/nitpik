@@ -199,9 +199,7 @@ async fn run_license(action: LicenseAction) -> Result<()> {
     match action {
         LicenseAction::Activate { key } => {
             if !license::is_valid_key_format(&key) {
-                bail!(
-                    "license key has invalid format (expected nkp_live_… or nkp_test_…)"
-                );
+                bail!("license key has invalid format (expected nkp_live_… or nkp_test_…)");
             }
 
             write_license_key_to_config(&key)?;
@@ -256,9 +254,7 @@ async fn run_license(action: LicenseAction) -> Result<()> {
                     );
                 }
                 None => {
-                    bail!(
-                        "could not refresh the entitlement — see warnings above for the reason"
-                    );
+                    bail!("could not refresh the entitlement — see warnings above for the reason");
                 }
             }
         }
@@ -423,9 +419,8 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
 
-    let show_threat_progress = !args.quiet
-        && args.format == OutputFormat::Terminal
-        && std::io::stderr().is_terminal();
+    let show_threat_progress =
+        !args.quiet && args.format == OutputFormat::Terminal && std::io::stderr().is_terminal();
 
     let options = review::ReviewOptions {
         profiles: args.profile.clone(),
@@ -460,8 +455,8 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     let agent_defs = review::resolve_agents(&options, &config, diffs, repo_root_path).await?;
 
-    let commit_log = review::build_commit_log(args.no_commit_context, &input_mode, repo_root_path)
-        .await;
+    let commit_log =
+        review::build_commit_log(args.no_commit_context, &input_mode, repo_root_path).await;
     let baseline = context::build_baseline_context(
         repo_root_path,
         diffs,
@@ -728,19 +723,20 @@ fn setup_progress(
         // Offline tokens have a real wall-clock expiry users must manage —
         // surface a soft warning when one is approaching its end. Online
         // entitlements refresh automatically so we stay quiet there.
-        if let Some(claims) = license_claims {
-            if claims.kind == license::TokenKind::Offline {
-                use colored::Colorize;
-                use std::io::Write;
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-                let days_remaining = (claims.expires_at - now) / 86_400;
-                if (0..=14).contains(&days_remaining) {
-                    let stderr = std::io::stderr();
-                    let mut handle = stderr.lock();
-                    let _ = writeln!(
+        if let Some(claims) = license_claims
+            && claims.kind == license::TokenKind::Offline
+        {
+            use colored::Colorize;
+            use std::io::Write;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let days_remaining = (claims.expires_at - now) / 86_400;
+            if (0..=14).contains(&days_remaining) {
+                let stderr = std::io::stderr();
+                let mut handle = stderr.lock();
+                let _ = writeln!(
                         handle,
                         "  {} {}",
                         "⚠".yellow().bold(),
@@ -749,9 +745,8 @@ fn setup_progress(
                         )
                         .yellow(),
                     );
-                    let _ = writeln!(handle);
-                    let _ = handle.flush();
-                }
+                let _ = writeln!(handle);
+                let _ = handle.flush();
             }
         }
 

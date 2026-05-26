@@ -103,11 +103,11 @@ fn extract_hunk_context(content: &str, diff: &FileDiff<'_>, context: usize) -> S
     ranges.sort_by_key(|r| r.0);
     let mut merged: Vec<(usize, usize)> = Vec::new();
     for (start, end) in ranges {
-        if let Some(last) = merged.last_mut() {
-            if start <= last.1 + 1 {
-                last.1 = last.1.max(end);
-                continue;
-            }
+        if let Some(last) = merged.last_mut()
+            && start <= last.1 + 1
+        {
+            last.1 = last.1.max(end);
+            continue;
         }
         merged.push((start, end));
     }
@@ -146,11 +146,11 @@ fn extract_hunk_context(content: &str, diff: &FileDiff<'_>, context: usize) -> S
         prev_end = Some(*end);
     }
 
-    if let Some(pe) = prev_end {
-        if pe + 1 < total {
-            let remaining = total - pe - 1;
-            result.push_str(&format!("\n[... {} lines omitted ...]", remaining));
-        }
+    if let Some(pe) = prev_end
+        && pe + 1 < total
+    {
+        let remaining = total - pe - 1;
+        result.push_str(&format!("\n[... {} lines omitted ...]", remaining));
     }
 
     result

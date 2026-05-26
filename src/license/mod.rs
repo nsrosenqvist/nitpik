@@ -308,10 +308,10 @@ pub fn write_cache(token: &str, api_key: &str, exp_iso: &str) -> std::io::Result
 
 /// Best-effort cache deletion. Missing file is not an error.
 pub fn clear_cache() -> std::io::Result<()> {
-    if let Some(path) = cache_path() {
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
+    if let Some(path) = cache_path()
+        && path.exists()
+    {
+        std::fs::remove_file(path)?;
     }
     Ok(())
 }
@@ -332,8 +332,8 @@ pub async fn fetch_entitlement(
     api_key: &str,
     api_url: &str,
 ) -> Result<(String, String), LicenseError> {
-    let client = crate::http::build_client()
-        .map_err(|e| LicenseError::Network(format!("client: {e}")))?;
+    let client =
+        crate::http::build_client().map_err(|e| LicenseError::Network(format!("client: {e}")))?;
     let url = format!(
         "{}{}",
         api_url.trim_end_matches('/'),
@@ -390,18 +390,16 @@ pub async fn verify_entitlement(
 
     let api_key = config.license.key.as_ref()?;
     if !is_valid_key_format(api_key) {
-        eprintln!(
-            "Warning: license key has invalid format (expected nkp_live_… or nkp_test_…)"
-        );
+        eprintln!("Warning: license key has invalid format (expected nkp_live_… or nkp_test_…)");
         return None;
     }
 
-    if let Some(cached_token) = read_cache(api_key) {
-        if let Ok(claims) = verify_jwt(&cached_token) {
-            return Some(claims);
-        }
-        // Cache verification failed (expired / kid rotated) — fall through to refetch.
+    if let Some(cached_token) = read_cache(api_key)
+        && let Ok(claims) = verify_jwt(&cached_token)
+    {
+        return Some(claims);
     }
+    // Cache verification failed (expired / kid rotated) — fall through to refetch.
 
     let api_url = env
         .var(crate::constants::ENV_API_URL)
@@ -425,9 +423,7 @@ pub async fn verify_entitlement(
             None
         }
         Err(LicenseError::SubscriptionInactive) => {
-            eprintln!(
-                "Warning: subscription is not active. Manage at https://nitpik.dev/account."
-            );
+            eprintln!("Warning: subscription is not active. Manage at https://nitpik.dev/account.");
             None
         }
         Err(LicenseError::Network(msg)) => {
@@ -502,11 +498,7 @@ mod tests {
     }
 
     /// Manually sign a JWT for tests — mirrors what the Worker does.
-    fn sign_test_jwt(
-        sk: &SigningKey,
-        kid: &str,
-        payload_json: &str,
-    ) -> String {
+    fn sign_test_jwt(sk: &SigningKey, kid: &str, payload_json: &str) -> String {
         use ed25519_dalek::Signer;
         let header = format!(r#"{{"alg":"EdDSA","typ":"JWT","kid":"{kid}"}}"#);
         let h_b64 = general_purpose::URL_SAFE_NO_PAD.encode(header.as_bytes());
@@ -626,7 +618,10 @@ mod tests {
             r#"{"iss":"https://nitpik.dev","sub":"attacker","iat":0,"exp":9999999999,"subscription_id":"sub_x","plan":"monthly","type":"online"}"#.as_bytes(),
         );
         let tampered = format!("{}.{}.{}", parts[0], tampered_payload, parts[2]);
-        assert!(matches!(verify_jwt(&tampered), Err(LicenseError::InvalidSignature)));
+        assert!(matches!(
+            verify_jwt(&tampered),
+            Err(LicenseError::InvalidSignature)
+        ));
     }
 
     #[test]

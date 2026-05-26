@@ -216,10 +216,10 @@ pub async fn search_text(
                     continue;
                 }
 
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.len() > MAX_FILE_BYTES {
-                        continue;
-                    }
+                if let Ok(metadata) = entry.metadata()
+                    && metadata.len() > MAX_FILE_BYTES
+                {
+                    continue;
                 }
 
                 let Ok(content) = std::fs::read_to_string(entry.path()) else {

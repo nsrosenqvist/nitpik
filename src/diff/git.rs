@@ -45,13 +45,12 @@ pub async fn detect_branch(repo_root: &Path, env: &Env) -> String {
         .current_dir(repo_root)
         .output()
         .await
+        && output.status.success()
     {
-        if output.status.success() {
-            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            // "HEAD" means detached — fall through to CI env vars
-            if !branch.is_empty() && branch != "HEAD" {
-                return branch;
-            }
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // "HEAD" means detached — fall through to CI env vars
+        if !branch.is_empty() && branch != "HEAD" {
+            return branch;
         }
     }
 

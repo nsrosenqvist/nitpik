@@ -206,11 +206,11 @@ fn extract_json_candidates(text: &str) -> Vec<String> {
     // Second: bracket extraction — find the first '[' and last ']'.
     // This is the most robust strategy when the response contains
     // nested code fences inside JSON string values.
-    if let (Some(start), Some(end)) = (text.find('['), text.rfind(']')) {
-        if start < end {
-            let slice = &text[start..=end];
-            candidates.push(slice.to_string());
-        }
+    if let (Some(start), Some(end)) = (text.find('['), text.rfind(']'))
+        && start < end
+    {
+        let slice = &text[start..=end];
+        candidates.push(slice.to_string());
     }
 
     // Third: extract content from markdown code fences.

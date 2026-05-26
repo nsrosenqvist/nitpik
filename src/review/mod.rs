@@ -167,13 +167,18 @@ impl ProgressReporter for NoopProgress {
 /// the editor and agent surfaces are gated. Returns a user-facing message
 /// when no active entitlement is present.
 pub async fn require_entitlement(config: &Config, env: &Env) -> std::result::Result<(), String> {
-    if crate::license::verify_entitlement(config, env).await.is_some() {
+    if crate::license::verify_entitlement(config, env)
+        .await
+        .is_some()
+    {
         Ok(())
     } else {
-        Err("nitpik: an active subscription is required for editor and agent \
+        Err(
+            "nitpik: an active subscription is required for editor and agent \
              integrations. Sign in and manage your subscription at \
              https://nitpik.dev/account."
-            .to_string())
+                .to_string(),
+        )
     }
 }
 
@@ -393,9 +398,10 @@ pub async fn resolve_agents(
 
     // Tags: add any profiles matching the requested tags (deduped by name).
     if !options.tags.is_empty() {
-        let by_tag = agents::resolve_profiles_by_tags(&options.tags, options.profile_dir.as_deref())
-            .await
-            .context("failed to resolve profiles by tag")?;
+        let by_tag =
+            agents::resolve_profiles_by_tags(&options.tags, options.profile_dir.as_deref())
+                .await
+                .context("failed to resolve profiles by tag")?;
         let existing_names: std::collections::HashSet<String> =
             agent_defs.iter().map(|a| a.profile.name.clone()).collect();
         for agent in by_tag {
@@ -473,7 +479,10 @@ fn build_review_context<'a>(
     baseline: models::BaselineContext,
     repo_root: &str,
     is_path_scan: bool,
-) -> Result<(models::context::ReviewContext<'a>, Vec<models::finding::Finding>)> {
+) -> Result<(
+    models::context::ReviewContext<'a>,
+    Vec<models::finding::Finding>,
+)> {
     if !options.scan_secrets {
         let ctx = models::context::ReviewContext {
             diffs: diffs.to_vec(),
@@ -486,11 +495,8 @@ fn build_review_context<'a>(
 
     let mut rules = security::rules::default_rules();
 
-    let config_rules_path: Option<PathBuf> = config
-        .secrets
-        .additional_rules
-        .as_ref()
-        .map(PathBuf::from);
+    let config_rules_path: Option<PathBuf> =
+        config.secrets.additional_rules.as_ref().map(PathBuf::from);
     let rules_path = options
         .secrets_rules
         .as_deref()
@@ -534,11 +540,8 @@ async fn run_threat_scan(
     provider: &dyn ReviewProvider,
 ) -> (Vec<models::finding::Finding>, models::TokenUsage) {
     let mut threat_rules = threat::rules::default_rules();
-    let config_threat_path: Option<PathBuf> = config
-        .threats
-        .additional_rules
-        .as_ref()
-        .map(PathBuf::from);
+    let config_threat_path: Option<PathBuf> =
+        config.threats.additional_rules.as_ref().map(PathBuf::from);
     let threat_rules_path = options
         .threat_rules
         .as_deref()

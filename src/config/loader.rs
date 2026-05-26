@@ -210,11 +210,11 @@ impl Config {
         let mut config = Config::default();
 
         // Layer 4: global config
-        if let Some(global_path) = Self::global_config_path() {
-            if global_path.exists() {
-                let global = Self::load_file(&global_path)?;
-                config.merge(global);
-            }
+        if let Some(global_path) = Self::global_config_path()
+            && global_path.exists()
+        {
+            let global = Self::load_file(&global_path)?;
+            config.merge(global);
         }
 
         // Layer 3: repo-local config
@@ -385,10 +385,10 @@ impl Config {
         }
 
         // Audit log destination
-        if let Ok(val) = env.var(crate::constants::ENV_AUDIT_LOG) {
-            if !val.is_empty() {
-                self.review.audit_log = Some(PathBuf::from(val));
-            }
+        if let Ok(val) = env.var(crate::constants::ENV_AUDIT_LOG)
+            && !val.is_empty()
+        {
+            self.review.audit_log = Some(PathBuf::from(val));
         }
     }
 }
