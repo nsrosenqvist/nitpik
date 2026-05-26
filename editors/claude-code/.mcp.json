@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nitpik": {
+      "command": "nitpik",
+      "args": ["serve", "mcp"]
+    }
+  }
+}

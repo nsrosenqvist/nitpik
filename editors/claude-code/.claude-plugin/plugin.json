@@ -1,0 +1,11 @@
+{
+  "name": "nitpik",
+  "description": "AI-powered code review — exposes nitpik's review engine as MCP tools (nitpik_review_diff, nitpik_review_files, nitpik_list_profiles).",
+  "version": "3.0.0",
+  "author": {
+    "name": "Niklas Rosenqvist"
+  },
+  "homepage": "https://nitpik.dev",
+  "repository": "https://github.com/nsrosenqvist/nitpik",
+  "license": "BUSL-1.1"
+}

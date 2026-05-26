@@ -11,6 +11,7 @@
 - [Custom Profiles](07-Custom-Profiles)
 - [Agentic Mode](08-Agentic-Mode)
 - [Output Formats](09-Output-Formats)
+- [Editor & Agent Integrations](21-Editor-Integrations)
 
 **How It Works**
 - [How Reviews Work](10-How-Reviews-Work)
