@@ -121,6 +121,11 @@ impl NitpikMcpServer {
         let env = Env::real();
         let config = Config::load(Some(repo_root_path), &env)?;
 
+        // Editor/agent reviews require an active subscription.
+        review::require_entitlement(&config, &env)
+            .await
+            .map_err(|m| anyhow::anyhow!(m))?;
+
         let diff_source = diff::get_diff_source(&input_mode, repo_root_path).await?;
         let parsed_diffs;
         let diffs: &[crate::models::FileDiff<'_>] = match &diff_source {

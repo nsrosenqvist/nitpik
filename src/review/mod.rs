@@ -160,6 +160,23 @@ impl ProgressReporter for NoopProgress {
     fn finish(&self) {}
 }
 
+/// Ensure the process holds an active subscription entitlement, as required
+/// for editor/agent (LSP/MCP) reviews.
+///
+/// Unlike the CLI — which degrades to free-tier on a missing entitlement —
+/// the editor and agent surfaces are gated. Returns a user-facing message
+/// when no active entitlement is present.
+pub async fn require_entitlement(config: &Config, env: &Env) -> std::result::Result<(), String> {
+    if crate::license::verify_entitlement(config, env).await.is_some() {
+        Ok(())
+    } else {
+        Err("nitpik: an active subscription is required for editor and agent \
+             integrations. Sign in and manage your subscription at \
+             https://nitpik.dev/account."
+            .to_string())
+    }
+}
+
 /// Resolve the repository root for a `--path` argument.
 ///
 /// Falls back to the provided directory when it is not inside a git repo
