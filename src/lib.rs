@@ -21,6 +21,7 @@ pub mod orchestrator;
 pub mod output;
 pub mod progress;
 pub mod providers;
+pub mod review;
 pub mod security;
 pub mod telemetry;
 pub mod threat;

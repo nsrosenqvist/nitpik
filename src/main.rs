@@ -15,12 +15,9 @@ use nitpik::diff;
 use nitpik::env;
 use nitpik::license;
 use nitpik::models;
-use nitpik::orchestrator;
 use nitpik::progress;
-use nitpik::providers;
-use nitpik::security;
+use nitpik::review;
 use nitpik::telemetry;
-use nitpik::threat;
 use nitpik::update;
 
 use std::io::IsTerminal;
@@ -34,10 +31,8 @@ use clap::Parser;
 use cli::args::{CacheAction, Cli, Command, LicenseAction, OutputFormat, UpdateArgs};
 use config::Config;
 use env::Env;
-use models::{DEFAULT_PROFILE, Severity};
+use models::Severity;
 use progress::ProgressTracker;
-use providers::ReviewProvider;
-use providers::rig::RigProvider;
 
 #[tokio::main]
 async fn main() {
@@ -374,76 +369,9 @@ fn remove_license_key_from_config() -> Result<()> {
     }
     Ok(())
 }
-/// Canonicalize the `--path` directory and locate the git repo root.
-async fn resolve_repo_root(path: &Path) -> Result<String> {
-    let base_dir = std::fs::canonicalize(path)
-        .with_context(|| format!("--path directory not found: {}", path.display()))?;
-    match diff::git::find_repo_root(&base_dir).await {
-        Ok(root) => Ok(root),
-        Err(_) => Ok(base_dir.display().to_string()),
-    }
-}
-
-/// Fetch the commit log for baseline context, if applicable.
-async fn build_commit_log(
-    no_commit_context: bool,
-    input_mode: &models::InputMode,
-    repo_root_path: &Path,
-) -> Vec<String> {
-    if no_commit_context {
-        return Vec::new();
-    }
-    if let models::InputMode::GitBase(base_ref) = input_mode {
-        diff::git::git_log(repo_root_path, base_ref, 50)
-            .await
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    }
-}
-
-/// Build the provider, cache engine, and review orchestrator.
-#[allow(clippy::too_many_arguments)]
-async fn create_orchestrator(
-    config: &Config,
-    repo_root_path: &Path,
-    no_cache: bool,
-    progress: Arc<dyn progress::ProgressReporter>,
-    no_prior_context: bool,
-    max_prior_findings: Option<usize>,
-    verify: bool,
-    multi_wave: bool,
-    audit_enabled: bool,
-    timeout: Option<std::time::Duration>,
-) -> Result<(Arc<dyn ReviewProvider>, orchestrator::ReviewOrchestrator)> {
-    let provider: Arc<dyn ReviewProvider> = Arc::new(
-        RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
-            .map_err(|e| anyhow::anyhow!("{e}"))?,
-    );
-    let review_scope = diff::git::detect_branch(repo_root_path, &Env::real()).await;
-    let cache = cache::CacheEngine::new(!no_cache);
-    let stale_age = std::time::Duration::from_secs(30 * 24 * 60 * 60);
-    let _removed = cache.cleanup_stale(stale_age).await;
-
-    let orchestrator = orchestrator::ReviewOrchestrator::new(
-        Arc::clone(&provider),
-        config,
-        cache,
-        progress,
-        no_prior_context,
-        max_prior_findings,
-        review_scope,
-        verify,
-        multi_wave,
-        audit_enabled,
-        timeout,
-    );
-    Ok((provider, orchestrator))
-}
-
 async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<()> {
     let input_mode = args.validate_input().map_err(|e| anyhow::anyhow!("{e}"))?;
-    let repo_root = resolve_repo_root(&args.path).await?;
+    let repo_root = review::resolve_repo_root(&args.path).await?;
     let repo_root_path = Path::new(&repo_root);
 
     let env_real = Env::real();
@@ -483,7 +411,47 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         return Ok(());
     }
 
-    let commit_log = build_commit_log(args.no_commit_context, &input_mode, repo_root_path).await;
+    let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
+
+    let show_threat_progress = !args.quiet
+        && args.format == OutputFormat::Terminal
+        && std::io::stderr().is_terminal();
+
+    let options = review::ReviewOptions {
+        profiles: args.profile.clone(),
+        profile_dir: args.profile_dir.clone(),
+        tags: args.tag.clone(),
+        auto_mode: args.auto_mode,
+        use_agent,
+        scan_secrets,
+        scan_threats,
+        secrets_rules: args.secrets_rules.clone(),
+        secrets_severity: args.secrets_severity,
+        threat_rules: args.threat_rules.clone(),
+        no_project_docs: args.no_project_docs,
+        no_commit_context: args.no_commit_context,
+        exclude_doc: args.exclude_doc.clone(),
+        no_cache: args.no_cache,
+        no_prior_context: args.no_prior_context,
+        max_prior_findings: args.max_prior_findings,
+        verify: args.verify,
+        multi_wave: args.multi_wave,
+        max_concurrent: args.max_concurrent,
+        max_turns: args.max_turns,
+        max_tool_calls: args.max_tool_calls,
+        timeout: if args.timeout == 0 {
+            None
+        } else {
+            Some(std::time::Duration::from_secs(args.timeout))
+        },
+        audit_enabled: audit_path.is_some(),
+        show_threat_progress,
+    };
+
+    let agent_defs = review::resolve_agents(&options, &config, diffs, repo_root_path).await?;
+
+    let commit_log = review::build_commit_log(args.no_commit_context, &input_mode, repo_root_path)
+        .await;
     let baseline = context::build_baseline_context(
         repo_root_path,
         diffs,
@@ -493,8 +461,6 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         commit_log,
     )
     .await;
-
-    let agent_defs = resolve_agents(&args, &config, diffs, repo_root_path).await?;
 
     // Debug-only: dump constructed prompts and exit without calling the LLM.
     #[cfg(debug_assertions)]
@@ -506,7 +472,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             diffs: diffs.to_vec(),
             baseline,
             repo_root: repo_root.clone(),
-            is_path_scan: matches!(input_mode, models::InputMode::DirectPath(_)),
+            is_path_scan,
         };
 
         for agent in &agent_defs {
@@ -540,160 +506,29 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         &license_claims,
         use_agent,
     );
-    progress.start();
 
-    let is_path_scan = matches!(input_mode, models::InputMode::DirectPath(_));
-    let (review_context, secret_findings) = build_review_context(
-        &args,
+    // `execute_review` owns the engine lifecycle, including progress
+    // start/finish and the optional threat scan.
+    let output = review::execute_review(
         &config,
-        diffs,
-        baseline,
         &repo_root,
-        scan_secrets,
+        diffs,
         is_path_scan,
-    )?;
-
-    let (provider, orchestrator) = create_orchestrator(
-        &config,
-        repo_root_path,
-        args.no_cache,
+        &agent_defs,
+        baseline,
+        &options,
         Arc::clone(&progress) as Arc<dyn progress::ProgressReporter>,
-        args.no_prior_context,
-        args.max_prior_findings,
-        args.verify,
-        args.multi_wave,
-        audit_path.is_some(),
-        if args.timeout == 0 {
-            None
-        } else {
-            Some(std::time::Duration::from_secs(args.timeout))
-        },
     )
     .await?;
 
-    let review_result = orchestrator
-        .run(
-            &review_context,
-            &agent_defs,
-            args.max_concurrent,
-            use_agent,
-            args.max_turns,
-            args.max_tool_calls,
-        )
-        .await
-        .context("review failed")?;
+    let findings = output.findings;
 
-    // Finalize the live progress display before printing threat scanner status.
-    progress.finish();
-
-    // Threat scanning (pattern scan then optional LLM triage)
-    let (threat_findings, triage_tokens) = if scan_threats {
-        let mut threat_rules = threat::rules::default_rules();
-        let config_threat_path: Option<std::path::PathBuf> = config
-            .threats
-            .additional_rules
-            .as_ref()
-            .map(std::path::PathBuf::from);
-        let threat_rules_path = args
-            .threat_rules
-            .as_deref()
-            .or(config_threat_path.as_deref());
-        if let Some(path) = threat_rules_path {
-            match threat::rules::load_rules_from_file(path) {
-                Ok(extra) => threat_rules.extend(extra),
-                Err(e) => eprintln!("Warning: failed to load threat rules: {e}"),
-            }
-        }
-
-        // Phase 1: fast pattern matching (regex + entropy)
-        let raw_matches = threat::scanner::scan_for_threats(
-            &review_context.diffs,
-            &review_context.baseline.file_contents,
-            &threat_rules,
-        );
-
-        if raw_matches.is_empty() {
-            (vec![], nitpik::models::TokenUsage::default())
-        } else {
-            let show_progress = !args.quiet
-                && args.format == OutputFormat::Terminal
-                && std::io::stderr().is_terminal();
-
-            if show_progress {
-                use colored::Colorize;
-                use std::io::Write;
-                let stderr = std::io::stderr();
-                let mut handle = stderr.lock();
-                let _ = writeln!(
-                    handle,
-                    "  {} {}",
-                    "▸".cyan().bold(),
-                    format!(
-                        "Threat scanner: {} pattern match{} found, triaging with LLM…",
-                        raw_matches.len(),
-                        if raw_matches.len() == 1 { "" } else { "es" }
-                    )
-                    .dimmed(),
-                );
-                let _ = handle.flush();
-            }
-
-            // Phase 2: LLM triage (fail-open)
-            let (triaged, triage_tokens) = threat::triage::triage_findings(
-                raw_matches,
-                &review_context.baseline.file_contents,
-                provider.as_ref(),
-            )
-            .await;
-
-            if show_progress {
-                use colored::Colorize;
-                use std::io::Write;
-                let stderr = std::io::stderr();
-                let mut handle = stderr.lock();
-                let _ = writeln!(
-                    handle,
-                    "  {} {}",
-                    "✔".green().bold(),
-                    format!(
-                        "Threat triage complete: {} finding{} after triage",
-                        triaged.len(),
-                        if triaged.len() == 1 { "" } else { "s" }
-                    )
-                    .dimmed(),
-                );
-                let _ = writeln!(handle);
-                let _ = handle.flush();
-            }
-
-            (
-                triaged
-                    .iter()
-                    .map(threat::match_to_finding)
-                    .collect::<Vec<_>>(),
-                triage_tokens,
-            )
-        }
-    } else {
-        (vec![], nitpik::models::TokenUsage::default())
-    };
-
-    let mut findings = review_result.findings;
-    findings.extend(secret_findings);
-    findings.extend(threat_findings);
-    findings.sort_by(|a, b| {
-        b.severity
-            .cmp(&a.severity)
-            .then(a.file.cmp(&b.file))
-            .then(a.line.cmp(&b.line))
-    });
-
-    if args.show_dropped && !args.quiet && !review_result.dropped.is_empty() {
+    if args.show_dropped && !args.quiet && !output.result.dropped.is_empty() {
         eprintln!(
             "\nDropped {} finding(s) by critic verify pass:",
-            review_result.dropped.len()
+            output.result.dropped.len()
         );
-        for d in &review_result.dropped {
+        for d in &output.result.dropped {
             eprintln!(
                 "  - {}:{} {} — {}",
                 d.finding.file, d.finding.line, d.finding.title, d.reason
@@ -701,32 +536,24 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         }
     }
 
-    let total_tokens = review_result.tokens + triage_tokens;
-    let mut tokens_by_model = review_result.tokens_by_model.clone();
-    if triage_tokens.total() > 0 {
-        let triage_model = config.provider.resolved_model().to_string();
-        *tokens_by_model.entry(triage_model).or_default() += triage_tokens;
-    }
     let show_tokens = !args.quiet
         && !args.no_tokens
         && args.format == OutputFormat::Terminal
         && std::io::stderr().is_terminal();
-    if show_tokens && total_tokens.total() > 0 {
-        print_token_summary(total_tokens, &tokens_by_model);
+    if show_tokens && output.tokens.total() > 0 {
+        print_token_summary(output.tokens, &output.tokens_by_model);
     }
 
     // Write audit log artifact (opt-in via --audit-log / NITPIK_AUDIT_LOG / TOML).
     if let Some(ref path) = audit_path {
-        let profile_names: Vec<String> =
-            agent_defs.iter().map(|a| a.profile.name.clone()).collect();
         let summary = audit::ConfigSummary {
             provider: config.provider.name.to_string(),
-            model: config.provider.resolved_model().to_string(),
+            model: output.resolved_model.clone(),
             agentic: use_agent,
             max_turns: args.max_turns,
             max_tool_calls: args.max_tool_calls,
             max_concurrent: args.max_concurrent,
-            profiles: profile_names,
+            profiles: output.agent_profile_names.clone(),
             multi_wave: args.multi_wave,
             verify: args.verify,
             auto_mode: args.auto_mode,
@@ -740,11 +567,11 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             started_at_unix_ms: audit_started_at,
             duration_ms: audit_started_instant.elapsed().as_millis() as u64,
             config: summary,
-            tasks: review_result.task_audits.clone(),
-            verify: review_result.verify_audit.clone(),
+            tasks: output.result.task_audits.clone(),
+            verify: output.result.verify_audit.clone(),
             findings: findings.clone(),
-            failed_tasks: review_result.failed_tasks,
-            tokens: total_tokens,
+            failed_tasks: output.result.failed_tasks,
+            tokens: output.tokens,
         };
         match document.write_to(path) {
             Ok(()) => {
@@ -779,7 +606,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         &findings,
         fail_on_severity,
         &args.format,
-        review_result.failed_tasks,
+        output.result.failed_tasks,
     )
 }
 
@@ -970,205 +797,6 @@ fn determine_exit(
         bail!("{failed_tasks} review task(s) failed after retries — results are incomplete");
     }
     Ok(())
-}
-
-/// Resolve agent profiles from CLI args and config.
-async fn resolve_agents(
-    args: &cli::args::ReviewArgs,
-    config: &Config,
-    diffs: &[models::FileDiff<'_>],
-    repo_root_path: &Path,
-) -> Result<Vec<models::AgentDefinition>> {
-    let profile_names = if args.profile == vec![DEFAULT_PROFILE.to_string()] {
-        // CLI default — check config for overrides
-        if !config.review.default_profiles.is_empty() {
-            config.review.default_profiles.clone()
-        } else {
-            args.profile.clone()
-        }
-    } else {
-        args.profile.clone()
-    };
-
-    let used_auto = profile_names.iter().any(|p| p == "auto");
-    if !used_auto && args.auto_mode.is_some() {
-        eprintln!("warning: --auto-mode is ignored because --profile does not include 'auto'");
-    }
-    let profiles = if used_auto {
-        select_auto_profiles(args, config, diffs, repo_root_path).await?
-    } else {
-        profile_names
-    };
-
-    let mut agent_defs = agents::resolve_profiles(&profiles, args.profile_dir.as_deref())
-        .await
-        .context("failed to resolve agent profiles")?;
-
-    // Auto mode: splice in any profile that opted into `always_include`
-    // (built-in `security`, or custom always-on reviewers from
-    // `--profile-dir`). Skipped for explicit `--profile`/`--tag`
-    // selections, where the user has already chosen.
-    if used_auto {
-        let always_on = agents::list_always_include_profiles(args.profile_dir.as_deref())
-            .await
-            .context("failed to load always-include profiles")?;
-        let existing: std::collections::HashSet<String> =
-            agent_defs.iter().map(|a| a.profile.name.clone()).collect();
-        for agent in always_on {
-            if !existing.contains(&agent.profile.name) {
-                agent_defs.push(agent);
-            }
-        }
-    }
-
-    // --tag: add any profiles that match the requested tags
-    if !args.tag.is_empty() {
-        let by_tag = agents::resolve_profiles_by_tags(&args.tag, args.profile_dir.as_deref())
-            .await
-            .context("failed to resolve profiles by tag")?;
-
-        // Merge, avoiding duplicates (by profile name)
-        let existing_names: std::collections::HashSet<String> =
-            agent_defs.iter().map(|a| a.profile.name.clone()).collect();
-        for agent in by_tag {
-            if !existing_names.contains(&agent.profile.name) {
-                agent_defs.push(agent);
-            }
-        }
-    }
-
-    Ok(agent_defs)
-}
-
-/// Pick reviewer profiles for `--profile auto`, honoring `--auto-mode`.
-///
-/// In `heuristic` mode this is a thin wrapper around the file/path
-/// classifier. In `llm` mode it always asks the model. In `hybrid`
-/// mode (default) the heuristic runs first, and the LLM is consulted
-/// only when the heuristic confidence is low (i.e. no language
-/// specialist matched).
-///
-/// Fails open: any provider error falls back to the heuristic result.
-async fn select_auto_profiles(
-    args: &cli::args::ReviewArgs,
-    config: &Config,
-    diffs: &[models::FileDiff<'_>],
-    repo_root_path: &Path,
-) -> Result<Vec<String>> {
-    use agents::auto::AutoMode;
-    let (heuristic, confidence) =
-        agents::auto::auto_select_profiles_with_confidence(diffs, repo_root_path);
-
-    let need_llm = match args.auto_mode.unwrap_or(AutoMode::Hybrid) {
-        AutoMode::Heuristic => false,
-        AutoMode::Llm => true,
-        AutoMode::Hybrid => confidence == agents::auto::HeuristicConfidence::Low,
-    };
-    if !need_llm {
-        return Ok(heuristic);
-    }
-
-    let triage_agent = match agents::builtin::get_builtin("triage") {
-        Some(a) => a,
-        None => return Ok(heuristic),
-    };
-    let provider: Arc<dyn ReviewProvider> =
-        match RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf()) {
-            Ok(p) => Arc::new(p),
-            Err(e) => {
-                eprintln!("Warning: triage provider init failed ({e}); using heuristic profiles.");
-                return Ok(heuristic);
-            }
-        };
-
-    let summary = agents::auto::build_triage_summary(diffs);
-    match provider.triage(&triage_agent.system_prompt, &summary).await {
-        Ok(outcome) => {
-            let mut picked = agents::auto::parse_triage_profiles(&outcome.verdicts);
-            // Always preserve architect when the heuristic flagged a
-            // structural change — the LLM rarely sees CI/IaC signals
-            // strongly enough but the heuristic does.
-            if heuristic.iter().any(|p| p == "architect")
-                && !picked.iter().any(|p| p == "architect")
-            {
-                picked.push("architect".to_string());
-            }
-            if picked.is_empty() {
-                Ok(heuristic)
-            } else {
-                Ok(picked)
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: triage call failed ({e}); using heuristic profiles.");
-            Ok(heuristic)
-        }
-    }
-}
-
-/// Build review context, optionally scanning and redacting secrets.
-fn build_review_context<'a>(
-    args: &cli::args::ReviewArgs,
-    config: &Config,
-    diffs: &[models::FileDiff<'a>],
-    baseline: models::BaselineContext,
-    repo_root: &str,
-    scan_secrets: bool,
-    is_path_scan: bool,
-) -> Result<(models::ReviewContext<'a>, Vec<models::finding::Finding>)> {
-    if !scan_secrets {
-        let ctx = models::ReviewContext {
-            diffs: diffs.to_vec(),
-            baseline,
-            repo_root: repo_root.to_string(),
-            is_path_scan,
-        };
-        return Ok((ctx, Vec::new()));
-    }
-
-    let mut rules = security::rules::default_rules();
-
-    // Load additional rules: CLI flag takes priority, then config
-    let config_rules_path: Option<std::path::PathBuf> = config
-        .secrets
-        .additional_rules
-        .as_ref()
-        .map(std::path::PathBuf::from);
-    let rules_path = args
-        .secrets_rules
-        .as_deref()
-        .or(config_rules_path.as_deref());
-    if let Some(rules_path) = rules_path {
-        let extra = security::rules::load_rules_from_file(rules_path)
-            .map_err(|e| anyhow::anyhow!("failed to load secret rules: {e}"))?;
-        rules.extend(extra);
-    }
-
-    // Resolve secrets severity: CLI flag > config > default (warning)
-    let secrets_severity = args.secrets_severity.unwrap_or(config.secrets.severity);
-
-    // Scan and redact baseline file contents
-    let mut secret_findings = Vec::new();
-    let mut redacted_contents = indexmap::IndexMap::new();
-    for (path, content) in &baseline.file_contents {
-        let (redacted, findings) =
-            security::scan_and_redact(content, path, &rules, secrets_severity);
-        secret_findings.extend(findings);
-        redacted_contents.insert(path.clone(), redacted);
-    }
-
-    let ctx = models::ReviewContext {
-        diffs: diffs.to_vec(),
-        baseline: models::BaselineContext {
-            file_contents: redacted_contents,
-            project_docs: baseline.project_docs.clone(),
-            commit_log: baseline.commit_log.clone(),
-        },
-        repo_root: repo_root.to_string(),
-        is_path_scan,
-    };
-
-    Ok((ctx, secret_findings))
 }
 
 /// Render findings and print output, handling format-specific side effects.
