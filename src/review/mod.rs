@@ -27,7 +27,7 @@ use crate::diff;
 use crate::env::Env;
 use crate::models::{self, AgentDefinition, DEFAULT_PROFILE, Severity};
 use crate::orchestrator::{self, ReviewOrchestrator, ReviewResult};
-use crate::progress::ProgressReporter;
+use crate::progress::{ProgressReporter, TaskStatus};
 use crate::providers::ReviewProvider;
 use crate::providers::rig::RigProvider;
 use crate::security;
@@ -148,6 +148,16 @@ pub struct ReviewOutput {
     pub agent_profile_names: Vec<String>,
     /// The provider's resolved model identifier (for audit summaries).
     pub resolved_model: String,
+}
+
+/// A [`ProgressReporter`] that does nothing — for headless servers (LSP/MCP)
+/// that have no live terminal display.
+pub struct NoopProgress;
+
+impl ProgressReporter for NoopProgress {
+    fn update(&self, _file: &str, _agent: &str, _status: TaskStatus) {}
+    fn start(&self) {}
+    fn finish(&self) {}
 }
 
 /// Resolve the repository root for a `--path` argument.

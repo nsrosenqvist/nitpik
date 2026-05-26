@@ -48,8 +48,38 @@ pub enum Command {
     /// Update nitpik to the latest release.
     Update(UpdateArgs),
 
+    /// Run nitpik as a long-lived server for editors and agents.
+    Serve(ServeArgs),
+
     /// Print version and build information.
     Version,
+}
+
+/// Arguments for the `serve` subcommand.
+#[derive(Parser, Debug)]
+pub struct ServeArgs {
+    #[command(subcommand)]
+    pub transport: ServeTransport,
+}
+
+/// Server transports under `nitpik serve`.
+#[derive(clap::Subcommand, Debug)]
+pub enum ServeTransport {
+    /// Run a Language Server (LSP) over stdio — findings as diagnostics in any
+    /// LSP client (VS Code, Neovim, Helix, JetBrains, …).
+    Lsp(ServeCommonArgs),
+
+    /// Run an MCP server over stdio — nitpik as a tool for agents (Copilot,
+    /// Claude Code, Cursor, …).
+    Mcp(ServeCommonArgs),
+}
+
+/// Common arguments shared by the `serve` transports.
+#[derive(Parser, Debug)]
+pub struct ServeCommonArgs {
+    /// Workspace/repository root the server operates within (default: cwd).
+    #[arg(long, default_value = ".")]
+    pub path: PathBuf,
 }
 
 /// Arguments for the `profiles` subcommand.

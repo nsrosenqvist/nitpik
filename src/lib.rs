@@ -16,6 +16,8 @@ pub mod diff;
 pub mod env;
 pub(crate) mod http;
 pub mod license;
+pub mod lsp;
+pub mod mcp;
 pub mod models;
 pub mod orchestrator;
 pub mod output;

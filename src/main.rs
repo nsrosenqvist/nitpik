@@ -55,7 +55,17 @@ async fn run() -> Result<()> {
         Command::Cache { action } => run_cache(action).await,
         Command::License { action } => run_license(action).await,
         Command::Update(args) => run_update(args).await,
+        Command::Serve(args) => run_serve(args).await,
         Command::Version => run_version(),
+    }
+}
+
+/// Run nitpik as a long-lived LSP or MCP server over stdio.
+async fn run_serve(args: cli::args::ServeArgs) -> Result<()> {
+    use cli::args::ServeTransport;
+    match args.transport {
+        ServeTransport::Lsp(a) => nitpik::lsp::serve(a.path).await,
+        ServeTransport::Mcp(a) => nitpik::mcp::serve(a.path).await,
     }
 }
 
