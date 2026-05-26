@@ -1,0 +1,119 @@
+{
+  "name": "nitpik",
+  "displayName": "nitpik — AI Code Review",
+  "description": "AI-powered code review in your editor and Copilot agents. Findings as diagnostics; reviews run via the editor's own model or your configured provider.",
+  "version": "3.0.0",
+  "publisher": "nsrosenqvist",
+  "license": "BUSL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nsrosenqvist/nitpik"
+  },
+  "homepage": "https://nitpik.dev",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "AI"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "nitpik.signIn",
+        "title": "nitpik: Sign In"
+      },
+      {
+        "command": "nitpik.signOut",
+        "title": "nitpik: Sign Out"
+      },
+      {
+        "command": "nitpik.reviewChanges",
+        "title": "nitpik: Review Changes (diff vs base)"
+      },
+      {
+        "command": "nitpik.reviewFile",
+        "title": "nitpik: Review Current File"
+      },
+      {
+        "command": "nitpik.reviewWorkspace",
+        "title": "nitpik: Review Workspace"
+      },
+      {
+        "command": "nitpik.reviewFresh",
+        "title": "nitpik: Re-review from Scratch (ignore cache)"
+      }
+    ],
+    "configuration": {
+      "title": "nitpik",
+      "properties": {
+        "nitpik.serverUrl": {
+          "type": "string",
+          "default": "https://nitpik.dev",
+          "description": "Base URL of the nitpik service (override for staging)."
+        },
+        "nitpik.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the nitpik binary. Empty uses the bundled binary, then falls back to PATH."
+        },
+        "nitpik.modelSource": {
+          "type": "string",
+          "enum": [
+            "copilot",
+            "byom"
+          ],
+          "enumDescriptions": [
+            "Use the editor's language model (GitHub Copilot) via a local bridge.",
+            "Use the provider configured in your .nitpik.toml (bring your own model)."
+          ],
+          "default": "copilot",
+          "description": "Which model runs reviews launched from the editor."
+        },
+        "nitpik.copilotModel": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred Copilot model family for reviews (e.g. 'gpt-4o'). Empty picks the default available model."
+        },
+        "nitpik.diffBase": {
+          "type": "string",
+          "default": "",
+          "description": "Git ref to diff against for 'Review Changes'. Empty uses the merge-base with the default branch."
+        },
+        "nitpik.reviewOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically review a file when it is saved (debounced, diff-scoped). Off by default — reviews are LLM calls."
+        }
+      }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "nitpik",
+        "label": "nitpik"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.config.mjs --production",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
