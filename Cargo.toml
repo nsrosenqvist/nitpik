@@ -92,7 +92,6 @@ pretty_assertions = "1"
 rand_core = { version = "0.6", features = ["getrandom"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-serial_test = "3"
 filetime = "0.2"
 tokio = { version = "1", features = ["full", "test-util"] }
 

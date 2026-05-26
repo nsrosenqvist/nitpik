@@ -30,14 +30,6 @@ use std::sync::{LazyLock, RwLock};
 /// stale state across long-lived test processes.
 const MEMO_CAPACITY: usize = 1024;
 
-/// Process-global memo store.
-///
-/// Wrapped in a `LazyLock` so the static initializer is `const`-safe
-/// (`HashMap::new()` is `const` on stable Rust 1.85). Reads hold the
-/// `RwLock` briefly and never `.await` while the lock is held.
-static MEMO: LazyLock<RwLock<HashMap<MemoKey, String>>> =
-    LazyLock::new(|| RwLock::new(HashMap::with_capacity(64)));
-
 /// Cache key — tool name plus a 64-bit hash of the JSON-serialized args.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct MemoKey {
@@ -58,56 +50,103 @@ fn hash_args<T: serde::Serialize>(args: &T) -> Option<u64> {
     Some(hasher.finish())
 }
 
-/// Look up a cached successful result for `(tool, args)`.
+/// A `(tool, args) -> result` memo store.
 ///
-/// Returns `None` on miss, on hash failure, or when the cache is full
-/// of unrelated entries (lookup is exact-match only).
+/// Production uses a single process-global instance (cleared between runs);
+/// tests construct their own instances so they never race the global through
+/// shared state.
+pub struct ToolMemo {
+    map: RwLock<HashMap<MemoKey, String>>,
+}
+
+impl ToolMemo {
+    /// Create an empty store.
+    pub fn new() -> Self {
+        Self {
+            map: RwLock::new(HashMap::with_capacity(64)),
+        }
+    }
+
+    /// Look up a cached successful result for `(tool, args)`.
+    pub fn lookup<T: serde::Serialize>(&self, tool: &'static str, args: &T) -> Option<String> {
+        let args_hash = hash_args(args)?;
+        let key = MemoKey { tool, args_hash };
+        let map = self.map.read().ok()?;
+        map.get(&key).cloned()
+    }
+
+    /// Cache a successful result for `(tool, args)`.
+    ///
+    /// Errors are intentionally not stored — see the module docstring. When
+    /// the cache is full, the entry is silently dropped (no eviction); in
+    /// practice [`ToolMemo::clear`] is called between runs so capacity is
+    /// rarely the binding constraint.
+    pub fn store<T: serde::Serialize>(&self, tool: &'static str, args: &T, value: String) {
+        let Some(args_hash) = hash_args(args) else {
+            return;
+        };
+        let key = MemoKey { tool, args_hash };
+        let Ok(mut map) = self.map.write() else {
+            return;
+        };
+        if map.len() >= MEMO_CAPACITY && !map.contains_key(&key) {
+            return;
+        }
+        map.insert(key, value);
+    }
+
+    /// Clear all cached entries.
+    pub fn clear(&self) {
+        if let Ok(mut map) = self.map.write() {
+            map.clear();
+        }
+    }
+
+    /// Current cache size. Test-only observability.
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.map.read().map(|m| m.len()).unwrap_or(0)
+    }
+}
+
+impl Default for ToolMemo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Process-global memo store backing the free functions below.
+///
+/// `LazyLock` because `HashMap::new()` is not `const` (its hasher state needs
+/// entropy); the store initializes on first use.
+static MEMO: LazyLock<ToolMemo> = LazyLock::new(ToolMemo::new);
+
+/// Look up a cached successful result in the process-global memo.
 pub fn lookup<T: serde::Serialize>(tool: &'static str, args: &T) -> Option<String> {
-    let args_hash = hash_args(args)?;
-    let key = MemoKey { tool, args_hash };
-    let map = MEMO.read().ok()?;
-    map.get(&key).cloned()
+    MEMO.lookup(tool, args)
 }
 
-/// Cache a successful result for `(tool, args)`.
-///
-/// Errors are intentionally not stored — see the module docstring.
-/// When the cache is full, the entry is silently dropped (no eviction);
-/// in practice [`clear`] is called between runs so capacity is rarely
-/// the binding constraint.
+/// Cache a successful result in the process-global memo.
 pub fn store<T: serde::Serialize>(tool: &'static str, args: &T, value: String) {
-    let Some(args_hash) = hash_args(args) else {
-        return;
-    };
-    let key = MemoKey { tool, args_hash };
-    let Ok(mut map) = MEMO.write() else { return };
-    if map.len() >= MEMO_CAPACITY && !map.contains_key(&key) {
-        return;
-    }
-    map.insert(key, value);
+    MEMO.store(tool, args, value);
 }
 
-/// Clear all cached entries.
+/// Clear the process-global memo.
 ///
-/// Called by the orchestrator at the start of every review run so
-/// stale data from a previous invocation can't leak forward.
+/// Called by the orchestrator at the start of every review run so stale data
+/// from a previous invocation can't leak forward.
 pub fn clear() {
-    if let Ok(mut map) = MEMO.write() {
-        map.clear();
-    }
-}
-
-/// Current cache size. Test-only observability.
-#[cfg(test)]
-pub fn len() -> usize {
-    MEMO.read().map(|m| m.len()).unwrap_or(0)
+    MEMO.clear();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde::Serialize;
-    use serial_test::serial;
+
+    // Tests operate on their own `ToolMemo` instances rather than the
+    // process-global `MEMO`, so they never race other tests (tool/orchestrator
+    // tests that touch the global) and can assert on exact cache sizes.
 
     #[derive(Serialize)]
     struct Args {
@@ -116,33 +155,30 @@ mod tests {
     }
 
     #[test]
-    #[serial(memo)]
     fn lookup_miss_returns_none() {
-        clear();
+        let memo = ToolMemo::new();
         let args = Args {
             path: "src/main.rs".into(),
             n: 1,
         };
-        assert!(lookup("read_file", &args).is_none());
+        assert!(memo.lookup("read_file", &args).is_none());
     }
 
     #[test]
-    #[serial(memo)]
     fn store_then_lookup_hits() {
-        clear();
+        let memo = ToolMemo::new();
         let args = Args {
             path: "src/main.rs".into(),
             n: 1,
         };
-        store("read_file", &args, "hello".to_string());
-        assert_eq!(lookup("read_file", &args).as_deref(), Some("hello"));
-        assert_eq!(len(), 1);
+        memo.store("read_file", &args, "hello".to_string());
+        assert_eq!(memo.lookup("read_file", &args).as_deref(), Some("hello"));
+        assert_eq!(memo.len(), 1);
     }
 
     #[test]
-    #[serial(memo)]
     fn different_args_different_keys() {
-        clear();
+        let memo = ToolMemo::new();
         let a1 = Args {
             path: "a.rs".into(),
             n: 1,
@@ -151,39 +187,43 @@ mod tests {
             path: "b.rs".into(),
             n: 1,
         };
-        store("read_file", &a1, "AAA".to_string());
-        store("read_file", &a2, "BBB".to_string());
-        assert_eq!(lookup("read_file", &a1).as_deref(), Some("AAA"));
-        assert_eq!(lookup("read_file", &a2).as_deref(), Some("BBB"));
-        assert_eq!(len(), 2);
+        memo.store("read_file", &a1, "AAA".to_string());
+        memo.store("read_file", &a2, "BBB".to_string());
+        assert_eq!(memo.lookup("read_file", &a1).as_deref(), Some("AAA"));
+        assert_eq!(memo.lookup("read_file", &a2).as_deref(), Some("BBB"));
+        assert_eq!(memo.len(), 2);
     }
 
     #[test]
-    #[serial(memo)]
     fn different_tools_different_namespaces() {
-        clear();
+        let memo = ToolMemo::new();
         let args = Args {
             path: "x".into(),
             n: 0,
         };
-        store("read_file", &args, "from-read".to_string());
-        store("search_text", &args, "from-search".to_string());
-        assert_eq!(lookup("read_file", &args).as_deref(), Some("from-read"));
-        assert_eq!(lookup("search_text", &args).as_deref(), Some("from-search"));
+        memo.store("read_file", &args, "from-read".to_string());
+        memo.store("search_text", &args, "from-search".to_string());
+        assert_eq!(
+            memo.lookup("read_file", &args).as_deref(),
+            Some("from-read")
+        );
+        assert_eq!(
+            memo.lookup("search_text", &args).as_deref(),
+            Some("from-search")
+        );
     }
 
     #[test]
-    #[serial(memo)]
     fn clear_drops_all_entries() {
-        clear();
+        let memo = ToolMemo::new();
         let args = Args {
             path: "x".into(),
             n: 0,
         };
-        store("read_file", &args, "v".to_string());
-        assert!(lookup("read_file", &args).is_some());
-        clear();
-        assert!(lookup("read_file", &args).is_none());
-        assert_eq!(len(), 0);
+        memo.store("read_file", &args, "v".to_string());
+        assert!(memo.lookup("read_file", &args).is_some());
+        memo.clear();
+        assert!(memo.lookup("read_file", &args).is_none());
+        assert_eq!(memo.len(), 0);
     }
 }
