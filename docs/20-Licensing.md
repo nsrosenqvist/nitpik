@@ -61,7 +61,7 @@ nitpik license refresh          # force a fresh entitlement fetch
 nitpik license deactivate       # remove the key and the cached entitlement
 ```
 
-Subscription billing — invoices, plan changes (monthly ↔ yearly), payment method updates, VAT IDs, and cancellation — is handled through the Stripe-hosted customer portal accessible from [nitpik.dev/account](https://nitpik.dev/account).
+Subscription billing — invoices, plan changes (monthly ↔ yearly), payment method updates, and cancellation — is handled through the Polar-hosted customer portal accessible from [nitpik.dev/account](https://nitpik.dev/account). Polar acts as merchant of record and handles all tax (VAT, GST, US sales tax) automatically; invoices are issued under Polar's name and tax ID.
 
 ## How Verification Works
 
