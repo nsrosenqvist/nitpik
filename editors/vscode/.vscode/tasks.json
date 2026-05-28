@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm: watch",
+      "type": "npm",
+      "script": "watch",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated"
+      },
+      "problemMatcher": {
+        "owner": "esbuild",
+        "pattern": {
+          "regexp": "^\\s*✘ \\[ERROR\\] (.*)$",
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "\\[watch\\] build started",
+          "endsPattern": "Done in \\d+ms"
+        }
+      }
+    }
+  ]
+}
