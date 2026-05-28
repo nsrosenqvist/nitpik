@@ -21,7 +21,7 @@ For commercial use (proprietary codebases, company projects), subscribe at [nitp
 - **Solo** — €30/month or €300/year. For freelancers, indie developers, and single-person consultancies. Same product, just for one.
 - **Team** — €100/month or €1000/year. One flat fee for any team size — no per-seat charges, no usage caps.
 
-Both tiers include the full feature set: all LLM providers, unlimited reviews, editor integration (LSP), MCP server, secret scanning, threat scanning, custom profiles. Cancel anytime via the self-serve customer portal.
+Both tiers unlock the **editor integration (LSP)** and **MCP server** — these surfaces require an active subscription, unlike the standalone `nitpik review` CLI which works for free under the personal/OSS terms above. Everything else (all LLM providers, unlimited reviews, secret scanning, threat scanning, custom profiles) is shared with the free tier. Cancel anytime via the self-serve customer portal.
 
 Tier choice is on the honor system — the CLI doesn't enforce it. Same model as JetBrains' individual vs. business licenses: pick the one that describes your situation accurately.
 
