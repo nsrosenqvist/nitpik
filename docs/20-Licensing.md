@@ -14,11 +14,16 @@ No license key is needed for:
 
 Just install and go. nitpik works at full functionality without a license key.
 
-## Commercial Subscription
+## Commercial Subscriptions
 
-For commercial use (proprietary codebases, company projects), subscribe at [nitpik.dev](https://nitpik.dev).
+For commercial use (proprietary codebases, company projects), subscribe at [nitpik.dev](https://nitpik.dev). Two tiers — both unlock the same commercial-use license; pick the one that fits your situation:
 
-**Monthly or yearly. One flat fee, any team size, unlimited usage.** No per-seat charges, no usage caps. Cancel anytime via the self-serve customer portal.
+- **Solo** — €30/month or €300/year. For freelancers, indie developers, and single-person consultancies. Same product, just for one.
+- **Team** — €100/month or €1000/year. One flat fee for any team size — no per-seat charges, no usage caps.
+
+Both tiers include the full feature set: all LLM providers, unlimited reviews, editor integration (LSP), MCP server, secret scanning, threat scanning, custom profiles. Cancel anytime via the self-serve customer portal.
+
+Tier choice is on the honor system — the CLI doesn't enforce it. Same model as JetBrains' individual vs. business licenses: pick the one that describes your situation accurately.
 
 > **Verify compatibility first:** nitpik's LLM provider integrations rely on a third-party open-source library, and provider support may change due to upstream updates outside of nitpik's control. Before subscribing, please verify that your chosen provider and model work correctly using the free unlicensed version. No license key is required — just install and run a review with your own provider API key. See [LLM Providers](03-Providers) for the full list of supported providers.
 
