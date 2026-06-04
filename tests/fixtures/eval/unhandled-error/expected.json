@@ -1,0 +1,8 @@
+{
+  "description": "Unhandled error: a safe `unwrap_or` default was replaced with `unwrap()`, which panics on any non-numeric input.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "config.rs", "line": 2, "min_severity": "warning", "note": "panic on bad input; was unwrap_or(8080)" }
+  ]
+}

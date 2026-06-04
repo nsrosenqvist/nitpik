@@ -1,0 +1,6 @@
+{
+  "description": "Whitespace-only reformatting (PEP 8 spacing). No behavioral change; should draw no warning/error finding.",
+  "kind": "negative",
+  "profiles": ["backend"],
+  "expected": []
+}

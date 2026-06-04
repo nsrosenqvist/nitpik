@@ -1,0 +1,8 @@
+{
+  "description": "Authorization bypass: `==` became `!=`, so any non-owner (not just the owner/admin) is allowed to delete.",
+  "kind": "positive",
+  "profiles": ["security"],
+  "expected": [
+    { "file": "access.py", "line": 3, "min_severity": "error", "note": "privilege escalation: owner check inverted" }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Money handled with floats: integer-cent arithmetic was replaced with float division, introducing rounding error on currency.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "billing.py", "line": 3, "min_severity": "warning", "note": "float arithmetic on money; truncation/rounding error" }
+  ]
+}

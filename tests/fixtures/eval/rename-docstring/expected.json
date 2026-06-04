@@ -1,0 +1,6 @@
+{
+  "description": "Local variable rename plus an added docstring. Behavior is identical; should draw no warning/error finding.",
+  "kind": "negative",
+  "profiles": ["backend"],
+  "expected": []
+}

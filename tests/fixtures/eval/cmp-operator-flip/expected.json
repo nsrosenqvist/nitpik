@@ -1,0 +1,8 @@
+{
+  "description": "Comparison-operator flip: `>=` became `>`, so i == length is no longer clamped and returns an out-of-range index.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "clamp.py", "line": 3, "min_severity": "warning", "note": "off-by-one: > should be >=" }
+  ]
+}

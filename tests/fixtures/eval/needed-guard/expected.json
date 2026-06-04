@@ -1,0 +1,6 @@
+{
+  "description": "Adds a correct, load-bearing guard against an empty list (avoids ZeroDivisionError). This is strictly safer code; a noisy reviewer might wrongly call it redundant. Should draw no warning/error finding.",
+  "kind": "negative",
+  "profiles": ["backend"],
+  "expected": []
+}

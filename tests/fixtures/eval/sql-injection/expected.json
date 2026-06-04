@@ -1,0 +1,8 @@
+{
+  "description": "SQL injection: a parameterized query was replaced with an f-string interpolating untrusted `email`.",
+  "kind": "positive",
+  "profiles": ["security"],
+  "expected": [
+    { "file": "repo.py", "line": 2, "min_severity": "error", "note": "unparameterized SQL via f-string" }
+  ]
+}
