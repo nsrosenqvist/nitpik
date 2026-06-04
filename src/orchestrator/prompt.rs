@@ -32,6 +32,24 @@ Prefer precision over recall. If you are uncertain whether something is a real i
 lower the severity to \"info\" or omit it entirely. Do not report hypothetical issues \
 that require runtime context you cannot verify from the diff and file contents.
 
+TRIVIALITY GATE: some changes look trivial but are not — scrutinize, never wave through, \
+any one-line change to SQL, a regex, auth/permission/session logic, signature verification, \
+or a money/tax/currency constant; flipping a feature-flag default or a retry/timeout/limit \
+constant; changing an HTTP method, redirect target, or response/status code; tightening or \
+loosening a comparison operator (`<` vs `<=`, `==` vs `!=`); renaming a public API surface; \
+adding a new direct dependency; or a semantic one-liner buried in an otherwise \
+whitespace/format-only diff. Conversely, genuinely cosmetic changes (whitespace, comment \
+typos, renames with no behavioral effect) warrant no findings.
+
+ACCEPTANCE FILTER: a finding must leave the code more sound, correct, AND elegant. Improving \
+only one axis — or degrading elegance to nominally improve correctness — makes the codebase \
+worse, not better. If a finding satisfies only two of the three, look harder for a fix that \
+gets all three, or drop it.
+
+DO NOT REPORT (AI slop): defensive checks for cases that cannot happen, abstractions used \
+once, comments restating obvious code, tests asserting tautologies, \"just-in-case\" guards, \
+or error handlers for cases the type system already rules out. These add bloat, not value.
+
 Return your findings as a JSON array. For each finding include:
 - \"file\": the file path (\"{file}\")
 - \"line\": the line number in the new file (must be within a diff hunk)
@@ -51,6 +69,9 @@ Severity definitions:
 - \"error\": confirmed bug or vulnerability that will cause incorrect behavior or a security breach
 - \"warning\": likely issue or significant code smell that should be addressed
 - \"info\": suggestion, minor improvement, or observation worth noting
+
+Reserve \"error\" for issues you can demonstrate from the diff itself — do not escalate style, \
+preference, or speculation to \"error\". When unsure between two levels, choose the lower one.
 
 IMPORTANT: The \"severity\" field must be one of \"error\", \"warning\", or \"info\". \
 Do NOT use values like \"critical\", \"major\", \"minor\", \"high\", or \"low\".
@@ -510,6 +531,29 @@ mod tests {
         assert!(prompt.contains("+let x = 1;"));
         assert!(prompt.contains("test.rs"));
         assert!(prompt.contains("backend"));
+    }
+
+    #[test]
+    fn build_prompt_includes_quality_gates() {
+        let diff = make_simple_diff("test.rs");
+        let context = make_simple_context(&diff);
+        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+
+        let prompt = build_prompt(
+            &diff,
+            &context,
+            &agent,
+            std::slice::from_ref(&agent),
+            None,
+            false,
+        );
+        assert!(prompt.contains("TRIVIALITY GATE"), "triviality gate present");
+        assert!(prompt.contains("ACCEPTANCE FILTER"), "acceptance filter present");
+        assert!(prompt.contains("DO NOT REPORT"), "AI-slop reject-list present");
+        assert!(
+            prompt.contains("Reserve \"error\" for issues you can demonstrate"),
+            "severity discipline present"
+        );
     }
 
     #[test]

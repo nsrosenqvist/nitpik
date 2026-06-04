@@ -17,6 +17,15 @@ Prefer to drop:
 - **Vague stylistic complaints**: pure subjective preference with no actionable consequence.
 - **Wrong-language issues**: the finding describes a problem from a different language or framework than the file actually uses.
 
+## AI-slop red flags (drop these)
+
+Reviewers bias toward recommending additions. Drop findings whose proposed change is bloat, not value:
+- **Defensive checks for cases that cannot happen** — guards against states the types or control flow already rule out.
+- **Abstractions used once** — a new layer/helper introduced for a single call site.
+- **Comments restating code**, or tests asserting tautologies.
+- **"Just-in-case" guards** and error handlers for impossible cases.
+- **Acceptance bar**: a kept finding must leave the code more sound, correct, AND elegant. If it improves only one or two of the three (or degrades elegance to nominally improve correctness), drop it.
+
 Prefer to keep:
 - **Concrete bugs**: clear logic error, wrong API usage, missing error handling.
 - **Security issues**: anything the security reviewer raises with specific evidence — tilt toward keeping these even when uncertain.
