@@ -50,6 +50,16 @@ pub enum OrchestratorError {
 
     #[error("no diffs to review")]
     NoDiffs,
+
+    /// Every dispatched review task failed (after retries). This is a
+    /// failed run, not a clean one — distinguishing it from "reviewed and
+    /// found nothing" prevents callers from reporting a false "all clear"
+    /// when the cause is provider auth, quota, or a bad model name.
+    #[error(
+        "all {failed} review task(s) failed — no review was produced; \
+         check provider credentials, quota, and model name"
+    )]
+    AllTasksFailed { failed: usize },
 }
 
 /// Result of a review run, including partial results from failed tasks.
@@ -175,11 +185,12 @@ impl ReviewOrchestrator {
 
         let mut all_findings: Vec<Finding> = Vec::new();
         let mut failed_count: usize = 0;
+        let mut total_count: usize = 0;
         let mut total_tokens = TokenUsage::default();
         let mut tokens_by_model: BTreeMap<String, TokenUsage> = BTreeMap::new();
         let mut all_audits: Vec<TaskAudit> = Vec::new();
 
-        let (w1_findings, w1_failed, w1_tokens, w1_tokens_by_model, w1_audits) = self
+        let (w1_findings, w1_failed, w1_total, w1_tokens, w1_tokens_by_model, w1_audits) = self
             .dispatch_wave(
                 context,
                 &wave1_agents,
@@ -194,6 +205,7 @@ impl ReviewOrchestrator {
             )
             .await;
         failed_count += w1_failed;
+        total_count += w1_total;
         total_tokens += w1_tokens;
         for (m, t) in w1_tokens_by_model {
             *tokens_by_model.entry(m).or_default() += t;
@@ -204,7 +216,7 @@ impl ReviewOrchestrator {
             // Build a compact summary of wave-1 findings to feed wave-2
             // reviewers as extra context.
             let wave1_summary = format_wave1_summary(&w1_findings);
-            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model, w2_audits) = self
+            let (w2_findings, w2_failed, w2_total, w2_tokens, w2_tokens_by_model, w2_audits) = self
                 .dispatch_wave(
                     context,
                     &wave2_agents,
@@ -219,6 +231,7 @@ impl ReviewOrchestrator {
                 )
                 .await;
             failed_count += w2_failed;
+            total_count += w2_total;
             total_tokens += w2_tokens;
             for (m, t) in w2_tokens_by_model {
                 *tokens_by_model.entry(m).or_default() += t;
@@ -227,7 +240,7 @@ impl ReviewOrchestrator {
             all_findings.extend(w2_findings);
         } else if !wave2_agents.is_empty() {
             // Wave 1 found nothing; run wave 2 anyway with no addendum.
-            let (w2_findings, w2_failed, w2_tokens, w2_tokens_by_model, w2_audits) = self
+            let (w2_findings, w2_failed, w2_total, w2_tokens, w2_tokens_by_model, w2_audits) = self
                 .dispatch_wave(
                     context,
                     &wave2_agents,
@@ -242,6 +255,7 @@ impl ReviewOrchestrator {
                 )
                 .await;
             failed_count += w2_failed;
+            total_count += w2_total;
             total_tokens += w2_tokens;
             for (m, t) in w2_tokens_by_model {
                 *tokens_by_model.entry(m).or_default() += t;
@@ -251,6 +265,17 @@ impl ReviewOrchestrator {
         }
 
         all_findings.extend(w1_findings);
+
+        // Every dispatched task failed — the review did not happen. Surface
+        // this as an error rather than returning an empty (false "all
+        // clear") result, so no caller mistakes a total provider failure
+        // (auth, quota, bad model) for a clean review. A run with zero
+        // tasks (e.g. only binary files) is not a failure.
+        if total_count > 0 && failed_count == total_count {
+            return Err(OrchestratorError::AllTasksFailed {
+                failed: failed_count,
+            });
+        }
 
         // Deduplicate findings
         let deduped = dedup::deduplicate(all_findings);
@@ -310,7 +335,9 @@ impl ReviewOrchestrator {
     ///
     /// `wave_addendum` is appended to each agent's system prompt
     /// before tasks are spawned. Returns aggregated findings, failure
-    /// count, total tokens, and per-model token breakdown.
+    /// count, total dispatched-task count, total tokens, and per-model
+    /// token breakdown. The total lets the caller detect a wave (or run)
+    /// in which every task failed.
     #[allow(clippy::too_many_arguments)]
     async fn dispatch_wave(
         &self,
@@ -327,6 +354,7 @@ impl ReviewOrchestrator {
     ) -> (
         Vec<Finding>,
         usize,
+        usize,
         TokenUsage,
         BTreeMap<String, TokenUsage>,
         Vec<TaskAudit>,
@@ -334,6 +362,7 @@ impl ReviewOrchestrator {
         if wave_agents.is_empty() {
             return (
                 Vec::new(),
+                0,
                 0,
                 TokenUsage::default(),
                 BTreeMap::new(),
@@ -438,6 +467,7 @@ impl ReviewOrchestrator {
             }));
         }
 
+        let total = join_set.len();
         let mut findings: Vec<Finding> = Vec::new();
         let mut failed: usize = 0;
         let mut total_tokens = TokenUsage::default();
@@ -472,7 +502,7 @@ impl ReviewOrchestrator {
                 }
             }
         }
-        (findings, failed, total_tokens, tokens_by_model, audits)
+        (findings, failed, total, total_tokens, tokens_by_model, audits)
     }
 }
 

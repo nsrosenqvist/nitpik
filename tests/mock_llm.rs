@@ -419,30 +419,22 @@ async fn orchestrator_splits_token_usage_by_model() {
 }
 
 #[tokio::test]
-async fn orchestrator_zero_tokens_when_all_failed() {
-    // FailingProvider always returns Err; each task records a failure
-    // and contributes zero tokens to the accumulator.
-    let provider = Arc::new(FailingProvider);
+async fn orchestrator_failed_task_contributes_zero_tokens() {
+    // A failed task contributes zero tokens to the run-wide accumulator.
+    // Run one good agent (known tokens) alongside one failing agent and
+    // assert the total reflects only the good task.
     let config = Config::default();
-    let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(
-        &["src/a.rs".to_string()],
-        &["agent-1".to_string()],
-        false,
-    ));
-    let orchestrator = ReviewOrchestrator::new(
-        provider,
-        &config,
-        cache,
-        progress,
-        false,
-        None,
-        String::new(),
-        false,
-        false,
-        false,
-        None,
-    );
+    let good_tokens = nitpik::models::TokenUsage {
+        input: 100,
+        output: 25,
+        cached_input: 40,
+        cache_creation: 10,
+    };
+    let provider = SelectiveFailProvider {
+        good_findings: test_findings("src/a.rs", "good-agent"),
+        good_tokens,
+    };
+    let orchestrator = failure_orchestrator(provider, &config);
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/a.rs", "let x = 1;")],
@@ -451,14 +443,15 @@ async fn orchestrator_zero_tokens_when_all_failed() {
         is_path_scan: false,
     };
 
-    let agents = vec![test_agent("agent-1")];
+    let agents = vec![test_agent("good-agent"), test_agent("failing-agent")];
     let result = orchestrator
         .run(&context, &agents, 4, false, 10, 50)
         .await
-        .expect("orchestrator should succeed");
+        .expect("partial failure should still succeed");
 
     assert_eq!(result.failed_tasks, 1);
-    assert_eq!(result.tokens, nitpik::models::TokenUsage::default());
+    // Total == only the good task's tokens; the failed task added nothing.
+    assert_eq!(result.tokens, good_tokens);
 }
 
 #[tokio::test]
@@ -631,21 +624,61 @@ impl ReviewProvider for FailingProvider {
     }
 }
 
-#[tokio::test]
-async fn orchestrator_handles_provider_errors_gracefully() {
-    let provider = Arc::new(FailingProvider);
-    let config = Config::default();
-    let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(
-        &["src/main.rs".to_string()],
-        &["failing-agent".to_string()],
-        false,
-    ));
-    let orchestrator = ReviewOrchestrator::new(
-        provider,
-        &config,
-        cache,
-        progress,
+/// Provider that errors only for agents whose name contains "fail",
+/// returning canned findings (and tokens) otherwise. Used to exercise
+/// partial failure: some tasks succeed while others fail.
+struct SelectiveFailProvider {
+    good_findings: Vec<Finding>,
+    good_tokens: nitpik::models::TokenUsage,
+}
+
+impl SelectiveFailProvider {
+    fn new(good_findings: Vec<Finding>) -> Self {
+        Self {
+            good_findings,
+            good_tokens: nitpik::models::TokenUsage::default(),
+        }
+    }
+}
+
+#[async_trait]
+impl ReviewProvider for SelectiveFailProvider {
+    async fn review(
+        &self,
+        agent: &AgentDefinition,
+        _prompt: &str,
+        _agentic: bool,
+        _max_turns: usize,
+        _max_tool_calls: usize,
+    ) -> Result<ReviewOutcome, ProviderError> {
+        if agent.profile.name.contains("fail") {
+            return Err(ProviderError::ApiError("mock API failure".to_string()));
+        }
+        Ok(ReviewOutcome {
+            findings: self.good_findings.clone(),
+            tokens: self.good_tokens,
+            ..Default::default()
+        })
+    }
+
+    async fn triage(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<TriageOutcome, ProviderError> {
+        Ok(TriageOutcome::default())
+    }
+}
+
+fn failure_orchestrator<P: ReviewProvider + 'static>(
+    provider: P,
+    config: &Config,
+) -> ReviewOrchestrator {
+    ReviewOrchestrator::new(
+        Arc::new(provider),
+        config,
+        CacheEngine::new(false),
+        Arc::new(ProgressTracker::new(&[], &[], false)),
         false,
         None,
         String::new(),
@@ -653,7 +686,16 @@ async fn orchestrator_handles_provider_errors_gracefully() {
         false,
         false,
         None,
-    );
+    )
+}
+
+#[tokio::test]
+async fn orchestrator_errors_when_all_tasks_fail() {
+    // When every dispatched task fails, the run is an error — NOT a clean
+    // "0 findings" result. Guards against a total provider failure (auth,
+    // quota, bad model) being mistaken for a passing review.
+    let config = Config::default();
+    let orchestrator = failure_orchestrator(FailingProvider, &config);
 
     let context = ReviewContext {
         diffs: vec![test_diff("src/main.rs", "let x = 1;")],
@@ -662,15 +704,43 @@ async fn orchestrator_handles_provider_errors_gracefully() {
         is_path_scan: false,
     };
 
-    let agents = vec![test_agent("failing-agent")];
-    // Orchestrator should succeed but report the failure via failed_tasks
+    let err = orchestrator
+        .run(&context, &[test_agent("failing-agent")], 4, false, 10, 50)
+        .await
+        .expect_err("all-tasks-failed must surface as an error");
+
+    assert!(
+        matches!(
+            err,
+            nitpik::orchestrator::OrchestratorError::AllTasksFailed { failed } if failed == 1
+        ),
+        "expected AllTasksFailed {{ failed: 1 }}, got: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn orchestrator_partial_failure_returns_findings() {
+    // One agent fails, one succeeds: the run succeeds, returns the
+    // successful agent's findings, and reports the failure via failed_tasks.
+    let config = Config::default();
+    let provider = SelectiveFailProvider::new(test_findings("src/main.rs", "good-agent"));
+    let orchestrator = failure_orchestrator(provider, &config);
+
+    let context = ReviewContext {
+        diffs: vec![test_diff("src/main.rs", "let x = 1;")],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let agents = vec![test_agent("good-agent"), test_agent("failing-agent")];
     let result = orchestrator
         .run(&context, &agents, 4, false, 10, 50)
         .await
-        .expect("orchestrator should succeed even when provider fails");
+        .expect("partial failure should still succeed");
 
-    assert!(result.findings.is_empty());
-    assert!(result.failed_tasks > 0, "should report failed tasks");
+    assert!(!result.findings.is_empty(), "successful agent's findings kept");
+    assert_eq!(result.failed_tasks, 1, "the failing agent is reported");
 }
 
 #[tokio::test]
@@ -2381,16 +2451,15 @@ async fn orchestrator_skips_audit_collection_when_disabled() {
 
 #[tokio::test]
 async fn orchestrator_records_failed_task_in_audit() {
-    let provider = Arc::new(FailingProvider);
+    // Partial failure (one good agent, one failing) so the run returns Ok
+    // and we can inspect the audit: the failing task is recorded as Failed
+    // with an error, the successful one as not-failed.
     let config = Config::default();
+    let provider = SelectiveFailProvider::new(test_findings("src/main.rs", "good-agent"));
     let cache = CacheEngine::new(false);
-    let progress = Arc::new(ProgressTracker::new(
-        &["src/main.rs".to_string()],
-        &["test-agent".to_string()],
-        false,
-    ));
+    let progress = Arc::new(ProgressTracker::new(&[], &[], false));
     let orchestrator = ReviewOrchestrator::new(
-        provider,
+        Arc::new(provider),
         &config,
         cache,
         progress,
@@ -2410,17 +2479,21 @@ async fn orchestrator_records_failed_task_in_audit() {
         is_path_scan: false,
     };
 
-    let agents = vec![test_agent("test-agent")];
+    let agents = vec![test_agent("good-agent"), test_agent("failing-agent")];
     let result = orchestrator
         .run(&context, &agents, 4, false, 10, 50)
         .await
-        .expect("orchestrator should not error even when tasks fail");
+        .expect("partial failure should still succeed");
 
     assert_eq!(result.failed_tasks, 1);
-    assert_eq!(result.task_audits.len(), 1);
-    let task = &result.task_audits[0];
-    assert!(matches!(task.status, nitpik::audit::TaskStatus::Failed));
-    assert!(task.error.is_some());
+    assert_eq!(result.task_audits.len(), 2);
+    let failed: Vec<_> = result
+        .task_audits
+        .iter()
+        .filter(|t| matches!(t.status, nitpik::audit::TaskStatus::Failed))
+        .collect();
+    assert_eq!(failed.len(), 1, "exactly one task audited as failed");
+    assert!(failed[0].error.is_some(), "failed task records an error");
 }
 
 #[tokio::test]
@@ -2679,15 +2752,19 @@ async fn orchestrator_times_out_slow_provider_and_marks_failed() {
         is_path_scan: false,
     };
 
-    let result = orchestrator
+    // The sole task times out → every dispatched task failed → the run is
+    // an error (a timed-out provider must not read as a clean review).
+    let err = orchestrator
         .run(&context, &[test_agent("slow-agent")], 4, false, 10, 50)
         .await
-        .expect("orchestrator should return Ok with failed_tasks > 0");
+        .expect_err("a fully timed-out run must surface as an error");
 
-    assert_eq!(result.failed_tasks, 1, "task should be marked failed");
     assert!(
-        result.findings.is_empty(),
-        "no findings expected from a timed-out task"
+        matches!(
+            err,
+            nitpik::orchestrator::OrchestratorError::AllTasksFailed { failed } if failed == 1
+        ),
+        "timed-out task should count as failed; got: {err:?}"
     );
 }
 

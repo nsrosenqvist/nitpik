@@ -515,7 +515,11 @@ async fn review_case(repo: &Path, profiles: &[String], config: &nitpik::config::
     };
     let progress = Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
 
-    nitpik::review::execute_review(
+    // A total provider failure (all tasks erroring) now surfaces as an
+    // Err from the engine, so `.expect` fails the run loudly instead of
+    // scoring a false "0 findings". Partial failures still return — warn
+    // so they don't silently skew the scorecard.
+    let output = nitpik::review::execute_review(
         config,
         &repo.to_string_lossy(),
         &diffs,
@@ -526,8 +530,15 @@ async fn review_case(repo: &Path, profiles: &[String], config: &nitpik::config::
         progress,
     )
     .await
-    .expect("review")
-    .findings
+    .expect("review");
+
+    if output.result.failed_tasks > 0 {
+        eprintln!(
+            "  ⚠ {} review task(s) failed — scorecard for this case may be skewed",
+            output.result.failed_tasks
+        );
+    }
+    output.findings
 }
 
 #[tokio::test]
