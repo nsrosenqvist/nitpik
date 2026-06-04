@@ -402,7 +402,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.provider.name, ProviderName::Anthropic);
         assert!(config.provider.model.is_none());
-        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-20250514");
+        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-5-20250929");
         assert_eq!(config.review.default_profiles, vec!["auto"]);
         assert_eq!(config.review.agentic.max_turns, 10);
         assert!(!config.secrets.enabled);
@@ -631,7 +631,7 @@ model = "gpt-4o"
     fn resolved_model_uses_provider_default_when_no_model_set() {
         let mut config = Config::default();
         // No explicit model set — resolved_model() should use provider default
-        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-20250514");
+        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-5-20250929");
 
         // Switch provider without setting model — should get new provider's default
         config.provider.name = ProviderName::Gemini;

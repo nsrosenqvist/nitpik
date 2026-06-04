@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "auth-check-inverted",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "cmp-operator-flip",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "kind": "negative",
+      "name": "cosmetic-formatting",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "money-float-rounding",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "kind": "negative",
+      "name": "needed-guard",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "kind": "negative",
+      "name": "rename-docstring",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "sql-injection",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "unhandled-error",
+      "noise": 0,
+      "total_labels": 1
+    }
+  ],
+  "labels_caught": 5,
+  "labels_total": 5,
+  "negatives_clean": 3,
+  "negatives_total": 3,
+  "recall": 1.0,
+  "total_noise": 0
+}

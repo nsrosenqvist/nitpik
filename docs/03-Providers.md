@@ -52,7 +52,7 @@ export NITPIK_API_KEY=sk-ant-...       # works for any provider
 By default, nitpik picks a sensible model for each provider — you only need to set `NITPIK_PROVIDER` and an API key to get started. Override the default with `NITPIK_MODEL`:
 
 ```bash
-export NITPIK_MODEL=claude-sonnet-4-20250514
+export NITPIK_MODEL=claude-sonnet-4-5-20250929
 ```
 
 Or in your `.nitpik.toml`:
@@ -60,14 +60,14 @@ Or in your `.nitpik.toml`:
 ```toml
 [provider]
 name = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-5-20250929"
 ```
 
 ### Default Models
 
 | Provider | Default model |
 |---|---|
-| Anthropic | `claude-sonnet-4-20250514` |
+| Anthropic | `claude-sonnet-4-5-20250929` |
 | Azure OpenAI | `gpt-4o` |
 | Cohere | `command-r-plus` |
 | DeepSeek | `deepseek-chat` |
@@ -82,7 +82,7 @@ model = "claude-sonnet-4-20250514"
 | Moonshot | `moonshot-v1-32k` |
 | Ollama | `llama3` |
 | OpenAI | `gpt-4o` |
-| OpenRouter | `anthropic/claude-sonnet-4-20250514` |
+| OpenRouter | `anthropic/claude-sonnet-4.5` |
 | Perplexity | `sonar-pro` |
 | Together | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
 | xAI (Grok) | `grok-3` |
@@ -137,7 +137,7 @@ Individual reviewer profiles can specify their own model, overriding the global 
 ---
 name: security
 description: Deep security analysis
-model: claude-sonnet-4-20250514
+model: claude-sonnet-4-5-20250929
 ---
 ```
 
@@ -150,7 +150,7 @@ Instead of environment variables, configure the provider in `.nitpik.toml`:
 ```toml
 [provider]
 name = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-5-20250929"
 # api_key = "..."   # possible but not recommended — use env vars for secrets
 ```
 

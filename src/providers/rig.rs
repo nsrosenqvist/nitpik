@@ -95,6 +95,47 @@ struct CallResult {
 /// silently ignore it. The agentic prompt itself instructs the LLM to
 /// return JSON, and [`parse_with_fallbacks`] handles markdown-fenced
 /// or prose-prefixed responses.
+/// Strip JSON-Schema validation keywords that strict structured-output
+/// schemas reject. schemars emits `minimum` (and `format: "uint32"`) for
+/// `u32` fields such as `Finding::line`; Anthropic tool schemas 400 on it
+/// ("property 'minimum' is not supported"), and OpenAI strict mode / Gemini
+/// reject the same family. Removing them only loosens validation — the data
+/// shape (types, required, properties) is unchanged — so it's safe for every
+/// provider, not just the strict ones.
+fn strip_unsupported_schema_keywords(value: &mut serde_json::Value) {
+    const DROP: &[&str] = &[
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "format",
+    ];
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in DROP {
+                map.remove(*key);
+            }
+            for child in map.values_mut() {
+                strip_unsupported_schema_keywords(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items.iter_mut() {
+                strip_unsupported_schema_keywords(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The structured-output schema for `T`, sanitized for strict providers.
+fn review_output_schema<T: JsonSchema>() -> schemars::Schema {
+    let mut value = schema_for!(T).to_value();
+    strip_unsupported_schema_keywords(&mut value);
+    schemars::Schema::try_from(value).expect("sanitized schema is a valid JSON Schema object")
+}
+
 async fn dispatch_review<M, T>(model: M, args: CallArgs<'_>) -> Result<CallResult, ProviderError>
 where
     M: CompletionModel + 'static,
@@ -186,7 +227,7 @@ where
             .preamble(system_prompt.to_string())
             .temperature(0.0)
             .max_tokens(max_tokens)
-            .output_schema(schema_for!(T));
+            .output_schema(review_output_schema::<T>());
 
         let response = request
             .send()
@@ -564,6 +605,32 @@ pub use super::response::{classify_error, is_retryable, retry_backoff};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_unsupported_schema_keywords_recurses() {
+        let mut v = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "line": { "type": "integer", "format": "uint32", "minimum": 0.0 },
+                "range": { "type": "array", "items": { "type": "integer", "maximum": 10 } }
+            }
+        });
+        strip_unsupported_schema_keywords(&mut v);
+        let props = &v["properties"];
+        assert!(props["line"].get("minimum").is_none(), "minimum stripped");
+        assert!(props["line"].get("format").is_none(), "format stripped");
+        assert_eq!(props["line"]["type"], "integer", "type preserved");
+        assert!(props["range"]["items"].get("maximum").is_none(), "nested stripped");
+    }
+
+    #[test]
+    fn review_output_schema_drops_minimum_for_u32_fields() {
+        // Finding::line is u32, which schemars annotates with `minimum` —
+        // the keyword Anthropic's tool schema rejects. It must be gone.
+        let schema = review_output_schema::<crate::providers::FindingsResponse>();
+        let text = serde_json::to_string(&schema.to_value()).unwrap();
+        assert!(!text.contains("\"minimum\""), "schema must not carry `minimum`: {text}");
+    }
 
     #[test]
     fn new_provider_missing_api_key() {

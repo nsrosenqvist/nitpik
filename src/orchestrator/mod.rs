@@ -56,8 +56,9 @@ pub enum OrchestratorError {
     /// found nothing" prevents callers from reporting a false "all clear"
     /// when the cause is provider auth, quota, or a bad model name.
     #[error(
-        "all {failed} review task(s) failed — no review was produced; \
-         check provider credentials, quota, and model name"
+        "all {failed} review task(s) failed — no review was produced \
+         (see the per-task errors above; common causes: invalid model name, \
+         max_tokens over the model's cap, auth, or quota)"
     )]
     AllTasksFailed { failed: usize },
 }
@@ -730,6 +731,13 @@ async fn execute_review_task(params: ReviewTaskParams) -> TaskOutput {
             }
         }
         Err((err_msg, retries)) => {
+            // Surface the real reason a task gave up (after retries) so a
+            // misconfig — bad model, max_tokens over the cap, auth — is
+            // visible, not swallowed into a bare "task failed" count.
+            eprintln!(
+                "Warning: review task failed after retries ({}, {file_path}): {err_msg}",
+                agent.profile.name
+            );
             progress.update(
                 &file_path,
                 &agent.profile.name,

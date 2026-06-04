@@ -160,10 +160,20 @@ pub const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 300;
 
 /// Per-call ceiling on completion response tokens.
 ///
-/// Sized for thinking models (e.g. Gemini 2.5 Pro, Claude with extended
-/// thinking) that consume part of the budget for internal reasoning
-/// tokens. Models without thinking will rarely come close to this cap.
-pub const MAX_COMPLETION_TOKENS: u64 = 65536;
+/// Sized to the *task*, not the model. A per-file review response is a small
+/// findings JSON, so a modest fixed budget is ample — and because the task
+/// never needs much, one value works everywhere without per-model or
+/// per-provider tuning (the real output caps are per-*model* anyway:
+/// gpt-4o 16384 vs gpt-4.1 32768; Sonnet 4.5 64000 — a per-provider cap
+/// wouldn't fit them). It also stays at/under every default model's hard cap
+/// so requests never 400 on `max_tokens`. We can't simply omit it: Anthropic
+/// requires `max_tokens`.
+///
+/// Note: if extended thinking is ever enabled, thinking tokens count toward
+/// this budget and it must be raised. Providers with a known hard cap below
+/// this value are still clamped in [`crate::providers::rig`] via
+/// [`ProviderName::max_completion_tokens`](crate::models::ProviderName::max_completion_tokens).
+pub const MAX_COMPLETION_TOKENS: u64 = 16384;
 
 // ── HTTP constants ──────────────────────────────────────────────────
 

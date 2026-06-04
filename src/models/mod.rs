@@ -100,7 +100,7 @@ impl ProviderName {
     /// config files, or profile frontmatter.
     pub fn default_model(self) -> &'static str {
         match self {
-            ProviderName::Anthropic => "claude-sonnet-4-20250514",
+            ProviderName::Anthropic => "claude-sonnet-4-5-20250929",
             ProviderName::Azure => "gpt-4o",
             ProviderName::Cohere => "command-r-plus",
             ProviderName::DeepSeek => "deepseek-chat",
@@ -115,7 +115,7 @@ impl ProviderName {
             ProviderName::Moonshot => "moonshot-v1-32k",
             ProviderName::Ollama => "llama3",
             ProviderName::OpenAI | ProviderName::OpenAICompatible => "gpt-4o",
-            ProviderName::OpenRouter => "anthropic/claude-sonnet-4-20250514",
+            ProviderName::OpenRouter => "anthropic/claude-sonnet-4.5",
             ProviderName::Perplexity => "sonar-pro",
             ProviderName::Together => "meta-llama/Llama-3.3-70B-Instruct-Turbo",
             ProviderName::XAI => "grok-3",

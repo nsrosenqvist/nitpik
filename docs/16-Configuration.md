@@ -21,7 +21,7 @@ Drop this in your repository root to set defaults for your team:
 ```toml
 [provider]
 name = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-5-20250929"
 # base_url = "https://custom-endpoint.example.com/v1"  # for openai-compatible
 
 [review]
