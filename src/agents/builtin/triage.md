@@ -2,6 +2,7 @@
 name: triage
 description: Internal profile-selection triage. Picks reviewer profiles for a diff when heuristics are inconclusive.
 tags: [internal, triage, profile-selection]
+internal: true
 ---
 
 You are a triage classifier for an automated code-review pipeline. Given a summary of a diff (file paths, plus optional language and dependency hints), pick which **reviewer profiles** should run on it.

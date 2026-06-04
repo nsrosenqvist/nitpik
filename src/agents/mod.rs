@@ -34,94 +34,35 @@ pub enum AgentError {
 
 /// Resolve a list of profile names/paths into agent definitions.
 ///
-/// Resolution order for each value:
-/// 1. If `agent_dir` is set and `{agent_dir}/{value}.md` exists → load it
-///    (custom profiles override built-ins with the same name)
-/// 2. If it matches a built-in name → use embedded profile
-/// 3. If it's a file path (contains `/` or `.md`) → load it directly
-/// 4. Otherwise → error with suggestions
+/// For each value, [`ProfileRepository::resolve`] is consulted:
+/// 1. A registry name — a built-in, or a custom profile from `agent_dir`
+///    that overrides a built-in of the same name. Internal profiles
+///    (`critic`, `triage`) are *not* selectable this way.
+/// 2. A file path (contains `/` or ends with `.md`) → loaded directly.
+/// 3. Otherwise → error suggesting the selectable built-ins.
 pub async fn resolve_profiles(
     profiles: &[String],
     agent_dir: Option<&Path>,
 ) -> Result<Vec<AgentDefinition>, AgentError> {
-    let mut agents = Vec::new();
+    let repo = ProfileRepository::load(agent_dir).await?;
 
+    let mut agents = Vec::with_capacity(profiles.len());
     for profile in profiles {
-        let agent = resolve_single_profile(profile, agent_dir).await?;
-        agents.push(agent);
+        agents.push(repo.resolve(profile).await?);
     }
 
     Ok(agents)
 }
 
-/// List all available profiles: built-ins plus any custom ones from `agent_dir`.
+/// List all user-selectable profiles: built-ins plus any custom ones
+/// from `agent_dir`, excluding internal profiles (`critic`, `triage`).
 ///
 /// Custom profiles whose `name` matches a built-in replace the built-in entry.
 pub async fn list_all_profiles(
     agent_dir: Option<&Path>,
 ) -> Result<Vec<AgentDefinition>, AgentError> {
-    let mut agents: Vec<AgentDefinition> = Vec::new();
-
-    // Custom profiles from agent_dir take precedence — load them first
-    // so we know which built-in names to skip.
-    let mut custom_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-    if let Some(dir) = agent_dir
-        && dir.is_dir()
-    {
-        let mut entries = tokio::fs::read_dir(dir)
-            .await
-            .map_err(|e| AgentError::ReadError {
-                path: dir.display().to_string(),
-                source: e,
-            })?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| AgentError::ReadError {
-                path: dir.display().to_string(),
-                source: e,
-            })?
-        {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                let content =
-                    tokio::fs::read_to_string(&path)
-                        .await
-                        .map_err(|e| AgentError::ReadError {
-                            path: path.display().to_string(),
-                            source: e,
-                        })?;
-                match parser::parse_agent_definition(&content) {
-                    Ok(agent) => {
-                        custom_names.insert(agent.profile.name.clone());
-                        agents.push(agent);
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: skipping {}: {e}", path.display());
-                    }
-                }
-            }
-        }
-    }
-
-    // Built-in profiles, skipping any overridden by a custom profile of the same name.
-    // The `critic` and `triage` profiles are internal (used by the verify and
-    // hybrid-auto passes) and are intentionally excluded from listings so they
-    // never participate as a regular reviewer.
-    for name in builtin::list_builtin_names() {
-        if name == "critic" || name == "triage" {
-            continue;
-        }
-        if custom_names.contains(name) {
-            continue;
-        }
-        if let Some(agent) = builtin::get_builtin(name) {
-            agents.push(agent);
-        }
-    }
-
-    Ok(agents)
+    let repo = ProfileRepository::load(agent_dir).await?;
+    Ok(repo.selectable().cloned().collect())
 }
 
 /// Resolve profiles whose tags match any of the given tag values.
@@ -133,11 +74,11 @@ pub async fn resolve_profiles_by_tags(
     tags: &[String],
     agent_dir: Option<&Path>,
 ) -> Result<Vec<AgentDefinition>, AgentError> {
-    let all = list_all_profiles(agent_dir).await?;
+    let repo = ProfileRepository::load(agent_dir).await?;
     let lower_tags: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
 
-    let matched: Vec<AgentDefinition> = all
-        .into_iter()
+    Ok(repo
+        .selectable()
         .filter(|agent| {
             agent
                 .profile
@@ -145,9 +86,8 @@ pub async fn resolve_profiles_by_tags(
                 .iter()
                 .any(|t| lower_tags.contains(&t.to_lowercase()))
         })
-        .collect();
-
-    Ok(matched)
+        .cloned()
+        .collect())
 }
 
 /// List profiles whose frontmatter declares `always_include: true`.
@@ -164,62 +104,150 @@ pub async fn resolve_profiles_by_tags(
 pub async fn list_always_include_profiles(
     agent_dir: Option<&Path>,
 ) -> Result<Vec<AgentDefinition>, AgentError> {
-    let all = list_all_profiles(agent_dir).await?;
-    Ok(all
-        .into_iter()
+    let repo = ProfileRepository::load(agent_dir).await?;
+    Ok(repo
+        .selectable()
         .filter(|a| a.profile.always_include)
+        .cloned()
         .collect())
 }
 
-/// Resolve a single profile name or path.
-async fn resolve_single_profile(
-    profile: &str,
-    agent_dir: Option<&Path>,
-) -> Result<AgentDefinition, AgentError> {
-    // 1. Check agent_dir first so custom profiles can override built-ins
-    if let Some(dir) = agent_dir {
-        let path = dir.join(format!("{profile}.md"));
-        if path.exists() {
-            let content =
-                tokio::fs::read_to_string(&path)
+/// The set of profiles available for one review run: every built-in plus
+/// any custom profiles from `agent_dir`, with a custom profile replacing
+/// the built-in of the same name.
+///
+/// This is the single load-and-resolve path. Every public helper
+/// ([`resolve_profiles`], [`list_all_profiles`], [`resolve_profiles_by_tags`],
+/// [`list_always_include_profiles`]) builds on it, so custom-override
+/// precedence and internal-profile filtering live in exactly one place.
+/// Internal profiles (`critic`, `triage`) are kept in the registry — so
+/// resolution can tell "internal, not selectable" apart from "unknown" —
+/// but are never returned by [`Self::selectable`]. nitpik's own passes
+/// load them by name through [`builtin::get_builtin`], not through here.
+struct ProfileRepository {
+    /// Profiles in deterministic order: built-ins (declared order) first,
+    /// then custom-only profiles (directory order). A custom override
+    /// keeps the overridden built-in's position.
+    profiles: Vec<AgentDefinition>,
+}
+
+impl ProfileRepository {
+    /// Load every built-in, then merge custom profiles from `agent_dir`.
+    /// A malformed custom profile is skipped with a warning, matching the
+    /// previous listing behaviour. A missing/non-directory `agent_dir` is
+    /// not an error — only the built-ins are returned.
+    async fn load(agent_dir: Option<&Path>) -> Result<Self, AgentError> {
+        let mut profiles = builtin::all();
+
+        if let Some(dir) = agent_dir
+            && dir.is_dir()
+        {
+            let mut entries = tokio::fs::read_dir(dir)
+                .await
+                .map_err(|e| AgentError::ReadError {
+                    path: dir.display().to_string(),
+                    source: e,
+                })?;
+
+            while let Some(entry) =
+                entries
+                    .next_entry()
                     .await
                     .map_err(|e| AgentError::ReadError {
-                        path: path.display().to_string(),
+                        path: dir.display().to_string(),
                         source: e,
-                    })?;
-            return parser::parse_agent_definition(&content)
-                .map_err(|e| AgentError::ParseError(e.to_string()));
+                    })?
+            {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "md") {
+                    let content =
+                        tokio::fs::read_to_string(&path)
+                            .await
+                            .map_err(|e| AgentError::ReadError {
+                                path: path.display().to_string(),
+                                source: e,
+                            })?;
+                    match parser::parse_agent_definition(&content) {
+                        Ok(agent) => upsert(&mut profiles, agent),
+                        Err(e) => eprintln!("Warning: skipping {}: {e}", path.display()),
+                    }
+                }
+            }
         }
+
+        Ok(Self { profiles })
     }
 
-    // 2. Check built-in profiles
-    if let Some(agent) = builtin::get_builtin(profile) {
-        return Ok(agent);
+    /// Look up a profile by exact name (built-in or custom override),
+    /// including internal ones.
+    fn get(&self, name: &str) -> Option<&AgentDefinition> {
+        self.profiles.iter().find(|a| a.profile.name == name)
     }
 
-    // 3. Check if it's a direct file path
-    if profile.contains('/') || profile.ends_with(".md") {
-        let path = Path::new(profile);
-        if path.exists() {
-            let content =
-                tokio::fs::read_to_string(path)
-                    .await
-                    .map_err(|e| AgentError::ReadError {
-                        path: profile.to_string(),
-                        source: e,
-                    })?;
-            return parser::parse_agent_definition(&content)
-                .map_err(|e| AgentError::ParseError(e.to_string()));
+    /// Profiles a user may list or select — excludes internal profiles.
+    fn selectable(&self) -> impl Iterator<Item = &AgentDefinition> {
+        self.profiles.iter().filter(|a| !a.profile.internal)
+    }
+
+    /// Comma-separated selectable names, for "did you mean" error text.
+    fn selectable_names(&self) -> String {
+        self.selectable()
+            .map(|a| a.profile.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Resolve a single `--profile` value: a registry name first, then a
+    /// filesystem path. Internal profiles are rejected as not selectable.
+    async fn resolve(&self, value: &str) -> Result<AgentDefinition, AgentError> {
+        // 1. Registry name — custom overrides already merged in `load`.
+        if let Some(agent) = self.get(value) {
+            if agent.profile.internal {
+                return Err(AgentError::NotFound(format!(
+                    "'{value}' is an internal profile and cannot be selected directly. \
+                     Available profiles: {}",
+                    self.selectable_names()
+                )));
+            }
+            return Ok(agent.clone());
         }
-        return Err(AgentError::NotFound(format!("file not found: {profile}")));
-    }
 
-    // 4. Error with suggestions
-    let builtins = builtin::list_builtin_names();
-    Err(AgentError::NotFound(format!(
-        "unknown profile '{profile}'. Available built-in profiles: {}",
-        builtins.join(", ")
-    )))
+        // 2. Direct file path.
+        if value.contains('/') || value.ends_with(".md") {
+            let path = Path::new(value);
+            if path.exists() {
+                let content =
+                    tokio::fs::read_to_string(path)
+                        .await
+                        .map_err(|e| AgentError::ReadError {
+                            path: value.to_string(),
+                            source: e,
+                        })?;
+                return parser::parse_agent_definition(&content)
+                    .map_err(|e| AgentError::ParseError(e.to_string()));
+            }
+            return Err(AgentError::NotFound(format!("file not found: {value}")));
+        }
+
+        // 3. Unknown.
+        Err(AgentError::NotFound(format!(
+            "unknown profile '{value}'. Available built-in profiles: {}",
+            self.selectable_names()
+        )))
+    }
+}
+
+/// Insert `def` into `profiles`, replacing an existing entry of the same
+/// name (a custom profile overrides the built-in) or appending it.
+fn upsert(profiles: &mut Vec<AgentDefinition>, def: AgentDefinition) {
+    if let Some(slot) = profiles
+        .iter_mut()
+        .find(|a| a.profile.name == def.profile.name)
+    {
+        *slot = def;
+    } else {
+        profiles.push(def);
+    }
 }
 
 #[cfg(test)]
@@ -254,6 +282,70 @@ mod tests {
             err.contains("backend"),
             "should suggest built-ins, got: {err}"
         );
+        assert!(
+            !err.contains("critic") && !err.contains("triage"),
+            "suggestions must not leak internal profiles, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_internal_profiles_rejected() {
+        for name in ["critic", "triage"] {
+            let err = resolve_profiles(&[name.to_string()], None)
+                .await
+                .expect_err("internal profile must not be selectable")
+                .to_string();
+            assert!(err.contains("internal"), "got: {err}");
+            assert!(
+                err.contains(name),
+                "error should name the rejected profile, got: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn list_all_excludes_internal_profiles() {
+        let agents = list_all_profiles(None).await.unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
+        assert!(!names.contains(&"critic"), "got: {names:?}");
+        assert!(!names.contains(&"triage"), "got: {names:?}");
+    }
+
+    #[tokio::test]
+    async fn resolve_by_tag_excludes_internal_profiles() {
+        // `triage` carries the `internal` tag, but being an internal
+        // profile it must never surface through tag selection.
+        let agents = resolve_profiles_by_tags(&["internal".to_string()], None)
+            .await
+            .unwrap();
+        assert!(
+            agents.is_empty(),
+            "internal-tagged internal profile leaked: {:?}",
+            agents.iter().map(|a| &a.profile.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_override_of_internal_name_is_user_selectable() {
+        // A user who ships their own `critic.md` (without `internal: true`)
+        // deliberately reclaims that name as a regular reviewer — while the
+        // built-in internal critic is still what the verify pass loads.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("critic.md"),
+            "---\nname: critic\ndescription: My own critic\ntags: []\n---\nReview prompt.",
+        )
+        .unwrap();
+
+        let agents = resolve_profiles(&["critic".to_string()], Some(dir.path()))
+            .await
+            .unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].profile.description, "My own critic");
+        assert!(!agents[0].profile.internal, "override is not internal");
+
+        // The built-in critic the verify pass uses is unaffected.
+        assert!(builtin::get_builtin("critic").unwrap().profile.internal);
     }
 
     #[tokio::test]

@@ -69,6 +69,21 @@ pub struct AgentProfile {
     #[serde(default)]
     pub always_include: bool,
 
+    /// Whether this profile is for nitpik's own internal passes (the
+    /// verify critic, the auto-selection triage) rather than a reviewer
+    /// the user runs. Internal profiles are excluded from listings, tag
+    /// matching, `auto` always-include, and explicit `--profile`
+    /// selection; nitpik loads them by name through dedicated internal
+    /// code paths only (see
+    /// [`agents::builtin::get_builtin`](crate::agents::builtin::get_builtin)).
+    ///
+    /// A custom profile of the same name shipped in `--profile-dir`
+    /// replaces the built-in entirely, so overriding `critic`/`triage`
+    /// without `internal: true` deliberately makes that name
+    /// user-selectable.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub internal: bool,
+
     /// Wave this profile runs in for multi-wave reviews.
     ///
     /// Wave 1 is the default. Profiles with `wave: 2` run after wave 1
@@ -86,6 +101,12 @@ pub struct AgentProfile {
 
 fn default_wave() -> u8 {
     1
+}
+
+/// Serde `skip_serializing_if` predicate: omit `false` booleans so
+/// flags like `internal` don't add noise to serialized profile output.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// A custom tool defined in agent profile frontmatter.
