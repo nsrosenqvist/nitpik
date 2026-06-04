@@ -568,6 +568,14 @@ async fn eval_corpus_scorecard() {
         let (repo, _tmp) = setup_repo(dir).await;
         let findings = review_case(&repo, &case.profiles, &config).await;
         eprintln!("  · {name}: {} finding(s)", findings.len());
+        // Dump each finding's anchor so a miss (a finding outside the
+        // label's ±tolerance window) is diagnosable without a re-run.
+        for f in &findings {
+            eprintln!(
+                "      {}:{} [{}] {}",
+                f.file, f.line, f.severity, f.title
+            );
+        }
         cases.push(score_case(&name, &case, &findings));
     }
 

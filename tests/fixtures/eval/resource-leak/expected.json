@@ -1,0 +1,8 @@
+{
+  "description": "Refactor from a context manager to manual open/close introduces a file-handle leak: the early `return \"\"` on an empty file skips `f.close()`.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "reader.py", "line": 5, "min_severity": "warning", "note": "file handle leaked on the empty-line early return path" }
+  ]
+}

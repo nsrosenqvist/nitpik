@@ -1,0 +1,8 @@
+{
+  "description": "Off-by-one in slice bounds: `end` now spans `per_page + 1` items, so each page includes the first item of the next page — duplicated rows across page boundaries.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "paginate.py", "line": 3, "min_severity": "warning", "note": "page end overshoots by one, overlapping adjacent pages" }
+  ]
+}

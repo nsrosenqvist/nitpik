@@ -1,0 +1,6 @@
+{
+  "description": "Two comparisons collapsed into an equivalent Python chained comparison (`0 < x < 100`). Same truth table; a reviewer over-indexed on operator changes might wrongly flag it. Should draw no warning/error finding.",
+  "kind": "negative",
+  "profiles": ["backend"],
+  "expected": []
+}

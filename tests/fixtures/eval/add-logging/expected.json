@@ -1,0 +1,6 @@
+{
+  "description": "Adds a benign log line (an item count, no sensitive data) plus the import it needs. No behavior change; should draw no warning/error finding.",
+  "kind": "negative",
+  "profiles": ["backend"],
+  "expected": []
+}

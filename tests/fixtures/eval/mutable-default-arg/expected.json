@@ -1,0 +1,8 @@
+{
+  "description": "Replaces the None-sentinel idiom with a mutable default list. The default `[]` is created once and shared across calls, so items accumulate across independent invocations.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "accumulate.py", "line": 1, "min_severity": "warning", "note": "mutable default argument shared across calls" }
+  ]
+}

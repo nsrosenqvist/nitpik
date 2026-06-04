@@ -1,0 +1,8 @@
+{
+  "description": "Accumulator type narrowed from u32 to u8, so the running sum wraps at 256 and the final `as u32` widens an already-truncated value. The checksum is now wrong for any input summing past 255.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "checksum.rs", "line": 2, "min_severity": "warning", "note": "u8 accumulator truncates the running sum before widening" }
+  ]
+}

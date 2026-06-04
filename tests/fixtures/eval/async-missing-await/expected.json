@@ -1,0 +1,8 @@
+{
+  "description": "Dropped `await` on an async predicate: `isAllowed(user)` now returns a Promise, which is always truthy, so every caller passes the admin gate regardless of role.",
+  "kind": "positive",
+  "profiles": ["security"],
+  "expected": [
+    { "file": "auth.js", "line": 6, "min_severity": "error", "note": "missing await makes the auth check always pass (Promise is truthy)" }
+  ]
+}

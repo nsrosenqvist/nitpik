@@ -1,0 +1,8 @@
+{
+  "description": "`datetime.now(timezone.utc)` changed to naive `datetime.now()`. Comparing a naive local time against an aware UTC datetime raises TypeError at runtime, and even where it doesn't, the local-vs-UTC offset makes expiry decisions wrong.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "token.py", "line": 6, "min_severity": "warning", "note": "naive datetime compared against an aware UTC value" }
+  ]
+}

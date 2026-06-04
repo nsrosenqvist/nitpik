@@ -1,0 +1,8 @@
+{
+  "description": "A blanket `except Exception: return 0` masks distinct failures (missing file, corrupt/non-integer contents) as a silent zero, so callers can't distinguish 'no data' from 'broken data' and downstream counts are silently wrong.",
+  "kind": "positive",
+  "profiles": ["backend"],
+  "expected": [
+    { "file": "load.py", "line": 5, "min_severity": "warning", "note": "overly broad exception swallow hides real errors as a silent default" }
+  ]
+}

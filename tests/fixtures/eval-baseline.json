@@ -1,6 +1,22 @@
 {
   "cases": [
     {
+      "caught": 0,
+      "extra": 0,
+      "kind": "negative",
+      "name": "add-logging",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "async-missing-await",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
       "caught": 1,
       "extra": 0,
       "kind": "positive",
@@ -20,6 +36,14 @@
       "caught": 0,
       "extra": 0,
       "kind": "negative",
+      "name": "comprehension-swap",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "kind": "negative",
       "name": "cosmetic-formatting",
       "noise": 0,
       "total_labels": 0
@@ -28,7 +52,23 @@
       "caught": 1,
       "extra": 0,
       "kind": "positive",
+      "name": "integer-truncation",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
       "name": "money-float-rounding",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "mutable-default-arg",
       "noise": 0,
       "total_labels": 1
     },
@@ -41,6 +81,22 @@
       "total_labels": 0
     },
     {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "off-by-one-pagination",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "kind": "negative",
+      "name": "operator-order-equivalent",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
       "caught": 0,
       "extra": 0,
       "kind": "negative",
@@ -49,10 +105,34 @@
       "total_labels": 0
     },
     {
+      "caught": 0,
+      "extra": 1,
+      "kind": "positive",
+      "name": "resource-leak",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
       "caught": 1,
       "extra": 0,
       "kind": "positive",
       "name": "sql-injection",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "kind": "positive",
+      "name": "swallowed-exception",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "kind": "positive",
+      "name": "timezone-naive",
       "noise": 0,
       "total_labels": 1
     },
@@ -65,10 +145,10 @@
       "total_labels": 1
     }
   ],
-  "labels_caught": 5,
-  "labels_total": 5,
-  "negatives_clean": 3,
-  "negatives_total": 3,
-  "recall": 1.0,
+  "labels_caught": 10,
+  "labels_total": 12,
+  "negatives_clean": 6,
+  "negatives_total": 6,
+  "recall": 0.8333333333333334,
   "total_noise": 0
 }

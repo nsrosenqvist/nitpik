@@ -65,6 +65,24 @@ e2e fixtures, plus an `expected.json`:
 4. Write `expected.json`. No code changes needed — the harness auto-discovers
    any directory containing `expected.json`.
 
+## Current baseline & known-hard cases
+
+The committed baseline (`tests/fixtures/eval-baseline.json`) is intentionally
+**not** a perfect score — a corpus the reviewer aces every time can't detect
+improvement, only regression. The two recurring misses are kept as honest
+headroom, not bugs in the corpus:
+
+- **resource-leak** — the planted leak spans the `open()` acquisition and the
+  early-return that skips `close()`. The reviewer reliably *finds* it but tends
+  to anchor on the `open()` line, which can fall outside a single label's ±2
+  window. A signal about anchor placement, not recall.
+- **swallowed-exception** — a blanket `except Exception: return 0`. Borderline
+  by design: some reviewers treat broad-except-with-default as acceptable, so a
+  miss here reflects severity judgment rather than a clear bug.
+
+The `--ignored` runner prints each finding's `file:line [severity] title`, so a
+miss can be diagnosed (wrong anchor vs. truly absent) without re-running.
+
 ## Roadmap
 
 This corpus is the fast, synthetic, fully-deterministic-to-author baseline.

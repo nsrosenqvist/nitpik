@@ -1,0 +1,6 @@
+{
+  "description": "Loop-and-append rewritten as an equivalent list comprehension. Identical output, ordering, and types; should draw no warning/error finding.",
+  "kind": "negative",
+  "profiles": ["backend"],
+  "expected": []
+}
