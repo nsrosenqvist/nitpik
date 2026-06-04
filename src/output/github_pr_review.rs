@@ -23,10 +23,69 @@
 //! `GITHUB_API_URL` (GitHub Enterprise) and `GITHUB_SERVER_URL` /
 //! `GITHUB_RUN_ID` (run-link footer) are used when present.
 
+use std::collections::HashSet;
+
 use crate::env::Env;
 use crate::models::finding::Finding;
 use crate::output::{OutputFormatter, OutputPublisher};
 use thiserror::Error;
+
+/// Stable, line-independent fingerprint of a finding, used to recognize
+/// the same issue across PR pushes (line numbers shift; `path | title |
+/// evidence` does not). Hashed so it embeds cleanly in a comment marker.
+fn fingerprint(f: &Finding) -> String {
+    let basis = format!("{}\u{0}{}\u{0}{}", f.file, f.title, f.evidence.join(","));
+    format!("{:016x}", xxhash_rust::xxh3::xxh3_64(basis.as_bytes()))
+}
+
+/// Hidden marker embedded in each inline comment so a later run can tell
+/// which findings it has already posted. Invisible in GitHub's rendered
+/// Markdown.
+fn comment_marker(f: &Finding) -> String {
+    format!("<!-- nitpik:{} -->", fingerprint(f))
+}
+
+/// Extract the set of nitpik fingerprints already present in a batch of
+/// existing comment bodies.
+fn extract_markers<'a>(bodies: impl IntoIterator<Item = &'a str>) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for body in bodies {
+        let mut rest = body;
+        while let Some(start) = rest.find("<!-- nitpik:") {
+            let after = &rest[start + "<!-- nitpik:".len()..];
+            if let Some(end) = after.find(" -->") {
+                out.insert(after[..end].trim().to_string());
+                rest = &after[end..];
+            } else {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Split findings into those not yet posted (by fingerprint) and a count
+/// of those skipped because an earlier run already commented on them.
+fn partition_new(findings: &[Finding], existing: &HashSet<String>) -> (Vec<Finding>, usize) {
+    let mut fresh = Vec::new();
+    let mut skipped = 0usize;
+    for f in findings {
+        if existing.contains(&fingerprint(f)) {
+            skipped += 1;
+        } else {
+            fresh.push(f.clone());
+        }
+    }
+    (fresh, skipped)
+}
+
+/// Decide whether to post a review at all. Post when there's something new
+/// to say, or on a first-ever clean pass (no findings and no prior nitpik
+/// comments) — but stay quiet on re-runs where nothing is new, so the bot
+/// doesn't re-spam an unchanged PR.
+fn should_post(total_findings: usize, new_findings: usize, had_prior_comments: bool) -> bool {
+    new_findings > 0 || (total_findings == 0 && !had_prior_comments)
+}
 
 /// Errors from the GitHub PR review API path.
 #[derive(Error, Debug)]
@@ -49,8 +108,9 @@ pub struct GithubPrReviewFormatter;
 
 impl OutputFormatter for GithubPrReviewFormatter {
     fn format(&self, findings: &[Finding]) -> String {
-        // No env here (pure) — the run-link footer is added by the publisher.
-        let payload = build_review_payload(findings, "");
+        // No env here (pure) — the run-link footer and cross-run dedup are
+        // applied by the publisher; the rendered payload comments on all.
+        let payload = build_payload(findings, findings, "");
         serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string())
     }
 }
@@ -96,6 +156,7 @@ fn format_comment_body(f: &Finding) -> String {
         body.push_str(&format!("\n\n**Suggestion:** {suggestion}"));
     }
     body.push_str(&format!("\n\n_— agent: {}_", f.agent));
+    body.push_str(&format!("\n\n{}", comment_marker(f)));
     body
 }
 
@@ -122,14 +183,22 @@ fn review_body(findings: &[Finding], footer: &str) -> String {
     )
 }
 
-/// Assemble the full `createReview` request body. `commit_id` is
-/// intentionally omitted so GitHub anchors to the PR's latest commit —
-/// avoiding the merge-ref-vs-head-SHA ambiguity on `pull_request` events.
-fn build_review_payload(findings: &[Finding], footer: &str) -> serde_json::Value {
+/// Assemble the full `createReview` request body. The summary body counts
+/// `summary_findings` (the PR's whole current state) while inline comments
+/// are posted only for `comment_findings` (the not-yet-posted subset) —
+/// the two differ when cross-run dedup suppresses already-posted findings.
+/// `commit_id` is intentionally omitted so GitHub anchors to the PR's
+/// latest commit — avoiding the merge-ref-vs-head-SHA ambiguity on
+/// `pull_request` events.
+fn build_payload(
+    summary_findings: &[Finding],
+    comment_findings: &[Finding],
+    footer: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "event": "COMMENT",
-        "body": review_body(findings, footer),
-        "comments": comments_json(findings),
+        "body": review_body(summary_findings, footer),
+        "comments": comments_json(comment_findings),
     })
 }
 
@@ -213,21 +282,34 @@ pub async fn post_review(findings: &[Finding], env: &Env) -> Result<(), GithubPr
         .ok_or_else(|| GithubPrReviewError::InvalidRepository(repository.clone()))?;
     let pr_number = resolve_pr_number(env)?;
 
-    let api_url = env
+    let api_base = env
         .var("GITHUB_API_URL")
         .unwrap_or_else(|_| "https://api.github.com".to_string());
-    let url = format!(
-        "{}/repos/{}/{}/pulls/{}/reviews",
-        api_url.trim_end_matches('/'),
-        owner,
-        repo,
-        pr_number,
-    );
-
-    let payload = build_review_payload(findings, &run_footer(env));
+    let api_base = api_base.trim_end_matches('/');
 
     let client = crate::http::build_client()
         .map_err(|e| GithubPrReviewError::ApiError(format!("failed to build HTTP client: {e}")))?;
+
+    // Cross-run dedup: skip findings the bot already commented on. Fail open
+    // (treat all as new) if the probe errors — never block a review on it.
+    let existing =
+        fetch_existing_markers(&client, api_base, owner, repo, pr_number, &token).await;
+    let had_prior_comments = !existing.is_empty();
+    let (new_findings, skipped) = partition_new(findings, &existing);
+
+    if !should_post(findings.len(), new_findings.len(), had_prior_comments) {
+        return Ok(());
+    }
+
+    let mut footer = run_footer(env);
+    if skipped > 0 {
+        footer.push_str(&format!(
+            "\n\n_({skipped} finding(s) already reported in earlier reviews.)_"
+        ));
+    }
+    let payload = build_payload(findings, &new_findings, &footer);
+
+    let url = format!("{api_base}/repos/{owner}/{repo}/pulls/{pr_number}/reviews");
     let response = client
         .post(&url)
         .header("Authorization", format!("Bearer {token}"))
@@ -250,6 +332,54 @@ pub async fn post_review(findings: &[Finding], env: &Env) -> Result<(), GithubPr
     }
 
     Ok(())
+}
+
+/// Fetch the fingerprint markers of nitpik's existing inline comments on
+/// the PR, so a re-run doesn't repost them. Best-effort: any error (or a
+/// non-success status) yields an empty set, so dedup degrades to "post
+/// everything" rather than blocking the review.
+async fn fetch_existing_markers(
+    client: &reqwest::Client,
+    api_base: &str,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    token: &str,
+) -> HashSet<String> {
+    const MAX_PAGES: u32 = 10;
+    let mut bodies: Vec<String> = Vec::new();
+
+    for page in 1..=MAX_PAGES {
+        let url = format!(
+            "{api_base}/repos/{owner}/{repo}/pulls/{pr_number}/comments?per_page=100&page={page}"
+        );
+        let resp = match client
+            .get(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            _ => break,
+        };
+        let comments: Vec<serde_json::Value> = match resp.json().await {
+            Ok(c) => c,
+            Err(_) => break,
+        };
+        let page_len = comments.len();
+        for c in comments {
+            if let Some(body) = c.get("body").and_then(|b| b.as_str()) {
+                bodies.push(body.to_string());
+            }
+        }
+        if page_len < 100 {
+            break;
+        }
+    }
+
+    extract_markers(bodies.iter().map(|s| s.as_str()))
 }
 
 #[cfg(test)]
@@ -416,5 +546,68 @@ mod tests {
         ]);
         let footer = run_footer(&env);
         assert!(footer.contains("https://github.com/o/r/actions/runs/42"));
+    }
+
+    // --- cross-run dedup (gap b) ---
+
+    #[test]
+    fn fingerprint_is_stable_across_line_shifts() {
+        let mut a = sample_findings().remove(0);
+        let mut b = a.clone();
+        // Same file/title/evidence but different line (a later push shifted it).
+        a.line = 10;
+        b.line = 57;
+        assert_eq!(fingerprint(&a), fingerprint(&b));
+    }
+
+    #[test]
+    fn fingerprint_differs_by_file_or_title() {
+        let base = sample_findings().remove(0);
+        let mut other_file = base.clone();
+        other_file.file = "src/other.rs".into();
+        let mut other_title = base.clone();
+        other_title.title = "Different".into();
+        assert_ne!(fingerprint(&base), fingerprint(&other_file));
+        assert_ne!(fingerprint(&base), fingerprint(&other_title));
+    }
+
+    #[test]
+    fn comment_body_embeds_marker() {
+        let f = sample_findings().remove(0);
+        let body = format_comment_body(&f);
+        assert!(body.contains(&comment_marker(&f)));
+        assert!(body.contains("<!-- nitpik:"));
+    }
+
+    #[test]
+    fn extract_markers_finds_all() {
+        let f = sample_findings();
+        let bodies = [format_comment_body(&f[0]), "no marker here".to_string()];
+        let markers = extract_markers(bodies.iter().map(|s| s.as_str()));
+        assert!(markers.contains(&fingerprint(&f[0])));
+        assert_eq!(markers.len(), 1);
+    }
+
+    #[test]
+    fn partition_new_skips_already_posted() {
+        let findings = sample_findings();
+        // Pretend the first finding was already posted in an earlier review.
+        let existing: HashSet<String> = [fingerprint(&findings[0])].into_iter().collect();
+        let (fresh, skipped) = partition_new(&findings, &existing);
+        assert_eq!(skipped, 1);
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].title, findings[1].title);
+    }
+
+    #[test]
+    fn should_post_policy() {
+        // Something new to say → post.
+        assert!(should_post(3, 2, true));
+        // First-ever clean pass (no findings, no prior comments) → post once.
+        assert!(should_post(0, 0, false));
+        // Clean re-run after prior comments → stay quiet.
+        assert!(!should_post(0, 0, true));
+        // Findings exist but all already posted → stay quiet.
+        assert!(!should_post(3, 0, true));
     }
 }

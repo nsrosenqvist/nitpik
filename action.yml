@@ -74,6 +74,20 @@ runs:
         curl -sSfL "$DOWNLOAD_URL" | tar xz -C /usr/local/bin
         chmod +x /usr/local/bin/nitpik
 
+    # Persist nitpik's result cache across runs so incremental review works on
+    # ephemeral CI runners: unchanged files are reused (cache hit, no LLM call)
+    # and changed files get the prior run's findings injected as context. Keyed
+    # per branch, with a base-branch warm-start fallback. A no-op locally.
+    - name: Restore nitpik cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.config/nitpik/cache
+        key: nitpik-review-${{ runner.os }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
+        restore-keys: |
+          nitpik-review-${{ runner.os }}-${{ github.head_ref || github.ref_name }}-
+          nitpik-review-${{ runner.os }}-${{ github.base_ref }}-
+          nitpik-review-${{ runner.os }}-
+
     - name: Run nitpik
       shell: bash
       env:
