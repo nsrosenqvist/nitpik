@@ -182,6 +182,69 @@ impl super::Forge for GithubForge {
         Ok(())
     }
 
+    async fn open_review_threads(&self) -> Result<Vec<super::ReviewThread>, ForgeError> {
+        // Thread resolution state lives only in GraphQL, not REST.
+        let body = review_threads_query(&self.owner, &self.repo, self.pr_number);
+        let resp = self
+            .auth(self.client.post(self.graphql_url()))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ForgeError::ApiError(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(ForgeError::ApiError(format!(
+                "review-threads query failed with HTTP {}",
+                resp.status()
+            )));
+        }
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| ForgeError::ApiError(e.to_string()))?;
+        Ok(parse_review_threads(&json))
+    }
+
+    async fn reply_and_resolve(
+        &self,
+        thread: &super::ReviewThread,
+        reply: &str,
+    ) -> Result<(), ForgeError> {
+        // Reply to the root comment (REST), then resolve the thread (GraphQL).
+        if let Some(root_id) = thread.root_comment_id {
+            let url = format!(
+                "{}/repos/{}/{}/pulls/{}/comments/{root_id}/replies",
+                self.api_base, self.owner, self.repo, self.pr_number
+            );
+            let resp = self
+                .auth(self.client.post(&url))
+                .json(&serde_json::json!({ "body": reply }))
+                .send()
+                .await
+                .map_err(|e| ForgeError::ApiError(e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(ForgeError::ApiError(format!(
+                    "reply to comment {root_id} failed with HTTP {}",
+                    resp.status()
+                )));
+            }
+        }
+
+        let resp = self
+            .auth(self.client.post(self.graphql_url()))
+            .json(&resolve_thread_mutation(&thread.id))
+            .send()
+            .await
+            .map_err(|e| ForgeError::ApiError(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(ForgeError::ApiError(format!(
+                "resolve thread {} failed with HTTP {}",
+                thread.id,
+                resp.status()
+            )));
+        }
+        Ok(())
+    }
+
     fn run_footer(&self) -> String {
         match &self.run_link {
             Some((server, repo, run_id)) => {
@@ -190,6 +253,81 @@ impl super::Forge for GithubForge {
             None => String::new(),
         }
     }
+}
+
+impl GithubForge {
+    /// GraphQL endpoint for this host. github.com exposes it at
+    /// `/graphql`; GitHub Enterprise (`…/api/v3` REST) at `…/api/graphql`.
+    fn graphql_url(&self) -> String {
+        match self.api_base.strip_suffix("/api/v3") {
+            Some(host) => format!("{host}/api/graphql"),
+            None => format!("{}/graphql", self.api_base),
+        }
+    }
+}
+
+const REVIEW_THREADS_QUERY: &str = r#"
+query($owner:String!,$repo:String!,$pr:Int!) {
+  repository(owner:$owner,name:$repo) {
+    pullRequest(number:$pr) {
+      reviewThreads(first:100) {
+        nodes {
+          id isResolved isOutdated
+          comments(first:1) {
+            nodes { databaseId body path line }
+          }
+        }
+      }
+    }
+  }
+}"#;
+
+/// Build the GraphQL request body to list a PR's review threads.
+pub fn review_threads_query(owner: &str, repo: &str, pr: u64) -> serde_json::Value {
+    serde_json::json!({
+        "query": REVIEW_THREADS_QUERY,
+        "variables": { "owner": owner, "repo": repo, "pr": pr },
+    })
+}
+
+/// Build the GraphQL mutation body to resolve a review thread.
+pub fn resolve_thread_mutation(thread_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "query": "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}",
+        "variables": { "id": thread_id },
+    })
+}
+
+/// Parse the review-threads GraphQL response into neutral [`ReviewThread`]s,
+/// keeping only unresolved threads and lifting the root comment's fields.
+fn parse_review_threads(json: &serde_json::Value) -> Vec<super::ReviewThread> {
+    let nodes = json["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"].as_array();
+    let Some(nodes) = nodes else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for t in nodes {
+        if t["isResolved"].as_bool().unwrap_or(false) {
+            continue;
+        }
+        let Some(id) = t["id"].as_str() else { continue };
+        let root = &t["comments"]["nodes"][0];
+        let body = root["body"].as_str().unwrap_or_default().to_string();
+        let fingerprint = super::extract_markers(std::iter::once(body.as_str()))
+            .into_iter()
+            .next();
+        out.push(super::ReviewThread {
+            id: id.to_string(),
+            root_comment_id: root["databaseId"].as_u64(),
+            fingerprint,
+            path: root["path"].as_str().unwrap_or_default().to_string(),
+            line: root["line"].as_u64().map(|l| l as u32),
+            outdated: t["isOutdated"].as_bool().unwrap_or(false),
+            body,
+        });
+    }
+    out
 }
 
 /// Build the `createReview` request body from a neutral draft.
@@ -438,6 +576,74 @@ mod tests {
         assert_eq!(forge.pr_number, 5);
         assert_eq!(forge.owner, "o");
         assert_eq!(forge.repo, "r");
+    }
+
+    #[test]
+    fn review_threads_query_carries_variables() {
+        let q = review_threads_query("o", "r", 42);
+        assert!(q["query"].as_str().unwrap().contains("reviewThreads"));
+        assert_eq!(q["variables"]["owner"], "o");
+        assert_eq!(q["variables"]["repo"], "r");
+        assert_eq!(q["variables"]["pr"], 42);
+    }
+
+    #[test]
+    fn resolve_mutation_carries_thread_id() {
+        let m = resolve_thread_mutation("THREAD_abc");
+        assert!(m["query"].as_str().unwrap().contains("resolveReviewThread"));
+        assert_eq!(m["variables"]["id"], "THREAD_abc");
+    }
+
+    #[test]
+    fn parse_review_threads_skips_resolved_and_lifts_root() {
+        let json = serde_json::json!({
+          "data": { "repository": { "pullRequest": { "reviewThreads": { "nodes": [
+            {
+              "id": "T1", "isResolved": false, "isOutdated": true,
+              "comments": { "nodes": [
+                { "databaseId": 555, "body": "🔴 Bug\n\n<!-- nitpik:abc123 -->", "path": "db.py", "line": 6 }
+              ]}
+            },
+            {
+              "id": "T2", "isResolved": true, "isOutdated": false,
+              "comments": { "nodes": [ { "databaseId": 777, "body": "old", "path": "x.py", "line": 1 } ]}
+            }
+          ]}}}}
+        });
+        let threads = parse_review_threads(&json);
+        assert_eq!(threads.len(), 1); // resolved T2 dropped
+        let t = &threads[0];
+        assert_eq!(t.id, "T1");
+        assert_eq!(t.root_comment_id, Some(555));
+        assert_eq!(t.fingerprint.as_deref(), Some("abc123"));
+        assert_eq!(t.path, "db.py");
+        assert_eq!(t.line, Some(6));
+        assert!(t.outdated);
+    }
+
+    #[test]
+    fn parse_review_threads_empty_on_missing_data() {
+        assert!(parse_review_threads(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn graphql_url_for_dotcom_and_enterprise() {
+        let env = Env::mock([
+            ("GITHUB_TOKEN", "t"),
+            ("GITHUB_REPOSITORY", "o/r"),
+            ("GITHUB_REF", "refs/pull/5/merge"),
+        ]);
+        let forge = GithubForge::from_env(&env).unwrap();
+        assert_eq!(forge.graphql_url(), "https://api.github.com/graphql");
+
+        let env = Env::mock([
+            ("GITHUB_TOKEN", "t"),
+            ("GITHUB_REPOSITORY", "o/r"),
+            ("GITHUB_REF", "refs/pull/5/merge"),
+            ("GITHUB_API_URL", "https://ghe.example.com/api/v3"),
+        ]);
+        let forge = GithubForge::from_env(&env).unwrap();
+        assert_eq!(forge.graphql_url(), "https://ghe.example.com/api/graphql");
     }
 
     #[test]

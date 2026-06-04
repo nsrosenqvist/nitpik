@@ -568,6 +568,9 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     // A real review needs the provider — surface the construction error now
     // (e.g. a missing API key) rather than silently producing no findings.
     let provider = provider_result.map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Keep a handle for the optional prior-feedback resolution pass, which
+    // runs after the review but reuses the same provider.
+    let resolve_provider = args.resolve_addressed.then(|| Arc::clone(&provider));
     let output = review::execute_review(
         provider,
         &config,
@@ -593,6 +596,35 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     }
 
     let findings = output.findings;
+
+    // Prior-feedback retirement (opt-in): reply to + resolve nitpik threads
+    // the latest push addressed. Best-effort; runs before publishing the new
+    // review so the thread state aligns. Tokens fold into the run total.
+    if let Some(provider) = resolve_provider
+        && let Some(forge) = nitpik::forge::detect(&env_real)
+    {
+        let head_sha = env_real.var("GITHUB_SHA").ok();
+        let outcome = review::resolve::resolve_addressed_threads(
+            &provider,
+            &output.resolved_model,
+            forge.as_ref(),
+            diffs,
+            head_sha.as_deref(),
+        )
+        .await;
+        if !args.quiet && !outcome.resolved.is_empty() {
+            eprintln!(
+                "Resolved {} addressed thread(s): {}",
+                outcome.resolved.len(),
+                outcome.resolved.join(", ")
+            );
+        }
+        if outcome.tokens.total() > 0 {
+            let model = output.resolved_model.clone();
+            output.tokens += outcome.tokens;
+            *output.tokens_by_model.entry(model).or_default() += outcome.tokens;
+        }
+    }
 
     if args.show_dropped && !args.quiet && !output.result.dropped.is_empty() {
         eprintln!(

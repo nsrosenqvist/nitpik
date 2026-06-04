@@ -13,6 +13,7 @@
 //! stay with the caller, which is why the function returns a fully-owned
 //! [`ReviewOutput`] rather than printing anything itself.
 
+pub mod resolve;
 pub mod summary;
 
 use std::collections::BTreeMap;

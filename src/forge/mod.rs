@@ -104,6 +104,27 @@ pub struct ReviewDraft {
     pub comments: Vec<InlineComment>,
 }
 
+/// An open review thread on the PR — used to retire prior feedback that a
+/// later push has addressed (reply + resolve).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewThread {
+    /// Opaque forge thread identifier (e.g. GitHub's GraphQL node id),
+    /// used to resolve the thread.
+    pub id: String,
+    /// Root comment id for posting a reply (GitHub's REST `databaseId`).
+    pub root_comment_id: Option<u64>,
+    /// nitpik fingerprint parsed from the root comment's hidden marker, if
+    /// present — i.e. whether this thread is one nitpik authored.
+    pub fingerprint: Option<String>,
+    pub path: String,
+    pub line: Option<u32>,
+    /// The forge flags the anchored line as changed since the comment was
+    /// written — a hint (not a verdict) that the finding may be addressed.
+    pub outdated: bool,
+    /// Root comment body — the prior finding text the judge evaluates.
+    pub body: String,
+}
+
 /// Errors raised by a forge adapter.
 #[derive(Error, Debug)]
 pub enum ForgeError {
@@ -134,6 +155,27 @@ pub trait Forge: Send + Sync {
 
     /// Post a review (summary + inline comments) on the PR.
     async fn post_review(&self, draft: &ReviewDraft) -> Result<(), ForgeError>;
+
+    /// Open (unresolved) review threads on the PR. Used to retire prior
+    /// feedback the latest push has addressed. Default: none — a forge
+    /// without thread-resolution support simply has nothing to retire.
+    async fn open_review_threads(&self) -> Result<Vec<ReviewThread>, ForgeError> {
+        Ok(Vec::new())
+    }
+
+    /// Reply to a thread's root comment and mark the thread resolved.
+    /// Only ever called with a thread returned by [`Self::open_review_threads`],
+    /// so the default (unsupported) is unreachable for forges that return no
+    /// threads.
+    async fn reply_and_resolve(
+        &self,
+        _thread: &ReviewThread,
+        _reply: &str,
+    ) -> Result<(), ForgeError> {
+        Err(ForgeError::ApiError(
+            "thread resolution is not supported for this forge".into(),
+        ))
+    }
 
     /// A run-link footer appended to the review summary, when the CI
     /// environment exposes a link. Default: none.

@@ -358,6 +358,15 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub pr_threads: bool,
 
+    /// Retire prior feedback the latest push addressed: fetch nitpik's open
+    /// review threads, let the model judge each against the current diff
+    /// (informed by the platform's "outdated" hint), then reply
+    /// `Addressed in <sha>.` and resolve the ones it fixed. Adds one LLM call
+    /// when there are open threads. Requires a detected forge with a token;
+    /// a no-op otherwise. Only nitpik's own threads are ever touched.
+    #[arg(long, default_value_t = false)]
+    pub resolve_addressed: bool,
+
     /// Print the constructed prompts (system + user) for each task and exit
     /// without calling the LLM. Only available in debug builds.
     #[cfg(debug_assertions)]
@@ -563,6 +572,7 @@ mod tests {
             exclude_doc: vec![],
             pr_summary: false,
             pr_threads: false,
+            resolve_addressed: false,
             #[cfg(debug_assertions)]
             debug_prompt: false,
         }
