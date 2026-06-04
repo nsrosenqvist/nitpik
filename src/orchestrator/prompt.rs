@@ -712,7 +712,7 @@ mod tests {
     fn build_prompt_includes_diff() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_prompt(
             &diff,
@@ -724,14 +724,14 @@ mod tests {
         );
         assert!(prompt.contains("+let x = 1;"));
         assert!(prompt.contains("test.rs"));
-        assert!(prompt.contains("backend"));
+        assert!(prompt.contains("correctness"));
     }
 
     #[test]
     fn build_prompt_includes_quality_gates() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_prompt(
             &diff,
@@ -763,7 +763,7 @@ mod tests {
     fn build_prompt_includes_prior_findings() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
         let prior = vec![Finding {
             file: "test.rs".into(),
             line: 1,
@@ -793,7 +793,7 @@ mod tests {
     fn build_prompt_excludes_prior_when_none() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_prompt(
             &diff,
@@ -810,7 +810,7 @@ mod tests {
     fn build_prompt_with_prior_injects_before_instructions() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
         let prior = vec![Finding {
             file: "test.rs".into(),
             line: 5,
@@ -843,7 +843,7 @@ mod tests {
     fn prompt_includes_scope_rule() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_prompt(
             &diff,
@@ -887,7 +887,7 @@ mod tests {
             repo_root: "/tmp".into(),
             is_path_scan: false,
         };
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_prompt(
             &diff,
@@ -918,7 +918,7 @@ mod tests {
             repo_root: "/tmp".into(),
             is_path_scan: false,
         };
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_whole_diff_prompt(&context, &agent, std::slice::from_ref(&agent), false);
 
@@ -946,7 +946,7 @@ mod tests {
             repo_root: "/tmp".into(),
             is_path_scan: false,
         };
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_whole_diff_prompt(&context, &agent, std::slice::from_ref(&agent), false);
         assert!(prompt.contains("src/a.rs"));
@@ -957,7 +957,7 @@ mod tests {
     fn build_prompt_non_agentic_excludes_tool_guidance() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_prompt(
             &diff,
@@ -974,7 +974,7 @@ mod tests {
 
     #[test]
     fn coordination_note_with_multiple_agents() {
-        let backend = crate::agents::builtin::get_builtin("backend").unwrap();
+        let backend = crate::agents::builtin::get_builtin("correctness").unwrap();
         let security = crate::agents::builtin::get_builtin("security").unwrap();
         let all_agents = vec![backend.clone(), security.clone()];
 
@@ -994,7 +994,7 @@ mod tests {
     fn coordination_note_absent_with_single_agent() {
         let diff = make_simple_diff("test.rs");
         let context = make_simple_context(&diff);
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
 
         let prompt = build_prompt(
             &diff,
@@ -1062,7 +1062,7 @@ mod tests {
 
         // And the user prompt no longer carries them — caching depends
         // on the user prompt varying per task while system stays stable.
-        let agent = crate::agents::builtin::get_builtin("backend").unwrap();
+        let agent = crate::agents::builtin::get_builtin("correctness").unwrap();
         let user_prompt = build_prompt(
             &diff,
             &context,

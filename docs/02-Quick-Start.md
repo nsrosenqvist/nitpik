@@ -69,7 +69,7 @@ Each finding includes:
 
 ## What's Next?
 
-- **Run multiple reviewers** — add `--profile backend,security` to get specialist perspectives. See [Reviewer Profiles](06-Reviewer-Profiles).
+- **Run multiple reviewers** — add `--profile security,performance` to get specialist perspectives. See [Reviewer Profiles](06-Reviewer-Profiles).
 - **Set up CI** — output findings as GitHub annotations, GitLab Code Quality, or Bitbucket Code Insights. See [CI/CD Integration](17-CI-Integration).
 - **Enable secret scanning** — add `--scan-secrets` to detect and redact secrets before they reach the LLM. See [Secret Scanning](14-Secret-Scanning).
 - **Explore agentic mode** — add `--agent` to let the LLM read files and search your codebase for deeper analysis. See [Agentic Mode](08-Agentic-Mode).

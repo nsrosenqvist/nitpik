@@ -276,7 +276,9 @@ async fn run_review(repo_path: &Path, profile_names: &[&str], config: &Config) -
     // Resolve agent profiles
     let profiles: Vec<String> = profile_names.iter().map(|s| s.to_string()).collect();
     let agent_defs = if profiles.iter().any(|p| p == "auto") {
-        let auto_profiles = nitpik::agents::auto::auto_select_profiles(&diffs, repo_path);
+        // Always-on lenses plus the heuristic conditional candidates.
+        let mut auto_profiles = vec!["security".to_string(), "correctness".to_string()];
+        auto_profiles.extend(nitpik::agents::auto::heuristic_lens_candidates(&diffs));
         agents::resolve_profiles(&auto_profiles, None)
             .await
             .expect("failed to resolve auto profiles")

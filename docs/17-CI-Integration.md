@@ -45,7 +45,7 @@ jobs:
           key: nitpik-${{ github.repository }}
       - uses: nsrosenqvist/nitpik@v1
         with:
-          profiles: backend,security
+          profiles: security,performance
           fail_on: warning
           scan_secrets: "true"
         env:
@@ -88,7 +88,7 @@ jobs:
         run: |
           nitpik review \
             --diff-base "origin/$GITHUB_BASE_REF" \
-            --profile backend,security \
+            --profile security,performance \
             --format github \
             --fail-on warning \
             --scan-secrets
@@ -124,7 +124,7 @@ code-review:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - nitpik review
         --diff-base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-        --profile backend,security
+        --profile security,performance
         --format gitlab
         --fail-on warning
         --scan-secrets
@@ -248,7 +248,7 @@ steps:
       - git fetch origin "$CI_COMMIT_TARGET_BRANCH"
       - nitpik review
           --diff-base "origin/$CI_COMMIT_TARGET_BRANCH"
-          --profile backend,security
+          --profile security,performance
           --format forgejo
           --fail-on warning
           --scan-secrets

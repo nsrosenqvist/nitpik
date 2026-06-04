@@ -137,41 +137,48 @@ nitpik review --diff-file changes.patch     # pre-computed unified diff
 git diff main | nitpik review --diff-stdin  # piped from another tool
 ```
 
-### Reviewer Profiles
+### Reviewer Lenses
 
-Profiles are specialist reviewers with their own system prompts and focus areas. Five ship built-in:
+nitpik reviews through **lenses** — issue-typed specialist reviewers, each hunting one orthogonal class of problem. Two always run; the rest are selected per-change by a diff-substance triage step:
 
-| Profile | Focus |
-|---|---|
-| `backend` | Correctness, error handling, performance, API design |
-| `frontend` | Accessibility, rendering, state management, UX |
-| `architect` | System design, coupling, abstractions, scalability |
-| `security` | Vulnerabilities, injection, auth, data exposure |
-| `general` | Broad catch-all: correctness, clarity, configuration, docs |
+| Lens | Hunts for | When |
+|---|---|---|
+| `security` | injection, authZ, secrets, input validation, crypto | always |
+| `correctness` | logic bugs, off-by-one, error handling, edge cases, invariants | always |
+| `concurrency` | races, deadlocks, shared mutable state | conditional |
+| `performance` | N+1, hot-path allocation, complexity, latency | conditional |
+| `test-integrity` | coverage of changed behavior, determinism, tautological tests | conditional |
+| `operational` | observability, migrations, feature flags, config/secrets | conditional |
+| `a11y` | semantics, ARIA, keyboard nav, contrast, labels | conditional |
+| `user-journey` | UX happy-path + failure-mode walkthrough | conditional |
+| `contract-impact` | rename/signature ripple, cross-file API/back-compat | conditional |
+| `docs-drift` | docs/comments/OpenAPI no longer matching changed behavior | conditional |
+| `holistic` | whole-PR coherence, symmetric obligations | conditional |
 
-Use one or combine several:
+Run an exact set, or let `auto` (the default) pick:
 
 ```bash
-nitpik review --diff-base main --profile backend,security
+nitpik review --diff-base main                              # auto: always-on + triaged lenses
+nitpik review --diff-base main --profile security,performance  # exactly these
 ```
 
-Auto-select profiles based on what changed — nitpik looks at file extensions, directory structure, and project root files (like `package.json`) to pick the right combination of `frontend`, `backend`, and `architect`. When no language specialist matches (docs-only, infra-only, shell-only diffs), the broad `general` reviewer is used as the catch-all. Profiles flagged `always_include` (the built-in `security` reviewer, plus any custom profiles you mark) are added to every auto run:
+With `--profile auto` (the default when no flag is given), the two always-on lenses run and a triage step selects the conditional lenses the change warrants — by substance, not just file type:
 
 ```bash
 nitpik review --diff-base main --profile auto
 ```
 
-Select profiles by tag — all profiles (built-in and custom) whose tags match are included:
+Select lenses by tag — all profiles (built-in and custom) whose tags match are included:
 
 ```bash
-nitpik review --diff-base main --tag security          # all profiles tagged "security"
-nitpik review --diff-base main --tag css,accessibility  # union of both tags
+nitpik review --diff-base main --tag security              # everything tagged "security"
+nitpik review --diff-base main --tag accessibility,performance  # union of both tags
 ```
 
-Combine `--tag` with `--profile` to add tag-matched profiles on top of explicit ones:
+Combine `--tag` with `--profile` to add tag-matched reviewers on top of an explicit set:
 
 ```bash
-nitpik review --diff-base main --profile backend --tag css
+nitpik review --diff-base main --profile correctness --tag performance
 ```
 
 Tag matching is case-insensitive. See [Custom Agent Profiles](#custom-agent-profiles) for how to set tags on your own profiles.
@@ -210,7 +217,7 @@ nitpik doesn't just pass your diff to an LLM and hope for the best. Every review
 
 - **Full-context awareness** — the LLM sees the complete file (or smart excerpts for large files), your project's conventions, commit history, and the focused diff — so it understands what changed and why it matters.
 - **Multi-agent coordination** — when multiple reviewer profiles run in parallel, each one knows what the others cover and stays in its lane, eliminating duplicate findings and ensuring nothing falls through the cracks.
-- **Multi-wave reviews (opt-in)** — `--multi-wave` lets profiles declare `wave: 2` in their frontmatter to run after wave 1 and react to its findings. Useful for late-stage profiles like an architect that benefits from seeing what specialists found first.
+- **Multi-wave reviews (opt-in)** — `--multi-wave` lets profiles declare `wave: 2` in their frontmatter to run after wave 1 and react to its findings. Useful for a late-stage reviewer (e.g. a `holistic` lens) that benefits from seeing what the others found first.
 - **Auto profile selection** — `auto` is the default profile (no flag needed): heuristics pick reviewers from the diff. Tune the strategy with `--auto-mode heuristic|llm|hybrid` (default `hybrid` uses heuristics first, falls back to a built-in `triage` LLM call only when the heuristics are inconclusive). Pass `--profile <name>` to override.
 - **Critic verification (opt-in)** — `--verify` runs an extra LLM pass after deduplication that votes keep/drop on each finding using a built-in `critic` profile, suppressing probable false positives. Add `--show-dropped` to see what the critic discarded and why.
 - **Iterative continuity** — when you push new changes, nitpik carries forward context from previous reviews so the LLM can distinguish resolved issues from persistent ones, keeping feedback consistent as your code evolves.
@@ -234,7 +241,7 @@ name = "anthropic"
 model = "claude-sonnet-4-20250514"
 
 [review]
-default_profiles = ["backend", "security"]
+default_profiles = ["security", "correctness"]
 fail_on = "warning"
 
 [review.agentic]
@@ -304,7 +311,7 @@ The `tags` field lets you select this profile with `--tag` instead of (or alongs
 nitpik review --diff-base main --profile-dir ./agents --tag style
 ```
 
-Multiple profiles can share tags. For example, if two custom profiles are both tagged `css`, running `--tag css` selects them both (along with any built-in profiles that also carry the tag, such as `frontend`).
+Multiple profiles can share tags. For example, if two custom profiles are both tagged `ui`, running `--tag ui` selects them both (along with any built-in lens that also carries the tag, such as `a11y`).
 
 Use it directly by path, or place it in a directory and reference by name:
 
@@ -313,7 +320,7 @@ nitpik review --diff-base main --profile ./team-conventions.md
 nitpik review --diff-base main --profile-dir ./agents --profile team-conventions
 ```
 
-A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`, `general`) replaces that built-in when `--profile-dir` is set — useful for tuning the shipped reviewers to your team without forking the project. Set `always_include: true` in a profile's frontmatter to include it in every `auto` review (the built-in `security` profile uses this; you can opt out by overriding it). See [Custom Profiles → Overriding Built-In Profiles](docs/07-Custom-Profiles.md#overriding-built-in-profiles) and [Always-On Profiles](docs/07-Custom-Profiles.md#always-on-profiles) for details.
+A custom profile whose `name` matches a built-in lens (`security`, `correctness`, `performance`, `a11y`, …) replaces that lens when `--profile-dir` is set — useful for tuning a shipped lens to your team without forking the project. Set `always_include: true` in a profile's frontmatter to run it on every `auto` review (the built-in `security` and `correctness` lenses use this), or `auto_candidate: true` to add it to the conditional triage pool. See [Custom Profiles → Overriding Built-In Lenses](docs/07-Custom-Profiles.md#overriding-built-in-lenses) and [Always-On Profiles](docs/07-Custom-Profiles.md#always-on-profiles) for details.
 
 Validate a profile before using it:
 
@@ -413,7 +420,7 @@ jobs:
           key: nitpik-${{ github.repository }}
       - uses: nsrosenqvist/nitpik@v1
         with:
-          profiles: backend,security
+          profiles: security,performance
           fail_on: warning
           scan_secrets: "true"
         env:
@@ -457,7 +464,7 @@ jobs:
         run: |
           nitpik review \
             --diff-base "origin/$GITHUB_BASE_REF" \
-            --profile backend,security \
+            --profile security,performance \
             --format github \
             --fail-on warning \
             --scan-secrets
@@ -489,7 +496,7 @@ code-review:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - nitpik review
         --diff-base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-        --profile backend,security
+        --profile security,performance
         --format gitlab
         --fail-on warning
         --scan-secrets
@@ -562,7 +569,7 @@ steps:
       - git fetch origin "$CI_COMMIT_TARGET_BRANCH"
       - nitpik review
           --diff-base "origin/$CI_COMMIT_TARGET_BRANCH"
-          --profile backend,security
+          --profile security,performance
           --format forgejo
           --fail-on warning
           --scan-secrets

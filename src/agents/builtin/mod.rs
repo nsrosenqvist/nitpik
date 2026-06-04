@@ -20,13 +20,6 @@ const CONTRACT_IMPACT_MD: &str = include_str!("contract-impact.md");
 const DOCS_DRIFT_MD: &str = include_str!("docs-drift.md");
 const HOLISTIC_MD: &str = include_str!("holistic.md");
 
-// Legacy domain profiles — retired from the default path but still
-// resolvable via `--profile`/`--tag` for back-compat.
-const BACKEND_MD: &str = include_str!("backend.md");
-const FRONTEND_MD: &str = include_str!("frontend.md");
-const ARCHITECT_MD: &str = include_str!("architect.md");
-const GENERAL_MD: &str = include_str!("general.md");
-
 // Internal profiles for nitpik's own passes.
 const CRITIC_MD: &str = include_str!("critic.md");
 const TRIAGE_MD: &str = include_str!("triage.md");
@@ -87,23 +80,6 @@ const BUILTINS: &[Builtin] = &[
     Builtin {
         name: "holistic",
         body: HOLISTIC_MD,
-    },
-    // Legacy domain profiles (back-compat, --profile only).
-    Builtin {
-        name: "backend",
-        body: BACKEND_MD,
-    },
-    Builtin {
-        name: "frontend",
-        body: FRONTEND_MD,
-    },
-    Builtin {
-        name: "architect",
-        body: ARCHITECT_MD,
-    },
-    Builtin {
-        name: "general",
-        body: GENERAL_MD,
     },
     // Internal passes.
     Builtin {
@@ -172,7 +148,7 @@ mod tests {
     #[test]
     fn list_names() {
         let names = list_builtin_names();
-        assert!(names.contains(&"backend"));
+        assert!(names.contains(&"correctness"));
         assert!(names.contains(&"security"));
     }
 
@@ -208,10 +184,6 @@ mod tests {
             "contract-impact",
             "docs-drift",
             "holistic",
-            "backend",
-            "frontend",
-            "architect",
-            "general",
         ] {
             let agent = get_builtin(name).unwrap();
             assert!(
@@ -256,7 +228,7 @@ mod tests {
 
     #[test]
     fn reviewer_builtins_are_not_internal() {
-        for name in ["backend", "frontend", "architect", "security", "general"] {
+        for name in ["security", "correctness", "a11y", "holistic"] {
             assert!(
                 !get_builtin(name).unwrap().profile.internal,
                 "{name} must remain user-selectable"

@@ -556,16 +556,11 @@ async fn review_case(
         no_cache: true,
         ..Default::default()
     };
-    let agent_defs = nitpik::review::resolve_agents(
-        Some(provider.as_ref()),
-        &options,
-        config,
-        &diffs,
-        repo,
-    )
-    .await
-    .expect("resolve agents")
-    .agents;
+    let agent_defs =
+        nitpik::review::resolve_agents(Some(provider.as_ref()), &options, config, &diffs, repo)
+            .await
+            .expect("resolve agents")
+            .agents;
     let progress = Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
 
     // A total provider failure (all tasks erroring) now surfaces as an

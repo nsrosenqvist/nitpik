@@ -285,19 +285,19 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_builtin_profile() {
-        let agents = resolve_profiles(&["backend".to_string()], None)
+        let agents = resolve_profiles(&["correctness".to_string()], None)
             .await
             .unwrap();
         assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].profile.name, "backend");
+        assert_eq!(agents[0].profile.name, "correctness");
     }
 
     #[tokio::test]
     async fn resolve_multiple_builtins() {
-        let profiles = vec!["backend".to_string(), "security".to_string()];
+        let profiles = vec!["correctness".to_string(), "security".to_string()];
         let agents = resolve_profiles(&profiles, None).await.unwrap();
         assert_eq!(agents.len(), 2);
-        assert_eq!(agents[0].profile.name, "backend");
+        assert_eq!(agents[0].profile.name, "correctness");
         assert_eq!(agents[1].profile.name, "security");
     }
 
@@ -308,7 +308,7 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("unknown profile"), "got: {err}");
         assert!(
-            err.contains("backend"),
+            err.contains("correctness"),
             "should suggest built-ins, got: {err}"
         );
         assert!(
@@ -432,14 +432,12 @@ mod tests {
     async fn list_all_builtins_without_agent_dir() {
         let agents = list_all_profiles(None).await.unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(names.contains(&"backend"));
-        assert!(names.contains(&"frontend"));
-        assert!(names.contains(&"architect"));
         assert!(names.contains(&"security"));
-        assert!(names.contains(&"general"));
-        // Plus the new lenses (correctness, concurrency, …).
         assert!(names.contains(&"correctness"));
+        assert!(names.contains(&"concurrency"));
+        assert!(names.contains(&"a11y"));
         assert!(names.contains(&"docs-drift"));
+        assert!(names.contains(&"holistic"));
         assert_eq!(agents.len(), selectable_builtins());
     }
 
@@ -456,7 +454,7 @@ mod tests {
 
         let agents = list_all_profiles(Some(dir.path())).await.unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(names.contains(&"backend"));
+        assert!(names.contains(&"correctness"));
         assert!(names.contains(&"custom"));
         assert_eq!(agents.len(), selectable_builtins() + 1);
     }
@@ -486,40 +484,40 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_by_tag_matches_builtin() {
-        // "backend" is a tag on the backend profile
-        let agents = resolve_profiles_by_tags(&["backend".to_string()], None)
+        // "races" is a tag on the concurrency lens
+        let agents = resolve_profiles_by_tags(&["races".to_string()], None)
             .await
             .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(names.contains(&"backend"), "got: {names:?}");
+        assert!(names.contains(&"concurrency"), "got: {names:?}");
     }
 
     #[tokio::test]
     async fn resolve_by_tag_matches_multiple_profiles() {
-        // "security" is a tag on the security profile; "performance" is on backend
+        // "auth" is a tag on security; "performance" is on the performance lens
         let agents =
-            resolve_profiles_by_tags(&["security".to_string(), "performance".to_string()], None)
+            resolve_profiles_by_tags(&["auth".to_string(), "performance".to_string()], None)
                 .await
                 .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
         assert!(
-            names.contains(&"backend"),
-            "performance tag → backend; got: {names:?}"
+            names.contains(&"performance"),
+            "performance tag → performance lens; got: {names:?}"
         );
         assert!(
             names.contains(&"security"),
-            "security tag → security; got: {names:?}"
+            "auth tag → security; got: {names:?}"
         );
     }
 
     #[tokio::test]
     async fn resolve_by_tag_is_case_insensitive() {
-        let agents = resolve_profiles_by_tags(&["BACKEND".to_string()], None)
+        let agents = resolve_profiles_by_tags(&["CONCURRENCY".to_string()], None)
             .await
             .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
         assert!(
-            names.contains(&"backend"),
+            names.contains(&"concurrency"),
             "case-insensitive match; got: {names:?}"
         );
     }
@@ -560,16 +558,16 @@ mod tests {
     async fn resolve_custom_overrides_builtin() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("backend.md"),
-            "---\nname: backend\ndescription: My override\ntags: [custom-tag]\n---\nOverridden prompt body.",
+            dir.path().join("performance.md"),
+            "---\nname: performance\ndescription: My override\ntags: [custom-tag]\n---\nOverridden prompt body.",
         )
         .unwrap();
 
-        let agents = resolve_profiles(&["backend".to_string()], Some(dir.path()))
+        let agents = resolve_profiles(&["performance".to_string()], Some(dir.path()))
             .await
             .unwrap();
         assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].profile.name, "backend");
+        assert_eq!(agents[0].profile.name, "performance");
         assert_eq!(
             agents[0].profile.description, "My override",
             "should load custom profile, not built-in"
@@ -582,52 +580,51 @@ mod tests {
     async fn list_all_custom_replaces_builtin_with_same_name() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("backend.md"),
-            "---\nname: backend\ndescription: My override\ntags: []\n---\nOverridden prompt.",
+            dir.path().join("performance.md"),
+            "---\nname: performance\ndescription: My override\ntags: []\n---\nOverridden prompt.",
         )
         .unwrap();
 
         let agents = list_all_profiles(Some(dir.path())).await.unwrap();
-        // No duplicate "backend" entry
-        let backend_entries: Vec<_> = agents
+        // No duplicate "performance" entry
+        let perf_entries: Vec<_> = agents
             .iter()
-            .filter(|a| a.profile.name == "backend")
+            .filter(|a| a.profile.name == "performance")
             .collect();
         assert_eq!(
-            backend_entries.len(),
+            perf_entries.len(),
             1,
             "should not duplicate overridden profile"
         );
-        assert_eq!(backend_entries[0].profile.description, "My override");
+        assert_eq!(perf_entries[0].profile.description, "My override");
         // Other built-ins still present
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(names.contains(&"frontend"));
-        assert!(names.contains(&"architect"));
         assert!(names.contains(&"security"));
-        assert!(names.contains(&"general"));
+        assert!(names.contains(&"correctness"));
+        assert!(names.contains(&"a11y"));
         assert_eq!(agents.len(), selectable_builtins());
     }
 
     #[tokio::test]
     async fn resolve_by_tag_uses_overridden_profile_tags() {
-        // Built-in `backend` has tags like "backend", "performance".
+        // The built-in `performance` lens has tags like "performance", "latency".
         // Override removes those tags, so the built-in's tags should NOT match.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("backend.md"),
-            "---\nname: backend\ndescription: Override\ntags: [only-mine]\n---\nPrompt.",
+            dir.path().join("performance.md"),
+            "---\nname: performance\ndescription: Override\ntags: [only-mine]\n---\nPrompt.",
         )
         .unwrap();
 
-        // The built-in's "performance" tag should no longer match because
+        // The built-in's "latency" tag should no longer match because
         // the overridden profile replaces it.
-        let agents = resolve_profiles_by_tags(&["performance".to_string()], Some(dir.path()))
+        let agents = resolve_profiles_by_tags(&["latency".to_string()], Some(dir.path()))
             .await
             .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
         assert!(
-            !names.contains(&"backend"),
-            "overridden backend lost 'performance' tag; got: {names:?}"
+            !names.contains(&"performance"),
+            "overridden performance lost 'latency' tag; got: {names:?}"
         );
 
         // The new tag matches and selects the override.
@@ -635,7 +632,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].profile.name, "backend");
+        assert_eq!(agents[0].profile.name, "performance");
         assert_eq!(agents[0].profile.description, "Override");
     }
 
@@ -644,22 +641,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("design.md"),
-            "---\nname: design-system\ndescription: Design\ntags: [css, design]\n---\nPrompt.",
+            "---\nname: design-system\ndescription: Design\ntags: [ui, design]\n---\nPrompt.",
         )
         .unwrap();
 
-        // "css" is on the built-in frontend AND the custom design-system profile
-        let agents = resolve_profiles_by_tags(&["css".to_string()], Some(dir.path()))
+        // "ui" is on the built-in a11y lens AND the custom design-system profile
+        let agents = resolve_profiles_by_tags(&["ui".to_string()], Some(dir.path()))
             .await
             .unwrap();
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-        assert!(
-            names.contains(&"frontend"),
-            "frontend has css tag; got: {names:?}"
-        );
+        assert!(names.contains(&"a11y"), "a11y has ui tag; got: {names:?}");
         assert!(
             names.contains(&"design-system"),
-            "custom has css tag; got: {names:?}"
+            "custom has ui tag; got: {names:?}"
         );
     }
 

@@ -59,13 +59,7 @@ nitpik review --diff-base main --profile security,correctness,concurrency
 
 When multiple lenses run together, each is told what the others cover so they stay in their lane and avoid duplicate findings. See [How Reviews Work](10-How-Reviews-Work).
 
-## Legacy domain profiles
-
-The earlier domain profiles — `backend`, `frontend`, `architect`, `general` — still ship and remain resolvable via `--profile`/`--tag` for back-compat, but they are no longer part of the default (auto) engine. Prefer the lenses above for new setups.
-
-```bash
-nitpik review --diff-base main --profile backend
-```
+> **Upgrading from 2.x?** The domain profiles `backend`, `frontend`, `architect`, and `general` were removed in 3.0. Use the issue-typed lenses above instead — for most setups the default `auto` is the direct replacement. Custom profiles you ship in `--profile-dir` are unaffected.
 
 ## Tag-Based Selection
 

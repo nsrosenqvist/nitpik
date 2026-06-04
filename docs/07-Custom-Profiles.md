@@ -57,32 +57,32 @@ nitpik review --diff-base main --profile-dir ./agents --profile team-conventions
 Combine custom profiles with built-in ones:
 
 ```bash
-nitpik review --diff-base main --profile-dir ./agents --profile backend,team-conventions
+nitpik review --diff-base main --profile-dir ./agents --profile performance,team-conventions
 ```
 
-## Overriding Built-In Profiles
+## Overriding Built-In Lenses
 
-A custom profile whose `name` matches a built-in (a lens like `security`, `correctness`, `a11y`, …, or a legacy profile like `backend`) replaces the built-in when `--profile-dir` is set. This lets you tune the shipped profiles to your team's needs without forking the project.
+A custom profile whose `name` matches a built-in lens (`security`, `correctness`, `performance`, `a11y`, …) replaces that lens when `--profile-dir` is set. This lets you tune a shipped lens to your team's needs without forking the project.
 
-For example, drop a file at `./agents/backend.md`:
+For example, drop a file at `./agents/performance.md`:
 
 ```markdown
 ---
-name: backend
-description: Backend review tuned for our Rust services
-tags: [backend, rust, performance]
+name: performance
+description: Performance review tuned for our Rust services
+tags: [performance, latency, rust]
 ---
 
-You are reviewing backend Rust code for our team...
+You are reviewing for performance regressions in our hot paths...
 ```
 
 Then run:
 
 ```bash
-nitpik review --diff-base main --profile-dir ./agents --profile backend
+nitpik review --diff-base main --profile-dir ./agents --profile performance
 ```
 
-nitpik loads your `backend.md` instead of the built-in. The override applies everywhere the profile is referenced — `--profile backend`, `--tag backend`, auto-selection, and `nitpik profiles` all use your version.
+nitpik loads your `performance.md` instead of the built-in. The override applies everywhere the lens is referenced — `--profile performance`, `--tag performance`, auto-selection, and `nitpik profiles` all use your version.
 
 > **Tip:** Use `nitpik profiles --profile-dir ./agents` to confirm which version of a profile will be used. Overridden built-ins appear once, with your custom description.
 

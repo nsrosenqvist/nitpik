@@ -16,10 +16,10 @@ use nitpik::models::finding::{Finding, Severity};
 async fn profiles_lists_all_builtins() {
     let agents = agents::list_all_profiles(None).await.unwrap();
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-    assert!(names.contains(&"backend"));
-    assert!(names.contains(&"frontend"));
-    assert!(names.contains(&"architect"));
     assert!(names.contains(&"security"));
+    assert!(names.contains(&"correctness"));
+    assert!(names.contains(&"a11y"));
+    assert!(names.contains(&"holistic"));
 }
 
 #[tokio::test]
@@ -34,14 +34,17 @@ async fn profiles_includes_custom_from_agent_dir() {
     let agents = agents::list_all_profiles(Some(dir.path())).await.unwrap();
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
     assert!(names.contains(&"ops"), "custom profile should appear");
-    assert!(names.contains(&"backend"), "built-ins should still appear");
+    assert!(
+        names.contains(&"correctness"),
+        "built-ins should still appear"
+    );
 }
 
 #[tokio::test]
 async fn profiles_empty_agent_dir() {
     let dir = tempfile::tempdir().unwrap();
     let agents = agents::list_all_profiles(Some(dir.path())).await.unwrap();
-    // Only built-ins (lenses + legacy domain profiles; internal excluded).
+    // Only built-in lenses (internal critic/triage excluded).
     let expected = agents::list_all_profiles(None).await.unwrap().len();
     assert_eq!(agents.len(), expected);
     assert!(agents.iter().any(|a| a.profile.name == "correctness"));
@@ -249,16 +252,19 @@ fn cache_stats_human_size() {
 
 #[tokio::test]
 async fn tag_selects_matching_builtin_profiles() {
-    // "api" is a tag on backend; "accessibility" is on frontend
+    // "api" is a tag on contract-impact; "accessibility" is on a11y
     let agents =
         agents::resolve_profiles_by_tags(&["api".to_string(), "accessibility".to_string()], None)
             .await
             .unwrap();
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-    assert!(names.contains(&"backend"), "api → backend; got: {names:?}");
     assert!(
-        names.contains(&"frontend"),
-        "accessibility → frontend; got: {names:?}"
+        names.contains(&"contract-impact"),
+        "api → contract-impact; got: {names:?}"
+    );
+    assert!(
+        names.contains(&"a11y"),
+        "accessibility → a11y; got: {names:?}"
     );
 }
 
@@ -289,14 +295,11 @@ async fn tag_with_no_matches_returns_empty() {
 
 #[tokio::test]
 async fn tag_is_case_insensitive() {
-    let agents = agents::resolve_profiles_by_tags(&["CSS".to_string()], None)
+    let agents = agents::resolve_profiles_by_tags(&["ACCESSIBILITY".to_string()], None)
         .await
         .unwrap();
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-    assert!(
-        names.contains(&"frontend"),
-        "case-insensitive; got: {names:?}"
-    );
+    assert!(names.contains(&"a11y"), "case-insensitive; got: {names:?}");
 }
 
 // ---------------------------------------------------------------------------

@@ -856,14 +856,19 @@ mod tests {
     #[tokio::test]
     async fn resolve_agents_explicit_profiles_spend_no_selection_tokens() {
         let options = ReviewOptions {
-            profiles: vec!["backend".to_string()],
+            profiles: vec!["correctness".to_string()],
             ..Default::default()
         };
         let config = Config::default();
         let resolved = resolve_agents(None, &options, &config, &[], Path::new("."))
             .await
             .expect("resolve explicit profile");
-        assert!(resolved.agents.iter().any(|a| a.profile.name == "backend"));
+        assert!(
+            resolved
+                .agents
+                .iter()
+                .any(|a| a.profile.name == "correctness")
+        );
         assert_eq!(resolved.selection_tokens.total(), 0);
         assert!(resolved.selection_model.is_none());
     }

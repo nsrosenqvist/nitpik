@@ -36,7 +36,7 @@ This only applies to git ref diffs — stdin, file, and scan modes have no commi
 
 ## Multi-Agent Coordination
 
-When you run multiple profiles together (e.g. `--profile backend,security`), nitpik automatically coordinates them to avoid duplicate findings. Each reviewer focuses on its own area of expertise without stepping on the others.
+When you run multiple profiles together (e.g. `--profile security,performance`), nitpik automatically coordinates them to avoid duplicate findings. Each reviewer focuses on its own area of expertise without stepping on the others.
 
 You don't need to configure anything — just combine profiles and nitpik handles the rest.
 
