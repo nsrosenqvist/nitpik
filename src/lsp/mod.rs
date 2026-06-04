@@ -123,9 +123,24 @@ impl Backend {
             options.no_prior_context = true;
         }
 
-        let agent_defs = review::resolve_agents(&options, &config, diffs, repo_root_path)
-            .await?
-            .agents;
+        // One provider, injected into both profile resolution and the review.
+        let provider: Arc<dyn crate::providers::ReviewProvider> = Arc::new(
+            crate::providers::rig::RigProvider::new(
+                config.provider.clone(),
+                repo_root_path.to_path_buf(),
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?,
+        );
+
+        let agent_defs = review::resolve_agents(
+            Some(provider.as_ref()),
+            &options,
+            &config,
+            diffs,
+            repo_root_path,
+        )
+        .await?
+        .agents;
         let commit_log =
             review::build_commit_log(options.no_commit_context, &input_mode, repo_root_path).await;
         let baseline = crate::context::build_baseline_context(
@@ -139,6 +154,7 @@ impl Backend {
         .await;
 
         let output = review::execute_review(
+            provider,
             &config,
             &repo_root,
             diffs,

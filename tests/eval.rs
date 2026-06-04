@@ -540,6 +540,13 @@ async fn review_case(
     let baseline =
         nitpik::context::build_baseline_context(repo, &diffs, config, false, &[], Vec::new()).await;
 
+    // Full DI: construct the provider at the composition root (this harness)
+    // and inject it into the engine.
+    let provider: Arc<dyn nitpik::providers::ReviewProvider> = Arc::new(
+        nitpik::providers::rig::RigProvider::new(config.provider.clone(), repo.to_path_buf())
+            .expect("construct provider"),
+    );
+
     let options = nitpik::review::ReviewOptions {
         profiles: profiles.to_vec(),
         verify: true,
@@ -553,6 +560,7 @@ async fn review_case(
     // scoring a false "0 findings". Partial failures still return — warn
     // so they don't silently skew the scorecard.
     let output = nitpik::review::execute_review(
+        provider,
         config,
         &repo.to_string_lossy(),
         &diffs,

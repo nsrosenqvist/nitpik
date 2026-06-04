@@ -31,7 +31,6 @@ use crate::models::{self, AgentDefinition, DEFAULT_PROFILE, Severity};
 use crate::orchestrator::{self, ReviewOrchestrator, ReviewResult};
 use crate::progress::{ProgressReporter, TaskStatus};
 use crate::providers::ReviewProvider;
-use crate::providers::rig::RigProvider;
 use crate::security;
 use crate::threat;
 
@@ -215,6 +214,7 @@ pub async fn resolve_repo_root(path: &Path) -> Result<String> {
 /// and all output are the caller's job.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_review<'a>(
+    provider: Arc<dyn ReviewProvider>,
     config: &Config,
     repo_root: &str,
     diffs: &[models::FileDiff<'a>],
@@ -229,7 +229,8 @@ pub async fn execute_review<'a>(
     let agent_profile_names: Vec<String> =
         agent_defs.iter().map(|a| a.profile.name.clone()).collect();
 
-    let (provider, orchestrator) = create_orchestrator(
+    let orchestrator = create_orchestrator(
+        Arc::clone(&provider),
         config,
         repo_root_path,
         options.no_cache,
@@ -241,7 +242,7 @@ pub async fn execute_review<'a>(
         options.audit_enabled,
         options.timeout,
     )
-    .await?;
+    .await;
 
     // Rolling PR summary (Phase C, gap c): an optional extra LLM call whose
     // result is injected into every reviewer's baseline context and
@@ -345,9 +346,10 @@ pub async fn build_commit_log(
     }
 }
 
-/// Build the provider, cache engine, and review orchestrator.
+/// Build the cache engine and review orchestrator around an injected provider.
 #[allow(clippy::too_many_arguments)]
 async fn create_orchestrator(
+    provider: Arc<dyn ReviewProvider>,
     config: &Config,
     repo_root_path: &Path,
     no_cache: bool,
@@ -358,18 +360,14 @@ async fn create_orchestrator(
     multi_wave: bool,
     audit_enabled: bool,
     timeout: Option<Duration>,
-) -> Result<(Arc<dyn ReviewProvider>, ReviewOrchestrator)> {
-    let provider: Arc<dyn ReviewProvider> = Arc::new(
-        RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
-            .map_err(|e| anyhow::anyhow!("{e}"))?,
-    );
+) -> ReviewOrchestrator {
     let review_scope = diff::git::detect_branch(repo_root_path, &Env::real()).await;
     let cache = cache::CacheEngine::new(!no_cache);
     let stale_age = Duration::from_secs(30 * 24 * 60 * 60);
     let _removed = cache.cleanup_stale(stale_age).await;
 
-    let orchestrator = orchestrator::ReviewOrchestrator::new(
-        Arc::clone(&provider),
+    orchestrator::ReviewOrchestrator::new(
+        provider,
         config,
         cache,
         progress,
@@ -380,8 +378,7 @@ async fn create_orchestrator(
         multi_wave,
         audit_enabled,
         timeout,
-    );
-    Ok((provider, orchestrator))
+    )
 }
 
 /// Generate/refresh the rolling PR summary and write it into `baseline`.
@@ -448,9 +445,15 @@ pub struct ResolvedAgents {
 
 /// Resolve the set of agent profiles to run for this review.
 ///
-/// Exposed as a building block for callers (e.g. the CLI's debug
-/// prompt-dump) that need the resolved profile set without running a review.
+/// `provider` is injected for `auto` profile selection (the only step here
+/// that may call an LLM). Pass `None` to force heuristic-only selection —
+/// e.g. when no provider could be constructed — keeping key-free paths
+/// (like the CLI's `--debug-prompt`) working.
+///
+/// Exposed as a building block for callers that need the resolved profile
+/// set without running a review.
 pub async fn resolve_agents(
+    provider: Option<&dyn ReviewProvider>,
     options: &ReviewOptions,
     config: &Config,
     diffs: &[models::FileDiff<'_>],
@@ -472,7 +475,7 @@ pub async fn resolve_agents(
         eprintln!("warning: auto-mode is ignored because the profile set does not include 'auto'");
     }
     let (profiles, selection_tokens) = if used_auto {
-        select_auto_profiles(options, config, diffs, repo_root_path).await?
+        select_auto_profiles(provider, options, config, diffs, repo_root_path).await
     } else {
         (profile_names, models::TokenUsage::default())
     };
@@ -530,16 +533,19 @@ pub async fn resolve_agents(
 
 /// Pick reviewer profiles for `auto`, honoring the auto-mode strategy.
 ///
-/// Returns the chosen profiles plus the tokens the selection triage call
-/// consumed (zero when no LLM call was made). Fails open: any provider
-/// error falls back to the heuristic result — but tokens already spent on
-/// a call that then errored or returned nothing are still reported.
+/// The `provider` is injected by the caller (`None` when none could be
+/// constructed, e.g. no API key — which keeps key-free paths like
+/// `--debug-prompt` working). Returns the chosen profiles plus the tokens
+/// the selection triage call consumed (zero when no LLM call was made).
+/// Fails open to the heuristic result whenever an LLM call can't run or
+/// errors.
 async fn select_auto_profiles(
+    provider: Option<&dyn ReviewProvider>,
     options: &ReviewOptions,
     config: &Config,
     diffs: &[models::FileDiff<'_>],
     repo_root_path: &Path,
-) -> Result<(Vec<String>, models::TokenUsage)> {
+) -> (Vec<String>, models::TokenUsage) {
     use agents::auto::AutoMode;
     let no_tokens = models::TokenUsage::default();
     let (heuristic, confidence) =
@@ -551,26 +557,47 @@ async fn select_auto_profiles(
         AutoMode::Hybrid => confidence == agents::auto::HeuristicConfidence::Low,
     };
     if !need_llm {
-        return Ok((heuristic, no_tokens));
+        return (heuristic, no_tokens);
     }
 
     let triage_agent = match agents::builtin::get_builtin("triage") {
         Some(a) => a,
-        None => return Ok((heuristic, no_tokens)),
+        None => return (heuristic, no_tokens),
     };
-    let provider: Arc<dyn ReviewProvider> =
-        match RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf()) {
-            Ok(p) => Arc::new(p),
-            Err(e) => {
-                eprintln!("Warning: triage provider init failed ({e}); using heuristic profiles.");
-                return Ok((heuristic, no_tokens));
-            }
-        };
+    let Some(provider) = provider else {
+        eprintln!("Warning: no provider available for auto-selection; using heuristic profiles.");
+        return (heuristic, no_tokens);
+    };
 
     let summary = agents::auto::build_triage_summary(diffs);
     let triage_model = config.provider.model_for(crate::config::ModelTask::Triage);
+    auto_triage_select(
+        provider,
+        triage_model,
+        &triage_agent.system_prompt,
+        &summary,
+        heuristic,
+    )
+    .await
+}
+
+/// Run the auto-selection triage call and interpret its result.
+///
+/// Extracted from [`select_auto_profiles`] so the provider-dependent logic
+/// is unit-testable with a mock: this owns the token capture and the
+/// verdict→profiles mapping, while the caller owns the (key-requiring,
+/// untestable) provider construction. Fails open to `heuristic` on a
+/// provider error, but still reports the tokens a successful call spent —
+/// even when its verdicts turn out unusable and we fall back to heuristics.
+async fn auto_triage_select(
+    provider: &dyn ReviewProvider,
+    triage_model: &str,
+    triage_system_prompt: &str,
+    triage_summary: &str,
+    heuristic: Vec<String>,
+) -> (Vec<String>, models::TokenUsage) {
     match provider
-        .triage(triage_model, &triage_agent.system_prompt, &summary)
+        .triage(triage_model, triage_system_prompt, triage_summary)
         .await
     {
         Ok(outcome) => {
@@ -581,11 +608,11 @@ async fn select_auto_profiles(
                 picked.push("architect".to_string());
             }
             let profiles = if picked.is_empty() { heuristic } else { picked };
-            Ok((profiles, outcome.tokens))
+            (profiles, outcome.tokens)
         }
         Err(e) => {
             eprintln!("Warning: triage call failed ({e}); using heuristic profiles.");
-            Ok((heuristic, no_tokens))
+            (heuristic, models::TokenUsage::default())
         }
     }
 }
@@ -742,6 +769,57 @@ async fn run_threat_scan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::TokenUsage;
+    use crate::providers::{
+        ProviderError, ReviewOutcome, ReviewProvider, TriageOutcome, TriageVerdict,
+    };
+
+    /// A test double for [`auto_triage_select`]: returns canned triage
+    /// verdicts + token usage, or a forced error. `review`/`summarize` are
+    /// never called on this path.
+    struct StubTriageProvider {
+        verdicts: Vec<TriageVerdict>,
+        tokens: TokenUsage,
+        fail: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl ReviewProvider for StubTriageProvider {
+        async fn review(
+            &self,
+            _agent: &AgentDefinition,
+            _prompt: &str,
+            _agentic: bool,
+            _max_turns: usize,
+            _max_tool_calls: usize,
+        ) -> std::result::Result<ReviewOutcome, ProviderError> {
+            unimplemented!("review is not exercised by auto_triage_select tests")
+        }
+
+        async fn triage(
+            &self,
+            _model: &str,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> std::result::Result<TriageOutcome, ProviderError> {
+            if self.fail {
+                Err(ProviderError::ApiError("boom".into()))
+            } else {
+                Ok(TriageOutcome {
+                    verdicts: self.verdicts.clone(),
+                    tokens: self.tokens,
+                })
+            }
+        }
+    }
+
+    fn verdict(classification: &str) -> TriageVerdict {
+        TriageVerdict {
+            index: 0,
+            classification: classification.to_string(),
+            rationale: None,
+        }
+    }
 
     /// A non-`auto` profile set makes no selection LLM call, so it must
     /// report zero selection tokens and no selection model — the signal
@@ -753,11 +831,82 @@ mod tests {
             ..Default::default()
         };
         let config = Config::default();
-        let resolved = resolve_agents(&options, &config, &[], Path::new("."))
+        let resolved = resolve_agents(None, &options, &config, &[], Path::new("."))
             .await
             .expect("resolve explicit profile");
         assert!(resolved.agents.iter().any(|a| a.profile.name == "backend"));
         assert_eq!(resolved.selection_tokens.total(), 0);
         assert!(resolved.selection_model.is_none());
+    }
+
+    /// The injected provider's verdicts drive the picked profiles, and its
+    /// token usage is propagated for accounting.
+    #[tokio::test]
+    async fn auto_triage_select_maps_verdicts_and_captures_tokens() {
+        let provider = StubTriageProvider {
+            verdicts: vec![verdict("backend")],
+            tokens: TokenUsage {
+                input: 100,
+                output: 20,
+                ..Default::default()
+            },
+            fail: false,
+        };
+        let (profiles, tokens) = auto_triage_select(
+            &provider,
+            "triage-model",
+            "sys",
+            "summary",
+            vec!["general".to_string()],
+        )
+        .await;
+        assert!(profiles.contains(&"backend".to_string()));
+        assert_eq!(tokens.total(), 120);
+    }
+
+    /// Tokens are reported even when the verdicts are unusable and we fall
+    /// back to the heuristic — the call still cost money. This is the path
+    /// that was previously untestable.
+    #[tokio::test]
+    async fn auto_triage_select_reports_tokens_even_when_falling_back() {
+        let provider = StubTriageProvider {
+            verdicts: vec![verdict("not-a-real-profile")],
+            tokens: TokenUsage {
+                input: 50,
+                output: 10,
+                ..Default::default()
+            },
+            fail: false,
+        };
+        let (profiles, tokens) = auto_triage_select(
+            &provider,
+            "triage-model",
+            "sys",
+            "summary",
+            vec!["general".to_string()],
+        )
+        .await;
+        assert_eq!(profiles, vec!["general".to_string()]); // heuristic fallback
+        assert_eq!(tokens.total(), 60); // but tokens still counted
+    }
+
+    /// A provider error fails open to the heuristic with zero tokens.
+    #[tokio::test]
+    async fn auto_triage_select_fails_open_with_zero_tokens() {
+        let provider = StubTriageProvider {
+            verdicts: vec![],
+            tokens: TokenUsage::default(),
+            fail: true,
+        };
+        let (profiles, tokens) = auto_triage_select(
+            &provider,
+            "triage-model",
+            "sys",
+            "summary",
+            vec!["backend".to_string()],
+        )
+        .await;
+        assert_eq!(profiles, vec!["backend".to_string()]);
+        assert_eq!(tokens.total(), 0);
     }
 }

@@ -16,6 +16,8 @@ use nitpik::env;
 use nitpik::license;
 use nitpik::models;
 use nitpik::progress;
+use nitpik::providers::ReviewProvider;
+use nitpik::providers::rig::RigProvider;
 use nitpik::review;
 use nitpik::telemetry;
 use nitpik::update;
@@ -454,11 +456,27 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         show_threat_progress,
     };
 
+    // Construct the LLM provider once at the composition root and inject it
+    // into both profile resolution and the review engine. Built as a
+    // `Result` so the key-free paths below (`--debug-prompt`, heuristic
+    // auto-selection) still work without an API key: they get `None`, while
+    // an actual review unwraps it and surfaces the real construction error.
+    let provider_result: std::result::Result<Arc<dyn ReviewProvider>, _> =
+        RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf())
+            .map(|p| Arc::new(p) as Arc<dyn ReviewProvider>);
+
     let review::ResolvedAgents {
         agents: agent_defs,
         selection_tokens,
         selection_model,
-    } = review::resolve_agents(&options, &config, diffs, repo_root_path).await?;
+    } = review::resolve_agents(
+        provider_result.as_ref().ok().map(|p| p.as_ref()),
+        &options,
+        &config,
+        diffs,
+        repo_root_path,
+    )
+    .await?;
 
     let commit_log =
         review::build_commit_log(args.no_commit_context, &input_mode, repo_root_path).await;
@@ -519,7 +537,11 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     // `execute_review` owns the engine lifecycle, including progress
     // start/finish and the optional threat scan.
+    // A real review needs the provider — surface the construction error now
+    // (e.g. a missing API key) rather than silently producing no findings.
+    let provider = provider_result.map_err(|e| anyhow::anyhow!("{e}"))?;
     let output = review::execute_review(
+        provider,
         &config,
         &repo_root,
         diffs,
