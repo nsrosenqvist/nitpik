@@ -104,6 +104,10 @@ pub const ENV_TRIAGE_MODEL: &str = "NITPIK_TRIAGE_MODEL";
 /// Per-task model override for the rolling PR summary call. Falls back to
 /// [`ENV_MODEL`] / the provider default when unset.
 pub const ENV_SUMMARY_MODEL: &str = "NITPIK_SUMMARY_MODEL";
+/// Explicit override for the PR author's stated intent (title + description).
+/// Takes precedence over the auto-detected GitHub event payload, and lets
+/// non-GitHub forges or local runs supply intent manually. Unset by default.
+pub const ENV_PR_INTENT: &str = "NITPIK_PR_INTENT";
 pub const ENV_API_KEY: &str = "NITPIK_API_KEY";
 pub const ENV_BASE_URL: &str = "NITPIK_BASE_URL";
 pub const ENV_LICENSE_KEY: &str = "NITPIK_LICENSE_KEY";

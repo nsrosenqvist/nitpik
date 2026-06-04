@@ -175,6 +175,7 @@ nitpik checks for a provider-specific key first, then falls back to `NITPIK_API_
 | `NITPIK_API_URL` | Override the nitpik.dev origin used for entitlement fetches (defaults to `https://nitpik.dev`; useful for staging). |
 | `NITPIK_TELEMETRY` | Set `false` to disable telemetry |
 | `NITPIK_AUDIT_LOG` | Path to write a per-run JSON audit log (equivalent to `--audit-log`) |
+| `NITPIK_PR_INTENT` | PR author intent (title + description) to feed reviewers as context. Overrides the auto-detected GitHub event payload — use it on non-GitHub forges or local runs. Suppress with `--no-pr-intent`. |
 
 ## Related Pages
 

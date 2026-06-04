@@ -480,6 +480,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
 
     let commit_log =
         review::build_commit_log(args.no_commit_context, &input_mode, repo_root_path).await;
+    let pr_intent = context::pr_intent::detect_pr_intent(&env_real, !args.no_pr_intent);
     let baseline = context::build_baseline_context(
         repo_root_path,
         diffs,
@@ -487,6 +488,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         args.no_project_docs,
         &args.exclude_doc,
         commit_log,
+        pr_intent,
     )
     .await;
 

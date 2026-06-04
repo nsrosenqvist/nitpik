@@ -310,6 +310,13 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub no_commit_context: bool,
 
+    /// Skip injecting the PR author's title/description (their stated intent)
+    /// into the review prompt. By default it is auto-detected from the CI
+    /// event payload (or `NITPIK_PR_INTENT`). Use this to ignore an untrusted
+    /// or noisy PR description.
+    #[arg(long, default_value_t = false)]
+    pub no_pr_intent: bool,
+
     /// Comma-separated list of project documentation files to exclude by name.
     /// Example: --exclude-doc AGENTS.md,CONVENTIONS.md
     #[arg(long, value_name = "FILENAME", value_delimiter = ',')]
@@ -498,6 +505,7 @@ mod tests {
             audit_log: None,
             no_project_docs: false,
             no_commit_context: false,
+            no_pr_intent: false,
             exclude_doc: vec![],
             pr_summary: false,
             #[cfg(debug_assertions)]

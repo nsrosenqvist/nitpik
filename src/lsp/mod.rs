@@ -150,6 +150,8 @@ impl Backend {
             options.no_project_docs,
             &options.exclude_doc,
             commit_log,
+            // Editor reviews have no PR context.
+            None,
         )
         .await;
 

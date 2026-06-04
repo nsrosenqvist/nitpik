@@ -98,6 +98,7 @@ Run a code review.
 | `--no-project-docs` | `false` | Skip auto-detected project documentation files. |
 | `--exclude-doc <NAMES>` | — | Comma-separated filenames to exclude from project docs (e.g. `AGENTS.md,CONTRIBUTING.md`). |
 | `--no-commit-context` | `false` | Skip injecting commit summaries into the review prompt. Only affects `--diff-base` mode. |
+| `--no-pr-intent` | `false` | Skip injecting the PR author's title/description (their stated intent) into the review prompt. By default it is auto-detected from the CI event payload (or `NITPIK_PR_INTENT`); use this to ignore an untrusted or noisy description. |
 | `--pr-summary` | `false` | Generate a rolling functional summary of the whole change (one extra LLM call) and feed it into every reviewer's context. Persisted per branch, so re-runs accumulate context across pushes. Also settable via `[review.context] rolling_summary`. |
 
 ### Performance

@@ -8,6 +8,7 @@
 //! that the orchestrator injects into prompts.
 
 pub mod files;
+pub mod pr_intent;
 pub mod project_docs;
 
 use std::path::Path;
@@ -28,6 +29,10 @@ use crate::models::diff::FileDiff;
 ///
 /// `commit_log` is passed through as-is — the caller is responsible for
 /// gathering it (via `git_log`) when the input mode is a git ref diff.
+///
+/// `pr_intent` (the PR author's stated title/description) is likewise
+/// caller-gathered — see [`pr_intent::detect_pr_intent`]. `None` outside a
+/// PR context or when the caller opts out.
 pub async fn build_baseline_context(
     repo_root: &Path,
     diffs: &[FileDiff<'_>],
@@ -35,6 +40,7 @@ pub async fn build_baseline_context(
     skip_project_docs: bool,
     exclude_docs: &[String],
     commit_log: Vec<String>,
+    pr_intent: Option<String>,
 ) -> BaselineContext {
     let file_contents =
         files::load_file_contents(repo_root, diffs, config.review.context.max_file_lines).await;
@@ -52,6 +58,7 @@ pub async fn build_baseline_context(
         // Populated later by the review engine when the rolling-summary
         // feature is enabled; the caller assembles a summary-free baseline.
         pr_summary: None,
+        pr_intent,
     }
 }
 
@@ -88,7 +95,8 @@ mod tests {
         let diffs = vec![make_diff("main.rs")];
         let config = Config::default();
 
-        let ctx = build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new()).await;
+        let ctx =
+            build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new(), None).await;
         assert!(ctx.file_contents.contains_key("main.rs"));
         assert_eq!(ctx.project_docs.len(), 1);
         assert!(ctx.project_docs.contains_key("AGENTS.md"));
@@ -99,7 +107,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::default();
 
-        let _ctx = build_baseline_context(dir.path(), &[], &config, false, &[], Vec::new()).await;
+        let _ctx =
+            build_baseline_context(dir.path(), &[], &config, false, &[], Vec::new(), None).await;
     }
 
     #[tokio::test]
@@ -112,7 +121,8 @@ mod tests {
         let config = Config::default();
 
         let ctx =
-            build_baseline_context(dir.path(), &[diff], &config, false, &[], Vec::new()).await;
+            build_baseline_context(dir.path(), &[diff], &config, false, &[], Vec::new(), None)
+                .await;
         assert!(ctx.file_contents.is_empty());
     }
 
@@ -124,7 +134,7 @@ mod tests {
         let config = Config::default();
 
         let _ctx =
-            build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new()).await;
+            build_baseline_context(dir.path(), &diffs, &config, false, &[], Vec::new(), None).await;
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "# Guide").unwrap();
@@ -133,7 +143,8 @@ mod tests {
         let diffs = vec![make_diff("main.rs")];
         let config = Config::default();
 
-        let _ctx = build_baseline_context(dir.path(), &diffs, &config, true, &[], Vec::new()).await;
+        let _ctx =
+            build_baseline_context(dir.path(), &diffs, &config, true, &[], Vec::new(), None).await;
     }
 
     #[tokio::test]
@@ -147,8 +158,16 @@ mod tests {
         let config = Config::default();
         let exclude = vec!["AGENTS.md".to_string()];
 
-        let ctx =
-            build_baseline_context(dir.path(), &diffs, &config, false, &exclude, Vec::new()).await;
+        let ctx = build_baseline_context(
+            dir.path(),
+            &diffs,
+            &config,
+            false,
+            &exclude,
+            Vec::new(),
+            None,
+        )
+        .await;
         assert_eq!(ctx.file_contents.len(), 1);
         assert_eq!(ctx.project_docs.len(), 1);
         assert!(!ctx.project_docs.contains_key("AGENTS.md"));
@@ -162,7 +181,8 @@ mod tests {
 
         let config = Config::default();
         // Even with an empty exclude list, skip_project_docs=true wins
-        let ctx = build_baseline_context(dir.path(), &[], &config, true, &[], Vec::new()).await;
+        let ctx =
+            build_baseline_context(dir.path(), &[], &config, true, &[], Vec::new(), None).await;
         assert!(ctx.project_docs.is_empty());
     }
 }

@@ -309,9 +309,16 @@ async fn no_project_docs_skips_all_docs() {
 
     let config = nitpik::config::Config::default();
     let diffs = vec![];
-    let ctx =
-        nitpik::context::build_baseline_context(dir.path(), &diffs, &config, true, &[], Vec::new())
-            .await;
+    let ctx = nitpik::context::build_baseline_context(
+        dir.path(),
+        &diffs,
+        &config,
+        true,
+        &[],
+        Vec::new(),
+        None,
+    )
+    .await;
     assert!(
         ctx.project_docs.is_empty(),
         "expected no docs with --no-project-docs"
@@ -333,6 +340,7 @@ async fn exclude_doc_filters_by_name() {
         false,
         &exclude,
         Vec::new(),
+        None,
     )
     .await;
     assert!(!ctx.project_docs.contains_key("AGENTS.md"));
@@ -355,6 +363,7 @@ async fn exclude_doc_multiple_names() {
         false,
         &exclude,
         Vec::new(),
+        None,
     )
     .await;
     assert_eq!(ctx.project_docs.len(), 1);

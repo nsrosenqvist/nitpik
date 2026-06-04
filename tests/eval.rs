@@ -538,7 +538,8 @@ async fn review_case(
         .await
         .expect("resolve profiles");
     let baseline =
-        nitpik::context::build_baseline_context(repo, &diffs, config, false, &[], Vec::new()).await;
+        nitpik::context::build_baseline_context(repo, &diffs, config, false, &[], Vec::new(), None)
+            .await;
 
     // Full DI: construct the provider at the composition root (this harness)
     // and inject it into the engine.

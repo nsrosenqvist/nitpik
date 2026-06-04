@@ -173,6 +173,8 @@ impl NitpikMcpServer {
             options.no_project_docs,
             &options.exclude_doc,
             commit_log,
+            // Editor/agent reviews have no PR context.
+            None,
         )
         .await;
 

@@ -20,6 +20,13 @@ pub struct BaselineContext {
     /// feature is enabled and a summary was generated or restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr_summary: Option<String>,
+    /// The PR author's stated intent — the pull request title and description
+    /// as written by the author. Sourced from the CI event payload (or an
+    /// explicit override). `None` outside a PR context or when disabled.
+    /// Treated as a description to verify against the diff, never as
+    /// instructions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_intent: Option<String>,
 }
 
 /// The complete context for a single review request.
