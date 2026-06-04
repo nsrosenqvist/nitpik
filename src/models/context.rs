@@ -27,6 +27,13 @@ pub struct BaselineContext {
     /// instructions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr_intent: Option<String>,
+    /// Prior review comments on this PR — nitpik's own earlier findings and
+    /// any human replies — fetched from the forge. Used so reviewers don't
+    /// re-raise addressed points and can weigh the author's responses. The
+    /// human-authored text is untrusted (never instructions). `None` unless
+    /// `--pr-threads` is enabled and a forge with prior comments is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_threads: Option<String>,
 }
 
 /// The complete context for a single review request.

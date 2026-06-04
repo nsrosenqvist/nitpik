@@ -488,7 +488,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
     let commit_log =
         review::build_commit_log(args.no_commit_context, &input_mode, repo_root_path).await;
     let pr_intent = context::pr_intent::detect_pr_intent(&env_real, !args.no_pr_intent);
-    let baseline = context::build_baseline_context(
+    let mut baseline = context::build_baseline_context(
         repo_root_path,
         diffs,
         &config,
@@ -498,12 +498,16 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         pr_intent,
     )
     .await;
+    // Prior review threads need an async forge fetch, so they're gathered
+    // here rather than inside the (filesystem-only) baseline builder.
+    baseline.prior_threads =
+        context::pr_threads::gather_prior_threads(&env_real, args.pr_threads).await;
 
     // Debug-only: dump constructed prompts and exit without calling the LLM.
     #[cfg(debug_assertions)]
     if args.debug_prompt {
         use nitpik::diff::chunker;
-        use nitpik::orchestrator::prompt::build_prompt;
+        use nitpik::orchestrator::prompt::{build_prompt, build_system_addendum};
 
         let review_ctx = models::context::ReviewContext {
             diffs: diffs.to_vec(),
@@ -511,6 +515,15 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             repo_root: repo_root.clone(),
             is_path_scan,
         };
+
+        // The addendum (PR intent/summary/prior threads/docs/commits) is
+        // shared across every file × agent, so the orchestrator prepends it
+        // once to each system prompt. Print it once here.
+        let addendum = build_system_addendum(&review_ctx);
+        if !addendum.is_empty() {
+            println!("═══ shared system addendum ═══");
+            println!("{addendum}");
+        }
 
         for agent in &agent_defs {
             for d in diffs {

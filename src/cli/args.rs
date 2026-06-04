@@ -349,6 +349,15 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub pr_summary: bool,
 
+    /// Fetch the PR's existing review comments (nitpik's prior findings and
+    /// human replies) from the forge and feed them into every reviewer's
+    /// context, so reviewers don't re-raise addressed points and can weigh
+    /// the author's responses. Requires a detected forge with a token (e.g.
+    /// `GITHUB_TOKEN`); a no-op otherwise. The comments are treated as
+    /// untrusted context, never as instructions.
+    #[arg(long, default_value_t = false)]
+    pub pr_threads: bool,
+
     /// Print the constructed prompts (system + user) for each task and exit
     /// without calling the LLM. Only available in debug builds.
     #[cfg(debug_assertions)]
@@ -553,6 +562,7 @@ mod tests {
             no_pr_intent: false,
             exclude_doc: vec![],
             pr_summary: false,
+            pr_threads: false,
             #[cfg(debug_assertions)]
             debug_prompt: false,
         }

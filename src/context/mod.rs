@@ -9,6 +9,7 @@
 
 pub mod files;
 pub mod pr_intent;
+pub mod pr_threads;
 pub mod project_docs;
 
 use std::path::Path;
@@ -59,6 +60,9 @@ pub async fn build_baseline_context(
         // feature is enabled; the caller assembles a summary-free baseline.
         pr_summary: None,
         pr_intent,
+        // Populated later by the caller (needs an async forge fetch); the
+        // builder assembles a threads-free baseline.
+        prior_threads: None,
     }
 }
 

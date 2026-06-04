@@ -702,6 +702,7 @@ fn build_review_context<'a>(
             commit_log: baseline.commit_log.clone(),
             pr_summary: baseline.pr_summary.clone(),
             pr_intent: baseline.pr_intent.clone(),
+            prior_threads: baseline.prior_threads.clone(),
         },
         repo_root: repo_root.to_string(),
         is_path_scan,
