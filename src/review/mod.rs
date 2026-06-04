@@ -404,9 +404,10 @@ async fn refresh_pr_summary(
     let system_prompt = summary::summary_system_prompt();
     let user_prompt = summary::build_summary_user_prompt(diffs, prior.as_deref());
 
-    match provider
-        .summarize(model, &system_prompt, &user_prompt)
-        .await
+    match crate::providers::response::retry_transient(crate::constants::MAX_AUX_RETRIES, || {
+        provider.summarize(model, &system_prompt, &user_prompt)
+    })
+    .await
     {
         Ok(outcome) if !outcome.summary.trim().is_empty() => {
             store.put_summary(&scope, &outcome.summary).await;
@@ -620,9 +621,10 @@ async fn auto_triage_select(
     heuristic: Vec<String>,
     allowed: Vec<String>,
 ) -> (Vec<String>, models::TokenUsage) {
-    match provider
-        .triage(triage_model, triage_system_prompt, triage_summary)
-        .await
+    match crate::providers::response::retry_transient(crate::constants::MAX_AUX_RETRIES, || {
+        provider.triage(triage_model, triage_system_prompt, triage_summary)
+    })
+    .await
     {
         Ok(outcome) => {
             let picked = agents::auto::parse_triage_lenses(&outcome.verdicts, &allowed);

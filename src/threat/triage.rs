@@ -30,10 +30,15 @@ pub async fn triage_findings(
     let prompt = build_triage_prompt(&matches, file_contents);
     let system = system_prompt();
 
-    let outcome = match provider.triage(model, &system, &prompt).await {
-        Ok(v) => v,
-        Err(_) => return (matches, TokenUsage::default()), // fail-open
-    };
+    let outcome =
+        match crate::providers::response::retry_transient(crate::constants::MAX_AUX_RETRIES, || {
+            provider.triage(model, &system, &prompt)
+        })
+        .await
+        {
+            Ok(v) => v,
+            Err(_) => return (matches, TokenUsage::default()), // fail-open
+        };
 
     let tokens = outcome.tokens;
     let verdicts = normalize_verdicts(outcome.verdicts);

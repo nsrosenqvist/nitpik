@@ -152,8 +152,15 @@ pub const SAFE_ENV_PREFIXES: &[&str] = &[
 
 // ── Retry constants ─────────────────────────────────────────────────
 
-/// Maximum number of retry attempts for transient API errors.
+/// Maximum number of retry attempts for transient API errors on the per-file
+/// review call — the primary work, which has no fallback, so it retries hard.
 pub const MAX_RETRIES: u32 = 5;
+
+/// Maximum retry attempts for the auxiliary LLM calls (lens-selection triage,
+/// the critic/verify pass, the rolling summary). Lower than [`MAX_RETRIES`]
+/// because these already fail open to a graceful fallback — a few retries ride
+/// out a transient 429 without stalling the run on a call that can degrade.
+pub const MAX_AUX_RETRIES: u32 = 3;
 
 /// Initial backoff delay between retries.
 pub const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);

@@ -68,9 +68,10 @@ pub async fn verify_findings(
 
     let user_prompt = build_critic_prompt(&findings);
 
-    match provider
-        .triage(model, &critic.system_prompt, &user_prompt)
-        .await
+    match crate::providers::response::retry_transient(crate::constants::MAX_AUX_RETRIES, || {
+        provider.triage(model, &critic.system_prompt, &user_prompt)
+    })
+    .await
     {
         Ok(outcome) => apply_verdicts(findings, outcome),
         Err(err) => {

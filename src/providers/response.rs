@@ -84,6 +84,35 @@ pub fn retry_backoff(attempt: u32) -> Duration {
     backoff.min(MAX_BACKOFF)
 }
 
+/// Retry an async provider call on transient errors with exponential backoff.
+///
+/// Runs `op`; on a [`is_retryable`] error retries up to `max_retries` times,
+/// sleeping [`retry_backoff`] between attempts. A non-retryable error (or the
+/// final retryable one once attempts are exhausted) is returned to the caller.
+///
+/// This is the retry path for the **auxiliary** LLM calls — lens-selection
+/// triage, the critic/verify pass, threat triage, and the rolling summary —
+/// which otherwise call the provider once and fail open. The per-file review
+/// loop in the orchestrator has its own retry (it also drives progress,
+/// per-attempt timeouts, and tool-event sinks), so it does not use this.
+pub async fn retry_transient<T, F, Fut>(max_retries: u32, mut op: F) -> Result<T, ProviderError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, ProviderError>>,
+{
+    let mut attempt: u32 = 0;
+    loop {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(e) if is_retryable(&e) && attempt < max_retries => {
+                tokio::time::sleep(retry_backoff(attempt)).await;
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Generic LLM-response parser with markdown- and prose-tolerant fallbacks.
 ///
 /// With `output_schema` constraining the model at the provider level,
@@ -229,6 +258,73 @@ fn extract_json_candidates(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // `start_paused` auto-advances tokio's clock when idle, so the backoff
+    // sleeps in `retry_transient` complete instantly — the tests assert the
+    // retry *behaviour*, not real wall-clock waits.
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_transient_succeeds_without_retry() {
+        let calls = AtomicUsize::new(0);
+        let r: Result<u32, ProviderError> = retry_transient(3, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Ok(7) }
+        })
+        .await;
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry on success");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_transient_retries_then_succeeds() {
+        let calls = AtomicUsize::new(0);
+        let r: Result<u32, ProviderError> = retry_transient(3, || {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n < 2 {
+                    Err(ProviderError::ApiError("429 Too Many Requests".into()))
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await;
+        assert_eq!(r.unwrap(), 42);
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "2 failures + 1 success");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_transient_gives_up_after_max() {
+        let calls = AtomicUsize::new(0);
+        let r: Result<u32, ProviderError> = retry_transient(3, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err(ProviderError::ApiError("rate limit".into())) }
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            4,
+            "initial attempt + 3 retries"
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_transient_no_retry_on_non_retryable() {
+        let calls = AtomicUsize::new(0);
+        let r: Result<u32, ProviderError> = retry_transient(3, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err(ProviderError::ParseError("malformed".into())) }
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "non-retryable error returns immediately"
+        );
+    }
 
     #[test]
     fn parse_json_array() {
