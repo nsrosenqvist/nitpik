@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
-  gollum:
 
 jobs:
   publish:
@@ -14,21 +13,14 @@ jobs:
       contents: write
     steps:
       - name: Checkout repo
-        if: github.event_name == 'push'
         uses: actions/checkout@v6
 
+      # Mirror docs/ into the GitHub Wiki as a human-browsable surface.
+      # The website no longer reads the wiki — it builds /docs from docs/ at
+      # the release tag — so this no longer triggers a nitpik-web deploy.
+      # nitpik-web redeploys on `release-published` (see release.yml).
       - name: Sync docs/ to wiki
-        if: github.event_name == 'push'
         uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
           path: docs/
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Trigger nitpik-web deploy
-        run: |
-          curl -sSf -X POST \
-            -H "Authorization: Bearer ${{ secrets.NITPIK_WEB_DISPATCH_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/nsrosenqvist/nitpik-web/dispatches \
-            -d '{"event_type":"wiki-updated"}'
