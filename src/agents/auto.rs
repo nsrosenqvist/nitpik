@@ -309,10 +309,11 @@ fn should_include_architect(diffs: &[FileDiff<'_>]) -> bool {
 pub enum AutoMode {
     /// Pure file/path/dependency heuristics (no LLM call).
     Heuristic,
-    /// Always call the LLM to pick profiles.
+    /// Always call the LLM to pick conditional lenses.
     Llm,
-    /// Heuristics first; consult the LLM only when heuristics are
-    /// inconclusive (default).
+    /// Default. Lens selection is substance-based, so this consults the LLM
+    /// to pick lenses, falling back to the heuristic only when the call
+    /// can't run or fails.
     Hybrid,
 }
 

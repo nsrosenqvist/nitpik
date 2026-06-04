@@ -158,10 +158,16 @@ pub struct ReviewArgs {
     pub scan: Option<PathBuf>,
 
     // --- Profile ---
-    /// Comma-separated profiles: built-in names, file paths, or "auto".
-    /// Built-in: frontend, backend, architect, security, general.
-    /// Defaults to `auto`, which selects profiles from the diff via
-    /// heuristics (see `--auto-mode`).
+    /// Comma-separated reviewer lenses: built-in lens names, custom profile
+    /// file paths, or "auto" (the default).
+    ///
+    /// Built-in lenses: security and correctness (always run), plus a11y,
+    /// concurrency, contract-impact, docs-drift, holistic, operational,
+    /// performance, test-integrity, user-journey.
+    ///
+    /// "auto" runs the always-on lenses and selects conditional lenses from
+    /// the diff (see --auto-mode). Naming lenses or tags explicitly runs
+    /// exactly those — the always-on lenses are not auto-added.
     #[arg(long, default_value = DEFAULT_PROFILE, value_delimiter = ',')]
     pub profile: Vec<String>,
 
@@ -278,9 +284,9 @@ pub struct ReviewArgs {
     /// emits a warning and the value is ignored.
     ///
     /// - `heuristic`: file/path/dependency rules only (no LLM call).
-    /// - `llm`: ask the model to pick profiles for every diff.
-    /// - `hybrid` (default): use heuristics; only consult the LLM when
-    ///   the heuristic is inconclusive (e.g. selects only `general`).
+    /// - `llm`: ask the model to pick conditional lenses for every diff.
+    /// - `hybrid` (default): consult the LLM to pick lenses by diff
+    ///   substance, falling back to the heuristic when the call can't run.
     #[arg(long, value_enum)]
     pub auto_mode: Option<AutoMode>,
 
@@ -502,7 +508,7 @@ mod tests {
             diff_stdin,
             diff_base: diff_base.map(String::from),
             scan: scan.map(PathBuf::from),
-            profile: vec!["backend".to_string()],
+            profile: vec!["correctness".to_string()],
             profile_dir: None,
             tag: vec![],
             format: OutputFormat::Terminal,
@@ -619,7 +625,7 @@ mod tests {
             title: "Test issue".to_string(),
             message: "This is a test finding".to_string(),
             suggestion: Some("Fix it".to_string()),
-            agent: "backend".to_string(),
+            agent: "correctness".to_string(),
             evidence: Vec::new(),
         }
     }
