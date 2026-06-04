@@ -2,6 +2,7 @@
 name: concurrency
 description: Data races, deadlocks, shared mutable state, and ordering bugs
 tags: [concurrency, races, threading, async, parallelism]
+auto_candidate: true
 agentic_instructions: >
   When the diff touches shared state, `search_text` for every other reader and
   writer of that field or resource to judge whether access is actually

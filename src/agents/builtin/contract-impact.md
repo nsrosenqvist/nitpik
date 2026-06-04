@@ -2,6 +2,7 @@
 name: contract-impact
 description: Rename/remove/signature ripple to call sites and cross-file API compatibility
 tags: [api, contract, impact, refactor, compatibility, breaking-change]
+auto_candidate: true
 scope: diff
 agentic: true
 agentic_instructions: >

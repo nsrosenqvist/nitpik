@@ -2,6 +2,7 @@
 name: docs-drift
 description: Documentation, comments, and config docs no longer matching changed behavior
 tags: [docs, documentation, comments, changelog]
+auto_candidate: true
 scope: diff
 agentic: true
 agentic_instructions: >

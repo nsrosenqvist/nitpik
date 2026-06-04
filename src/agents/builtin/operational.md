@@ -2,6 +2,7 @@
 name: operational
 description: Observability, migrations, feature flags, and config/secrets handling
 tags: [operations, observability, migrations, config, devops, deployment]
+auto_candidate: true
 agentic_instructions: >
   When the diff adds a migration, flag, or config key, `search_text` for its
   rollback, its default, and where it is read, to judge deploy/rollback safety.

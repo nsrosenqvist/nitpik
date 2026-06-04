@@ -2,6 +2,7 @@
 name: performance
 description: Hot-path allocation, N+1 queries, algorithmic complexity, and latency
 tags: [performance, latency, scalability, efficiency]
+auto_candidate: true
 agentic_instructions: >
   Before claiming a path is hot, `search_text` for the callers of the changed
   function to judge how often it runs and over what input size. `read_file`

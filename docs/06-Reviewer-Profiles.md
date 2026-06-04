@@ -1,146 +1,99 @@
-# Reviewer Profiles
+# Reviewer Profiles & Lenses
 
-Profiles are specialist reviewers — each with its own focus areas, system prompt, and severity guidelines. Run one or several in parallel to get targeted feedback from different perspectives.
+nitpik reviews a diff through **lenses** — issue-typed specialist reviewers, each hunting one orthogonal class of problem (correctness, security, concurrency, …). Several run in parallel and their findings are merged, deduplicated, and verified.
 
-By default nitpik runs `--profile auto`, which picks the right specialists for each diff (see [Auto-Selection](#auto-selection) below). Pass `--profile <name>` to override.
+By default nitpik runs `--profile auto`: two always-on lenses plus the conditional lenses a triage step judges the change actually warrants. Pass `--profile <name>` to run an exact set instead.
 
 ---
 
-## Built-in Profiles
+## How the default review works
 
-nitpik ships with five profiles:
+Every default review runs the two **always-on lenses**:
 
-### `backend`
+| Lens | Hunts for |
+|---|---|
+| `security` | injection, authZ, secrets, input validation, crypto, cross-tenant isolation |
+| `correctness` | logic bugs, off-by-one, error handling, edge cases, invariant/state-machine violations |
 
-Focuses on server-side code quality: correctness, error handling, performance, concurrency, API design, and data integrity. Catches bugs like logic errors, N+1 queries, missing error propagation, and race conditions.
+On top of those, a fast **triage** step selects from the **conditional lenses** — only the ones whose failure mode the change plausibly contains:
 
-Skips pure formatting issues and deep security analysis — it flags obvious problems (like unsanitized SQL) but leaves thorough security review to the `security` profile.
+| Lens | Hunts for | Scope |
+|---|---|---|
+| `concurrency` | races, deadlocks, shared mutable state, ordering | per file |
+| `performance` | N+1 queries, hot-path allocation, complexity, latency | per file |
+| `test-integrity` | coverage of changed behavior, determinism, tautological tests | per file |
+| `operational` | observability, migrations (fwd+rollback), feature flags, config/secrets | per file |
+| `a11y` | semantics, ARIA, keyboard nav/focus, contrast, labels | per file |
+| `user-journey` | UX happy-path + failure-mode walkthrough | per file |
+| `contract-impact` | rename/remove/signature ripple to call sites; cross-file API/back-compat | whole diff |
+| `docs-drift` | docs/comments/OpenAPI/changelog no longer matching changed behavior | whole diff |
+| `holistic` | whole-PR coherence; symmetric obligations (rollback-for-migration) | whole diff |
 
-```bash
-nitpik review --diff-base main --profile backend
-```
-
-### `frontend`
-
-Focuses on user-facing code: accessibility, rendering performance, state management, UX, and responsive design. Catches missing ARIA labels, improper heading hierarchy, unnecessary re-renders, and memory leaks from unsubscribed listeners.
-
-Skips backend logic and deep security analysis.
-
-```bash
-nitpik review --diff-base main --profile frontend
-```
-
-### `architect`
-
-Focuses on system design: coupling, abstractions, module boundaries, API surface changes, and backward compatibility. Catches god objects, leaky abstractions, breaking changes, and dependency direction violations.
-
-Skips localized implementation bugs — if a change is purely internal to one function, the architect won't nitpick it unless it reveals a systemic pattern.
-
-```bash
-nitpik review --diff-base main --profile architect
-```
-
-### `security`
-
-Focuses on vulnerabilities: injection risks (SQL, XSS, command injection), authentication and authorization flaws, cryptographic misuse, data exposure, and insecure configuration. Traces data flow from untrusted input to sensitive sinks.
-
-Reports findings only when the vulnerability path can be verified — no speculative alerts.
-
-```bash
-nitpik review --diff-base main --profile security
-```
-
-### `general`
-
-A broad, language-agnostic catch-all reviewer. Focuses on universals: correctness, clarity, error handling, configuration mistakes, broken references, and obvious anti-patterns across any file type — documentation, shell scripts, Markdown, configuration formats, and languages without a dedicated specialist.
-
-Used by `auto` mode as the catch-all when no language specialist (`backend` or `frontend`) is selected for the diff. Defers deep domain analysis to specialist reviewers when they run alongside it.
-
-```bash
-nitpik review --diff-base main --profile general
-```
-
-## Combining Profiles
-
-Run multiple profiles in parallel:
-
-```bash
-nitpik review --diff-base main --profile backend,security
-```
-
-When multiple profiles run together, each one is informed about the others and their focus areas. This coordination prevents duplicate findings and keeps each reviewer in its lane. See [How Reviews Work](10-How-Reviews-Work) for details.
+It is normal for triage to pick **no** conditional lens on a small, self-contained change — the always-on lenses already cover it. The three whole-diff lenses (`contract-impact`, `docs-drift`, `holistic`) review the entire change set at once and use repository-exploration tools by default (see [Agentic Mode](08-Agentic-Mode)).
 
 ## Auto-Selection
 
-When `--profile` is not specified, nitpik runs `auto`. You can also request it explicitly:
+When `--profile` is omitted, nitpik runs `auto`. You can request it explicitly:
 
 ```bash
 nitpik review --diff-base main --profile auto
 ```
 
-Auto-selection examines three layers of signals to choose profiles:
-
-1. **File extensions and paths** — unambiguous extensions (`.vue`, `.css` → frontend; `.rs`, `.go`, `.py` → backend) are classified directly. JS/TS files are disambiguated using directory names (e.g. `controllers/` → backend, `components/` → frontend) and filename patterns (e.g. `*.controller.ts` → backend).
-2. **Project root markers** — when JS/TS path signals are absent or one-sided, nitpik checks the repo root for `package.json` dependencies (Express, React, etc.) and config files (`nest-cli.json`, `wrangler.toml`, etc.) to fill in the gaps.
-3. **Architect triggers** — the `architect` profile is added when the diff touches cross-cutting files (CI configs, Dockerfiles, IaC, dependency manifests, API definitions, database migrations) or when the diff is large (many files or many distinct directories).
-
-The `security` profile is always included because its frontmatter sets `always_include: true`. Any custom profile in your `--profile-dir` with the same flag is appended too — see [Always-On Profiles](07-Custom-Profiles#always-on-profiles).
-
-When neither `frontend` nor `backend` signals fire (for example a docs-only, infra-only, or shell-only diff), the `general` profile is used as the catch-all. `general` and the language specialists are mutually exclusive: a strictly-backend or strictly-frontend diff never pulls `general` in alongside the specialist. JS/TS files with no clear signal still default to `frontend` rather than `general`.
-
-### Auto-Mode Strategy
-
-Tune how `--profile auto` decides with `--auto-mode`:
+The always-on lenses always run. The conditional lenses are chosen by `--auto-mode`:
 
 | Mode | Behavior |
 |---|---|
-| `heuristic` | File/path/dependency rules only — no LLM call. Fastest, fully offline. |
-| `llm` | Always ask the model to pick profiles using a built-in `triage` system prompt. Most flexible for unusual diffs. |
-| `hybrid` (default) | Heuristics first; consult the LLM only when the heuristic confidence is low (e.g. it would otherwise pick only `general`). |
+| `heuristic` | File/path rules only — no LLM call. Maps frontend files → `a11y`/`user-journey`, tests → `test-integrity`, structural/large diffs → `operational`/`contract-impact`/`holistic`, docs → `docs-drift`. Fully offline. |
+| `llm` | Always ask the model to pick conditional lenses by substance, using the built-in `triage` prompt. |
+| `hybrid` (default) | Consults the LLM for substance-based selection on every run; falls back to the heuristic if the triage call can't run or fails. |
 
-Hybrid mode is the recommended default — you get heuristic precision on common cases without losing flexibility on edge cases. Falls open: if the triage call fails, the heuristic result is used.
+Triage is a cheap call — point it at a smaller model with `[provider.models] triage` or `NITPIK_TRIAGE_MODEL` (see [Providers](03-Providers#per-task-model-overrides)).
+
+## Explicit selection
+
+`--profile <names>` runs **exactly** what you name — the always-on lenses are **not** added on top. This keeps explicit selection predictable (and is the power-user/CI path), but note that `--profile my-lens` alone runs without the security net; add it back with `--profile my-lens,security,correctness`.
+
+```bash
+nitpik review --diff-base main --profile security,correctness,concurrency
+```
+
+When multiple lenses run together, each is told what the others cover so they stay in their lane and avoid duplicate findings. See [How Reviews Work](10-How-Reviews-Work).
+
+## Legacy domain profiles
+
+The earlier domain profiles — `backend`, `frontend`, `architect`, `general` — still ship and remain resolvable via `--profile`/`--tag` for back-compat, but they are no longer part of the default (auto) engine. Prefer the lenses above for new setups.
+
+```bash
+nitpik review --diff-base main --profile backend
+```
 
 ## Tag-Based Selection
 
-Select profiles by tag instead of name:
+Select profiles by tag instead of name; matching is case-insensitive and spans built-in lenses and custom profiles:
 
 ```bash
-nitpik review --diff-base main --tag security
-nitpik review --diff-base main --tag css,accessibility
+nitpik review --diff-base main --tag accessibility
+nitpik review --diff-base main --tag performance,concurrency
 ```
 
-All profiles (built-in and custom) whose tags contain any of the given values are included. Tag matching is case-insensitive.
+Combine `--tag` with `--profile` to add tag-matched reviewers on top of an explicit set.
 
-Combine `--tag` with `--profile` to add tag-matched profiles on top of explicit ones:
+## Always-on and custom profiles
 
-```bash
-nitpik review --diff-base main --profile backend --tag css
-```
-
-### Built-in Profile Tags
-
-| Profile | Tags |
-|---|---|
-| `backend` | `backend`, `api`, `database`, `logic`, `performance` |
-| `frontend` | `frontend`, `ui`, `ux`, `accessibility`, `css`, `javascript`, `typescript` |
-| `architect` | `architecture`, `design`, `patterns`, `maintainability`, `coupling` |
-| `security` | `security`, `auth`, `injection`, `xss`, `csrf`, `cryptography` |
-| `general` | `docs`, `config`, `shell`, `scripts`, `prose`, `cross-cutting` |
+`security` and `correctness` set `always_include: true`, which is why they run on every default review. Any custom profile in your `--profile-dir` with the same flag rides along too; a custom profile that sets `auto_candidate: true` joins the conditional triage pool. See [Custom Profiles](07-Custom-Profiles#always-on-profiles).
 
 ## Listing Profiles
-
-See all available profiles, including custom ones:
 
 ```bash
 nitpik profiles
 nitpik profiles --profile-dir ./agents
 ```
 
-This shows each profile's name, description, and tags.
+Shows each profile's name, description, and tags.
 
 ## Related Pages
 
 - [Custom Profiles](07-Custom-Profiles) — create your own reviewers
 - [How Reviews Work](10-How-Reviews-Work) — multi-agent coordination
-- [Agentic Mode](08-Agentic-Mode) — give profiles access to tools
+- [Agentic Mode](08-Agentic-Mode) — `--agent` policy and tool access
 - [CLI Reference](18-CLI-Reference) — all profile-related flags

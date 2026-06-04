@@ -112,6 +112,25 @@ pub async fn list_always_include_profiles(
         .collect())
 }
 
+/// List the conditional lenses eligible for diff-substance auto-selection —
+/// profiles whose frontmatter declares `auto_candidate: true`.
+///
+/// These are the built-in issue-typed lenses (concurrency, performance, …)
+/// that the triage step picks from on top of the always-on lenses. The legacy
+/// domain profiles and ordinary custom profiles are excluded (they run only
+/// when named via `--profile`/`--tag`). A team can opt a custom profile into
+/// the pool by setting `auto_candidate: true` in its frontmatter.
+pub async fn list_auto_candidate_profiles(
+    agent_dir: Option<&Path>,
+) -> Result<Vec<AgentDefinition>, AgentError> {
+    let repo = ProfileRepository::load(agent_dir).await?;
+    Ok(repo
+        .selectable()
+        .filter(|a| a.profile.auto_candidate)
+        .cloned()
+        .collect())
+}
+
 /// The set of profiles available for one review run: every built-in plus
 /// any custom profiles from `agent_dir`, with a custom profile replacing
 /// the built-in of the same name.

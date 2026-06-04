@@ -2,6 +2,7 @@
 name: test-integrity
 description: Meaningful coverage of changed behavior, determinism, and test quality
 tags: [tests, testing, coverage, quality]
+auto_candidate: true
 agentic_instructions: >
   `search_text` for existing tests that exercise the changed code to judge
   whether the new behavior is actually covered. `read_file` the test helpers

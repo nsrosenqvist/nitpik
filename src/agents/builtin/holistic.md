@@ -2,6 +2,7 @@
 name: holistic
 description: Whole-PR coherence and symmetric obligations across the change set
 tags: [holistic, architecture, design, coherence]
+auto_candidate: true
 scope: diff
 agentic: true
 agentic_instructions: >

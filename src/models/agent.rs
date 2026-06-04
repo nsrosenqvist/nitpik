@@ -111,6 +111,15 @@ pub struct AgentProfile {
     #[serde(default)]
     pub scope: LensScope,
 
+    /// Whether this profile is part of the **default/auto candidate pool** —
+    /// a conditional lens the diff-substance triage may select on top of the
+    /// always-on lenses. Built-in conditional lenses (concurrency, perf, …)
+    /// set this `true`; the legacy domain profiles and user custom profiles
+    /// leave it `false`, so they run only when named via `--profile`/`--tag`.
+    /// Has no bearing on `always_include` lenses, which always run regardless.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub auto_candidate: bool,
+
     /// Whether this reviewer wants repository-exploration tools (agentic
     /// mode) by default.
     ///

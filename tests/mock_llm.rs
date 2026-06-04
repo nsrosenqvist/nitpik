@@ -151,6 +151,7 @@ fn test_agent(name: &str) -> AgentDefinition {
             wave: 1,
             scope: Default::default(),
             agentic: false,
+            auto_candidate: false,
         },
         system_prompt: "You are a test reviewer.".to_string(),
     }
@@ -171,6 +172,7 @@ fn test_agent_with_model(name: &str, model: &str) -> AgentDefinition {
             wave: 1,
             scope: Default::default(),
             agentic: false,
+            auto_candidate: false,
         },
         system_prompt: "You are a test reviewer.".to_string(),
     }
@@ -1455,6 +1457,7 @@ fn test_agent_with_tools(
             wave: 1,
             scope: Default::default(),
             agentic: false,
+            auto_candidate: false,
         },
         system_prompt: "You are a test reviewer with tools.".to_string(),
     }
@@ -2317,6 +2320,7 @@ fn test_agent_wave2(name: &str) -> AgentDefinition {
             wave: 2,
             scope: Default::default(),
             agentic: false,
+            auto_candidate: false,
         },
         system_prompt: "You are a test wave-2 reviewer.".to_string(),
     }

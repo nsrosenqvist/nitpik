@@ -1,8 +1,22 @@
-//! Auto-profile selection based on file heuristics.
+//! Auto-selection heuristics.
 //!
-//! When `--profile auto` is used, we select built-in reviewer profiles
-//! without an LLM call by analyzing three layers of signals from the diff
-//! and the repository root.
+//! The **default engine** selects issue-typed *lenses* by diff substance:
+//! [`heuristic_lens_candidates`] maps file signals to conditional lenses for
+//! the key-free path, [`build_lens_triage_summary`] + [`parse_triage_lenses`]
+//! back the LLM triage path, and the always-on lenses are added by
+//! [`crate::agents::list_always_include_profiles`]. See
+//! `plans/pr-native-review/lens-model.md`.
+//!
+//! The original *domain-profile* heuristics ([`auto_select_profiles`] and
+//! friends) below are retained — they classify files into
+//! `backend`/`frontend`/`architect`/`general`, which the lens router reuses
+//! and which remain available for tooling — but they no longer drive the
+//! default review.
+//!
+//! ## Domain classification (legacy)
+//!
+//! Selects built-in reviewer profiles without an LLM call by analyzing three
+//! layers of signals from the diff and the repository root.
 //!
 //! # Decision layers
 //!
@@ -585,6 +599,134 @@ pub fn parse_triage_profiles(verdicts: &[crate::providers::TriageVerdict]) -> Ve
     for v in verdicts {
         let name = v.classification.trim().to_lowercase();
         if !ALLOWED.contains(&name.as_str()) {
+            continue;
+        }
+        if seen.insert(name.clone()) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// Heuristic conditional-lens candidates for the **key-free** path (no LLM
+/// triage available, or `--auto heuristic`).
+///
+/// Reuses the file classification to route coarse signals to lenses:
+/// frontend → `a11y` + `user-journey`; backend → `concurrency` +
+/// `performance`; structural/large → `operational` + `contract-impact` +
+/// `holistic`; test files → `test-integrity`; docs → `docs-drift`. This is a
+/// deliberately coarse fallback — the LLM triage (the default) does
+/// substance-based selection. The caller intersects the result with the
+/// lenses actually available so a removed/overridden lens can't slip in.
+///
+/// The always-on lenses (security, correctness) are added separately and are
+/// not returned here.
+pub fn heuristic_lens_candidates(diffs: &[FileDiff<'_>]) -> Vec<String> {
+    let c = classify_files(diffs);
+    let frontend = c.has_frontend || c.js_ts_frontend_signals > 0;
+    let backend = c.has_backend || c.js_ts_backend_signals > 0;
+    let structural = should_include_architect(diffs);
+    let has_tests = diffs.iter().any(|d| is_test_path(d.path()));
+    let has_docs = diffs.iter().any(|d| is_docs_path(d.path()));
+
+    let mut out: Vec<String> = Vec::new();
+    let push = |name: &str, out: &mut Vec<String>| {
+        if !out.iter().any(|n| n == name) {
+            out.push(name.to_string());
+        }
+    };
+    if frontend {
+        push("a11y", &mut out);
+        push("user-journey", &mut out);
+    }
+    if backend {
+        push("concurrency", &mut out);
+        push("performance", &mut out);
+    }
+    if structural {
+        push("operational", &mut out);
+        push("contract-impact", &mut out);
+        push("holistic", &mut out);
+    }
+    if has_tests {
+        push("test-integrity", &mut out);
+    }
+    if has_docs {
+        push("docs-drift", &mut out);
+    }
+    out
+}
+
+/// Returns `true` if the path looks like a test file.
+fn is_test_path(path: &str) -> bool {
+    let p = path.to_lowercase();
+    p.contains("/test")
+        || p.starts_with("test")
+        || p.contains("/spec")
+        || p.contains("__tests__")
+        || p.contains(".test.")
+        || p.contains(".spec.")
+        || p.contains("_test.")
+        || p.ends_with("_test.go")
+        || p.contains("/tests/")
+}
+
+/// Returns `true` if the path looks like documentation.
+fn is_docs_path(path: &str) -> bool {
+    let p = path.to_lowercase();
+    p.ends_with(".md")
+        || p.ends_with(".mdx")
+        || p.ends_with(".rst")
+        || p.contains("/docs/")
+        || p.starts_with("docs/")
+        || p.contains("readme")
+        || p.contains("changelog")
+        || p.contains("openapi")
+        || p.contains("swagger")
+}
+
+/// Build the triage prompt body for **lens** selection: the changed-file
+/// summary plus the menu of candidate lenses (name + one-line description)
+/// the model may choose from.
+pub fn build_lens_triage_summary(
+    diffs: &[FileDiff<'_>],
+    candidates: &[(String, String)],
+) -> String {
+    let mut s = build_triage_summary(diffs);
+    // build_triage_summary ends with a profile-oriented instruction; replace
+    // the tail with a lens menu + lens instruction.
+    if let Some(pos) = s.find("\nPick the smallest set") {
+        s.truncate(pos);
+    }
+    s.push_str("\n## Candidate lenses\n\n");
+    for (name, desc) in candidates {
+        s.push_str(&format!("- `{name}` — {desc}\n"));
+    }
+    s.push_str(
+        "\nThe `security` and `correctness` lenses always run — do NOT list them. \
+         From the candidates above, pick **only** those whose failure mode this \
+         change plausibly contains. It is correct to pick none when the change is \
+         small or none apply. Do not pad the list. Return only the JSON array.\n",
+    );
+    s
+}
+
+/// Parse triage verdicts into lens names, validated against `allowed`.
+///
+/// Generalizes [`parse_triage_profiles`] to an arbitrary candidate set: a
+/// classification not in `allowed` (a hallucinated or always-on name) is
+/// dropped. Returns names in emitted order, deduplicated.
+pub fn parse_triage_lenses(
+    verdicts: &[crate::providers::TriageVerdict],
+    allowed: &[String],
+) -> Vec<String> {
+    let allowed_lower: std::collections::HashSet<String> =
+        allowed.iter().map(|a| a.to_lowercase()).collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for v in verdicts {
+        let name = v.classification.trim().to_lowercase();
+        if !allowed_lower.contains(&name) {
             continue;
         }
         if seen.insert(name.clone()) {
@@ -1217,6 +1359,82 @@ mod tests {
         ];
         let picked = parse_triage_profiles(&v);
         assert_eq!(picked, vec!["backend".to_string(), "frontend".to_string()]);
+    }
+
+    #[test]
+    fn heuristic_lens_candidates_routes_frontend() {
+        let diffs = vec![make_diff("src/components/Button.tsx")];
+        let lenses = heuristic_lens_candidates(&diffs);
+        assert!(lenses.contains(&"a11y".to_string()), "got: {lenses:?}");
+        assert!(lenses.contains(&"user-journey".to_string()));
+    }
+
+    #[test]
+    fn heuristic_lens_candidates_routes_tests_and_docs() {
+        let diffs = vec![make_diff("src/foo_test.rs"), make_diff("docs/guide.md")];
+        let lenses = heuristic_lens_candidates(&diffs);
+        assert!(
+            lenses.contains(&"test-integrity".to_string()),
+            "got: {lenses:?}"
+        );
+        assert!(lenses.contains(&"docs-drift".to_string()));
+    }
+
+    #[test]
+    fn heuristic_lens_candidates_structural_change() {
+        let diffs = vec![make_diff("Dockerfile")];
+        let lenses = heuristic_lens_candidates(&diffs);
+        assert!(
+            lenses.contains(&"operational".to_string()),
+            "got: {lenses:?}"
+        );
+        assert!(lenses.contains(&"contract-impact".to_string()));
+        assert!(lenses.contains(&"holistic".to_string()));
+    }
+
+    #[test]
+    fn parse_triage_lenses_filters_to_allowed() {
+        use crate::providers::TriageVerdict;
+        let v = vec![
+            TriageVerdict {
+                index: 0,
+                classification: "concurrency".into(),
+                rationale: None,
+            },
+            TriageVerdict {
+                index: 1,
+                classification: "security".into(), // always-on, not a candidate
+                rationale: None,
+            },
+            TriageVerdict {
+                index: 2,
+                classification: "made-up".into(),
+                rationale: None,
+            },
+        ];
+        let allowed = vec!["concurrency".to_string(), "performance".to_string()];
+        assert_eq!(
+            parse_triage_lenses(&v, &allowed),
+            vec!["concurrency".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_lens_triage_summary_lists_candidate_menu() {
+        let diffs = vec![make_diff("src/foo.rs")];
+        let menu = vec![
+            (
+                "concurrency".to_string(),
+                "races and shared state".to_string(),
+            ),
+            ("performance".to_string(), "hot-path cost".to_string()),
+        ];
+        let s = build_lens_triage_summary(&diffs, &menu);
+        assert!(s.contains("Candidate lenses"));
+        assert!(s.contains("`concurrency` — races and shared state"));
+        assert!(s.contains("do NOT list them"));
+        // The profile-oriented tail of build_triage_summary is replaced.
+        assert!(!s.contains("reviewer profiles needed"));
     }
 
     #[test]

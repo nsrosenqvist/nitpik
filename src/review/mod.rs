@@ -545,17 +545,34 @@ async fn select_auto_profiles(
     options: &ReviewOptions,
     config: &Config,
     diffs: &[models::FileDiff<'_>],
-    repo_root_path: &Path,
+    _repo_root_path: &Path,
 ) -> (Vec<String>, models::TokenUsage) {
     use agents::auto::AutoMode;
     let no_tokens = models::TokenUsage::default();
-    let (heuristic, confidence) =
-        agents::auto::auto_select_profiles_with_confidence(diffs, repo_root_path);
 
+    // The conditional-lens candidate pool. Always-on lenses (security,
+    // correctness) are added separately by `resolve_agents`, so they are not
+    // part of selection. With no candidates there is nothing to triage.
+    let candidates = agents::list_auto_candidate_profiles(options.profile_dir.as_deref())
+        .await
+        .unwrap_or_default();
+    if candidates.is_empty() {
+        return (Vec::new(), no_tokens);
+    }
+    let candidate_names: Vec<String> = candidates.iter().map(|a| a.profile.name.clone()).collect();
+
+    // Coarse key-free fallback, restricted to lenses that actually exist.
+    let heuristic: Vec<String> = agents::auto::heuristic_lens_candidates(diffs)
+        .into_iter()
+        .filter(|n| candidate_names.contains(n))
+        .collect();
+
+    // Lens selection is substance-based, so `hybrid` (the default) always
+    // consults the LLM; the heuristic is only the fallback when the call
+    // can't run or fails.
     let need_llm = match options.auto_mode.unwrap_or(AutoMode::Hybrid) {
         AutoMode::Heuristic => false,
-        AutoMode::Llm => true,
-        AutoMode::Hybrid => confidence == agents::auto::HeuristicConfidence::Low,
+        AutoMode::Llm | AutoMode::Hybrid => true,
     };
     if !need_llm {
         return (heuristic, no_tokens);
@@ -566,11 +583,15 @@ async fn select_auto_profiles(
         None => return (heuristic, no_tokens),
     };
     let Some(provider) = provider else {
-        eprintln!("Warning: no provider available for auto-selection; using heuristic profiles.");
+        eprintln!("Warning: no provider available for auto-selection; using heuristic lenses.");
         return (heuristic, no_tokens);
     };
 
-    let summary = agents::auto::build_triage_summary(diffs);
+    let menu: Vec<(String, String)> = candidates
+        .iter()
+        .map(|a| (a.profile.name.clone(), a.profile.description.clone()))
+        .collect();
+    let summary = agents::auto::build_lens_triage_summary(diffs, &menu);
     let triage_model = config.provider.model_for(crate::config::ModelTask::Triage);
     auto_triage_select(
         provider,
@@ -578,6 +599,7 @@ async fn select_auto_profiles(
         &triage_agent.system_prompt,
         &summary,
         heuristic,
+        candidate_names,
     )
     .await
 }
@@ -596,23 +618,28 @@ async fn auto_triage_select(
     triage_system_prompt: &str,
     triage_summary: &str,
     heuristic: Vec<String>,
+    allowed: Vec<String>,
 ) -> (Vec<String>, models::TokenUsage) {
     match provider
         .triage(triage_model, triage_system_prompt, triage_summary)
         .await
     {
         Ok(outcome) => {
-            let mut picked = agents::auto::parse_triage_profiles(&outcome.verdicts);
-            if heuristic.iter().any(|p| p == "architect")
-                && !picked.iter().any(|p| p == "architect")
-            {
-                picked.push("architect".to_string());
-            }
-            let profiles = if picked.is_empty() { heuristic } else { picked };
-            (profiles, outcome.tokens)
+            let picked = agents::auto::parse_triage_lenses(&outcome.verdicts, &allowed);
+            // Trust the model's judgement, *including a deliberate empty
+            // selection* (no conditional lens applies — the always-on lenses
+            // still run). Only fall back to the heuristic when the model
+            // emitted verdicts but none mapped to a valid lens (garbage), so
+            // a malformed response doesn't silently drop all conditionals.
+            let lenses = if !outcome.verdicts.is_empty() && picked.is_empty() {
+                heuristic
+            } else {
+                picked
+            };
+            (lenses, outcome.tokens)
         }
         Err(e) => {
-            eprintln!("Warning: triage call failed ({e}); using heuristic profiles.");
+            eprintln!("Warning: triage call failed ({e}); using heuristic lenses.");
             (heuristic, models::TokenUsage::default())
         }
     }
@@ -846,7 +873,7 @@ mod tests {
     #[tokio::test]
     async fn auto_triage_select_maps_verdicts_and_captures_tokens() {
         let provider = StubTriageProvider {
-            verdicts: vec![verdict("backend")],
+            verdicts: vec![verdict("concurrency")],
             tokens: TokenUsage {
                 input: 100,
                 output: 20,
@@ -854,16 +881,43 @@ mod tests {
             },
             fail: false,
         };
-        let (profiles, tokens) = auto_triage_select(
+        let (lenses, tokens) = auto_triage_select(
             &provider,
             "triage-model",
             "sys",
             "summary",
-            vec!["general".to_string()],
+            vec!["performance".to_string()],
+            vec!["concurrency".to_string(), "performance".to_string()],
         )
         .await;
-        assert!(profiles.contains(&"backend".to_string()));
+        assert!(lenses.contains(&"concurrency".to_string()));
         assert_eq!(tokens.total(), 120);
+    }
+
+    /// An LLM that deliberately selects no lens is trusted — the conditional
+    /// set is empty (only the always-on lenses run), NOT the heuristic.
+    #[tokio::test]
+    async fn auto_triage_select_trusts_deliberate_empty_selection() {
+        let provider = StubTriageProvider {
+            verdicts: vec![],
+            tokens: TokenUsage {
+                input: 30,
+                output: 5,
+                ..Default::default()
+            },
+            fail: false,
+        };
+        let (lenses, tokens) = auto_triage_select(
+            &provider,
+            "triage-model",
+            "sys",
+            "summary",
+            vec!["performance".to_string()],
+            vec!["concurrency".to_string(), "performance".to_string()],
+        )
+        .await;
+        assert!(lenses.is_empty(), "empty verdicts → no conditional lenses");
+        assert_eq!(tokens.total(), 35);
     }
 
     /// Tokens are reported even when the verdicts are unusable and we fall
@@ -872,7 +926,7 @@ mod tests {
     #[tokio::test]
     async fn auto_triage_select_reports_tokens_even_when_falling_back() {
         let provider = StubTriageProvider {
-            verdicts: vec![verdict("not-a-real-profile")],
+            verdicts: vec![verdict("not-a-real-lens")],
             tokens: TokenUsage {
                 input: 50,
                 output: 10,
@@ -880,15 +934,16 @@ mod tests {
             },
             fail: false,
         };
-        let (profiles, tokens) = auto_triage_select(
+        let (lenses, tokens) = auto_triage_select(
             &provider,
             "triage-model",
             "sys",
             "summary",
-            vec!["general".to_string()],
+            vec!["performance".to_string()],
+            vec!["concurrency".to_string(), "performance".to_string()],
         )
         .await;
-        assert_eq!(profiles, vec!["general".to_string()]); // heuristic fallback
+        assert_eq!(lenses, vec!["performance".to_string()]); // heuristic fallback
         assert_eq!(tokens.total(), 60); // but tokens still counted
     }
 
@@ -900,15 +955,16 @@ mod tests {
             tokens: TokenUsage::default(),
             fail: true,
         };
-        let (profiles, tokens) = auto_triage_select(
+        let (lenses, tokens) = auto_triage_select(
             &provider,
             "triage-model",
             "sys",
             "summary",
-            vec!["backend".to_string()],
+            vec!["performance".to_string()],
+            vec!["concurrency".to_string(), "performance".to_string()],
         )
         .await;
-        assert_eq!(profiles, vec!["backend".to_string()]);
+        assert_eq!(lenses, vec!["performance".to_string()]);
         assert_eq!(tokens.total(), 0);
     }
 }

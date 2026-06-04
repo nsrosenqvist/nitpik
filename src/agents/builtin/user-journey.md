@@ -2,6 +2,7 @@
 name: user-journey
 description: UX flows — happy path and failure modes walked as a user
 tags: [ux, frontend, ui, user-journey, product]
+auto_candidate: true
 agentic_instructions: >
   `read_file` the surrounding flow — the calling screen, the success and error
   branches, the loading and empty states — to walk the journey end to end
