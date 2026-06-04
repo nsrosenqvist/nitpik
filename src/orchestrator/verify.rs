@@ -44,6 +44,7 @@ pub struct DroppedFinding {
 /// the original order.
 pub async fn verify_findings(
     provider: &Arc<dyn ReviewProvider>,
+    model: &str,
     findings: Vec<Finding>,
 ) -> VerifyOutcome {
     if findings.is_empty() {
@@ -67,7 +68,10 @@ pub async fn verify_findings(
 
     let user_prompt = build_critic_prompt(&findings);
 
-    match provider.triage(&critic.system_prompt, &user_prompt).await {
+    match provider
+        .triage(model, &critic.system_prompt, &user_prompt)
+        .await
+    {
         Ok(outcome) => apply_verdicts(findings, outcome),
         Err(err) => {
             // Fail open: log to stderr and keep everything.
@@ -270,6 +274,7 @@ mod tests {
 
         async fn triage(
             &self,
+            _model: &str,
             _system_prompt: &str,
             _user_prompt: &str,
         ) -> Result<TriageOutcome, ProviderError> {
@@ -296,6 +301,7 @@ mod tests {
 
         async fn triage(
             &self,
+            _model: &str,
             _system_prompt: &str,
             _user_prompt: &str,
         ) -> Result<TriageOutcome, ProviderError> {
@@ -309,7 +315,7 @@ mod tests {
             verdicts: vec![verdict(0, "keep", None), verdict(1, "drop", Some("nope"))],
             tokens: TokenUsage::default(),
         }));
-        let result = verify_findings(&provider, vec![f("a"), f("b")]).await;
+        let result = verify_findings(&provider, "test-model", vec![f("a"), f("b")]).await;
         assert_eq!(result.kept.len(), 1);
         assert_eq!(result.kept[0].title, "a");
         assert_eq!(result.dropped.len(), 1);
@@ -319,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn verify_findings_fails_open_on_provider_error() {
         let provider: Arc<dyn ReviewProvider> = Arc::new(FailingTriage);
-        let result = verify_findings(&provider, vec![f("a"), f("b")]).await;
+        let result = verify_findings(&provider, "test-model", vec![f("a"), f("b")]).await;
         assert_eq!(result.kept.len(), 2);
         assert!(result.dropped.is_empty());
     }
@@ -327,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn verify_findings_passes_through_empty_input() {
         let provider: Arc<dyn ReviewProvider> = Arc::new(FailingTriage);
-        let result = verify_findings(&provider, Vec::new()).await;
+        let result = verify_findings(&provider, "test-model", Vec::new()).await;
         assert!(result.kept.is_empty());
         assert!(result.dropped.is_empty());
     }

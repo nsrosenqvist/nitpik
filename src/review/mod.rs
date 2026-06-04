@@ -250,8 +250,15 @@ pub async fn execute_review<'a>(
     let mut baseline = baseline;
     let mut summary_tokens = models::TokenUsage::default();
     if options.rolling_summary {
-        summary_tokens =
-            refresh_pr_summary(provider.as_ref(), repo_root_path, diffs, &mut baseline).await;
+        let summary_model = config.provider.model_for(crate::config::ModelTask::Summary);
+        summary_tokens = refresh_pr_summary(
+            provider.as_ref(),
+            summary_model,
+            repo_root_path,
+            diffs,
+            &mut baseline,
+        )
+        .await;
     }
 
     let (review_context, secret_findings) =
@@ -290,10 +297,21 @@ pub async fn execute_review<'a>(
 
     let total_tokens = review_result.tokens + triage_tokens + summary_tokens;
     let mut tokens_by_model = review_result.tokens_by_model.clone();
-    let aux_tokens = triage_tokens + summary_tokens;
-    if aux_tokens.total() > 0 {
-        let model = config.provider.resolved_model().to_string();
-        *tokens_by_model.entry(model).or_default() += aux_tokens;
+    // Attribute each auxiliary call's tokens to the model that actually ran
+    // it — they may differ from the review model under per-task overrides.
+    if triage_tokens.total() > 0 {
+        let model = config
+            .provider
+            .model_for(crate::config::ModelTask::Triage)
+            .to_string();
+        *tokens_by_model.entry(model).or_default() += triage_tokens;
+    }
+    if summary_tokens.total() > 0 {
+        let model = config
+            .provider
+            .model_for(crate::config::ModelTask::Summary)
+            .to_string();
+        *tokens_by_model.entry(model).or_default() += summary_tokens;
     }
 
     Ok(ReviewOutput {
@@ -376,6 +394,7 @@ async fn create_orchestrator(
 /// tokens the summary call consumed (for accounting).
 async fn refresh_pr_summary(
     provider: &dyn ReviewProvider,
+    model: &str,
     repo_root_path: &Path,
     diffs: &[models::FileDiff<'_>],
     baseline: &mut models::BaselineContext,
@@ -387,7 +406,10 @@ async fn refresh_pr_summary(
     let system_prompt = summary::summary_system_prompt();
     let user_prompt = summary::build_summary_user_prompt(diffs, prior.as_deref());
 
-    match provider.summarize(&system_prompt, &user_prompt).await {
+    match provider
+        .summarize(model, &system_prompt, &user_prompt)
+        .await
+    {
         Ok(outcome) if !outcome.summary.trim().is_empty() => {
             store.put_summary(&scope, &outcome.summary).await;
             baseline.pr_summary = Some(outcome.summary);
@@ -510,7 +532,11 @@ async fn select_auto_profiles(
         };
 
     let summary = agents::auto::build_triage_summary(diffs);
-    match provider.triage(&triage_agent.system_prompt, &summary).await {
+    let triage_model = config.provider.model_for(crate::config::ModelTask::Triage);
+    match provider
+        .triage(triage_model, &triage_agent.system_prompt, &summary)
+        .await
+    {
         Ok(outcome) => {
             let mut picked = agents::auto::parse_triage_profiles(&outcome.verdicts);
             if heuristic.iter().any(|p| p == "architect")
@@ -647,6 +673,7 @@ async fn run_threat_scan(
         raw_matches,
         &review_context.baseline.file_contents,
         provider,
+        config.provider.model_for(crate::config::ModelTask::Triage),
     )
     .await;
 

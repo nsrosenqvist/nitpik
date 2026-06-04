@@ -97,6 +97,13 @@ pub const PRIORITY_DOC_FILES: &[&str] = &["REVIEW.md", "NITPIK.md"];
 
 pub const ENV_PROVIDER: &str = "NITPIK_PROVIDER";
 pub const ENV_MODEL: &str = "NITPIK_MODEL";
+/// Per-task model override for cheap triage-style calls (auto profile
+/// selection + threat triage). Falls back to [`ENV_MODEL`] / the provider
+/// default when unset.
+pub const ENV_TRIAGE_MODEL: &str = "NITPIK_TRIAGE_MODEL";
+/// Per-task model override for the rolling PR summary call. Falls back to
+/// [`ENV_MODEL`] / the provider default when unset.
+pub const ENV_SUMMARY_MODEL: &str = "NITPIK_SUMMARY_MODEL";
 pub const ENV_API_KEY: &str = "NITPIK_API_KEY";
 pub const ENV_BASE_URL: &str = "NITPIK_BASE_URL";
 pub const ENV_LICENSE_KEY: &str = "NITPIK_LICENSE_KEY";

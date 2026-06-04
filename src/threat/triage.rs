@@ -25,11 +25,12 @@ pub async fn triage_findings(
     matches: Vec<ThreatMatch>,
     file_contents: &IndexMap<String, String>,
     provider: &dyn ReviewProvider,
+    model: &str,
 ) -> (Vec<ThreatMatch>, TokenUsage) {
     let prompt = build_triage_prompt(&matches, file_contents);
     let system = system_prompt();
 
-    let outcome = match provider.triage(&system, &prompt).await {
+    let outcome = match provider.triage(model, &system, &prompt).await {
         Ok(v) => v,
         Err(_) => return (matches, TokenUsage::default()), // fail-open
     };

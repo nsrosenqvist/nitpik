@@ -60,6 +60,7 @@ impl ReviewProvider for MockProvider {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -93,6 +94,7 @@ impl ReviewProvider for UsageMockProvider {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -617,6 +619,7 @@ impl ReviewProvider for FailingProvider {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -663,6 +666,7 @@ impl ReviewProvider for SelectiveFailProvider {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -775,6 +779,7 @@ async fn cache_prevents_duplicate_calls() {
 
         async fn triage(
             &self,
+            _model: &str,
             _system_prompt: &str,
             _user_prompt: &str,
         ) -> Result<TriageOutcome, ProviderError> {
@@ -894,6 +899,7 @@ async fn prior_findings_injected_on_cache_invalidation() {
 
         async fn triage(
             &self,
+            _model: &str,
             _system_prompt: &str,
             _user_prompt: &str,
         ) -> Result<TriageOutcome, ProviderError> {
@@ -1123,6 +1129,7 @@ async fn no_prior_context_flag_suppresses_injection() {
 
         async fn triage(
             &self,
+            _model: &str,
             _system_prompt: &str,
             _user_prompt: &str,
         ) -> Result<TriageOutcome, ProviderError> {
@@ -1289,6 +1296,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
 
         async fn triage(
             &self,
+            _model: &str,
             _system_prompt: &str,
             _user_prompt: &str,
         ) -> Result<TriageOutcome, ProviderError> {
@@ -1420,6 +1428,7 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
 
         async fn triage(
             &self,
+            _model: &str,
             _system_prompt: &str,
             _user_prompt: &str,
         ) -> Result<TriageOutcome, ProviderError> {
@@ -1533,7 +1542,9 @@ fn threat_test_diff(path: &str, lines: &[&str]) -> FileDiff<'static> {
 async fn threat_scanner_detects_eval_without_triage() {
     let rules = nitpik::threat::rules::default_rules();
     let diff = threat_test_diff("malicious.js", &["const x = eval(userInput);"]);
-    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+    let findings =
+        nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None, "haiku-test")
+            .await;
 
     assert!(!findings.is_empty(), "should detect eval() as a threat");
     assert!(
@@ -1558,7 +1569,9 @@ async fn threat_scanner_detects_multiple_patterns() {
             "os.system('rm -rf /')",
         ],
     );
-    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+    let findings =
+        nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None, "haiku-test")
+            .await;
 
     assert!(
         findings.len() >= 3,
@@ -1606,6 +1619,7 @@ impl ReviewProvider for TriageMockProvider {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -1630,9 +1644,14 @@ async fn threat_scanner_triage_dismisses_finding() {
     let file_contents = IndexMap::new();
 
     // First, scan without triage to see what we get
-    let raw_findings =
-        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None)
-            .await;
+    let raw_findings = nitpik::threat::scan_for_threats(
+        std::slice::from_ref(&diff),
+        &file_contents,
+        &rules,
+        None,
+        "haiku-test",
+    )
+    .await;
     assert!(
         raw_findings.len() >= 2,
         "should have at least 2 raw findings, got {}",
@@ -1647,6 +1666,7 @@ async fn threat_scanner_triage_dismisses_finding() {
         &file_contents,
         &rules,
         Some(&provider as &dyn ReviewProvider),
+        "haiku-test",
     )
     .await;
 
@@ -1677,6 +1697,7 @@ async fn threat_scanner_triage_downgrades_severity() {
         &file_contents,
         &rules,
         Some(&provider as &dyn ReviewProvider),
+        "haiku-test",
     )
     .await;
 
@@ -1709,12 +1730,18 @@ async fn threat_scanner_triage_fail_open_on_provider_error() {
         &file_contents,
         &rules,
         Some(&provider as &dyn ReviewProvider),
+        "haiku-test",
     )
     .await;
 
-    let without_triage =
-        nitpik::threat::scan_for_threats(std::slice::from_ref(&diff), &file_contents, &rules, None)
-            .await;
+    let without_triage = nitpik::threat::scan_for_threats(
+        std::slice::from_ref(&diff),
+        &file_contents,
+        &rules,
+        None,
+        "haiku-test",
+    )
+    .await;
 
     assert_eq!(
         with_error.len(),
@@ -1726,7 +1753,8 @@ async fn threat_scanner_triage_fail_open_on_provider_error() {
 #[tokio::test]
 async fn threat_scanner_empty_diff_no_findings() {
     let rules = nitpik::threat::rules::default_rules();
-    let findings = nitpik::threat::scan_for_threats(&[], &IndexMap::new(), &rules, None).await;
+    let findings =
+        nitpik::threat::scan_for_threats(&[], &IndexMap::new(), &rules, None, "haiku-test").await;
     assert!(
         findings.is_empty(),
         "empty diffs should produce no findings"
@@ -1746,7 +1774,9 @@ async fn threat_scanner_clean_code_no_findings() {
             "print(result)",
         ],
     );
-    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+    let findings =
+        nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None, "haiku-test")
+            .await;
     assert!(
         findings.is_empty(),
         "clean code should produce no threat findings, got {}",
@@ -1759,7 +1789,9 @@ async fn threat_scanner_mixed_script_homoglyph() {
     let rules = nitpik::threat::rules::default_rules();
     // Cyrillic 'р' (U+0440) looks like Latin 'p'
     let diff = threat_test_diff("spoof.py", &["р\u{0430}ypal_account = 'attacker@evil.com'"]);
-    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+    let findings =
+        nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None, "haiku-test")
+            .await;
 
     assert!(
         findings
@@ -1776,7 +1808,9 @@ async fn threat_scanner_binary_diff_skipped() {
     let mut diff = threat_test_diff("image.png", &["eval(x)"]);
     diff.is_binary = true;
 
-    let findings = nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+    let findings =
+        nitpik::threat::scan_for_threats(&[diff], &IndexMap::new(), &rules, None, "haiku-test")
+            .await;
     assert!(
         findings.is_empty(),
         "binary files should be skipped by threat scanner"
@@ -1814,6 +1848,7 @@ impl ReviewProvider for ReviewAndTriageMock {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -1908,6 +1943,7 @@ impl ReviewProvider for ReviewOkTriageFailMock {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -2087,6 +2123,7 @@ impl ReviewProvider for RecordingPerAgentMock {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -2350,6 +2387,7 @@ impl ReviewProvider for DiagnosticsProvider {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
@@ -2711,6 +2749,7 @@ impl ReviewProvider for SlowProvider {
 
     async fn triage(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {

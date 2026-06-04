@@ -77,6 +77,7 @@ pub async fn scan_for_threats(
     file_contents: &IndexMap<String, String>,
     rules: &[ThreatRule],
     provider: Option<&dyn ReviewProvider>,
+    triage_model: &str,
 ) -> Vec<Finding> {
     let raw_matches = scanner::scan_for_threats(diffs, file_contents, rules);
 
@@ -86,7 +87,7 @@ pub async fn scan_for_threats(
 
     let triaged = if let Some(provider) = provider {
         let (matches, _tokens) =
-            triage::triage_findings(raw_matches, file_contents, provider).await;
+            triage::triage_findings(raw_matches, file_contents, provider, triage_model).await;
         matches
     } else {
         raw_matches
@@ -135,7 +136,8 @@ mod tests {
     async fn produces_findings_from_eval() {
         let rules = rules::default_rules();
         let diff = make_diff("malicious.js", &["const x = eval(userInput);"]);
-        let findings = scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+        let findings =
+            scan_for_threats(&[diff], &IndexMap::new(), &rules, None, "haiku-test").await;
 
         assert!(!findings.is_empty(), "should detect eval() as a threat");
         assert_eq!(findings[0].agent, THREAT_SCANNER_AGENT);
@@ -145,7 +147,8 @@ mod tests {
     #[tokio::test]
     async fn empty_diff_produces_no_findings() {
         let rules = rules::default_rules();
-        let findings: Vec<Finding> = scan_for_threats(&[], &IndexMap::new(), &rules, None).await;
+        let findings: Vec<Finding> =
+            scan_for_threats(&[], &IndexMap::new(), &rules, None, "haiku-test").await;
         assert!(findings.is_empty());
     }
 
@@ -153,7 +156,8 @@ mod tests {
     async fn finding_has_correct_agent_name() {
         let rules = rules::default_rules();
         let diff = make_diff("app.py", &["os.system('rm -rf /')"]);
-        let findings = scan_for_threats(&[diff], &IndexMap::new(), &rules, None).await;
+        let findings =
+            scan_for_threats(&[diff], &IndexMap::new(), &rules, None, "haiku-test").await;
 
         for f in &findings {
             assert_eq!(f.agent, THREAT_SCANNER_AGENT);

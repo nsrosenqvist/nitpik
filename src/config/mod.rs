@@ -12,4 +12,4 @@
 
 pub mod loader;
 
-pub use loader::{Config, ProviderConfig};
+pub use loader::{Config, ModelTask, ProviderConfig, TaskModels};

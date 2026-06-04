@@ -568,12 +568,13 @@ impl ReviewProvider for RigProvider {
 
     async fn triage(
         &self,
+        model: &str,
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError> {
         let result = self
             .call::<crate::providers::VerdictsResponse>(
-                self.config.resolved_model(),
+                model,
                 CallArgs {
                     system_prompt,
                     user_prompt,
@@ -600,12 +601,13 @@ impl ReviewProvider for RigProvider {
 
     async fn summarize(
         &self,
+        model: &str,
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<crate::providers::SummaryOutcome, ProviderError> {
         let result = self
             .call::<crate::providers::PrSummaryResponse>(
-                self.config.resolved_model(),
+                model,
                 CallArgs {
                     system_prompt,
                     user_prompt,
@@ -676,6 +678,7 @@ mod tests {
             model: Some("claude-sonnet-4-20250514".to_string()),
             base_url: None,
             api_key: None,
+            models: Default::default(),
         };
         let result = RigProvider::new(config, PathBuf::from("/tmp"));
         match result {
@@ -691,6 +694,7 @@ mod tests {
             model: Some("claude-sonnet-4-20250514".to_string()),
             base_url: None,
             api_key: Some("sk-test-key".to_string()),
+            models: Default::default(),
         };
         assert!(RigProvider::new(config, PathBuf::from("/tmp")).is_ok());
     }
@@ -702,6 +706,7 @@ mod tests {
             model: Some("llama3".to_string()),
             base_url: None,
             api_key: None,
+            models: Default::default(),
         };
         assert!(
             RigProvider::new(config, PathBuf::from("/tmp")).is_ok(),
@@ -716,6 +721,7 @@ mod tests {
             model: Some("custom-model".to_string()),
             base_url: None,
             api_key: Some("key".to_string()),
+            models: Default::default(),
         };
         let provider = RigProvider::new(config, PathBuf::from("/tmp")).unwrap();
         let result = provider.require_base_url();
@@ -733,6 +739,7 @@ mod tests {
             model: Some("custom-model".to_string()),
             base_url: Some("https://my-api.example.com".to_string()),
             api_key: Some("key".to_string()),
+            models: Default::default(),
         };
         let provider = RigProvider::new(config, PathBuf::from("/tmp")).unwrap();
         assert_eq!(

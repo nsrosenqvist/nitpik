@@ -292,10 +292,12 @@ impl ReviewOrchestrator {
         // Optional critic pass: drop findings the critic votes to
         // discard. Fails open on provider error.
         let (final_findings, dropped, verify_audit) = if self.verify && !scoped.is_empty() {
-            let outcome = verify::verify_findings(&self.provider, scoped).await;
+            // The critic/verify pass is judgment-heavy, so it deliberately
+            // runs on the primary review model (no per-task override).
+            let critic_model = self.config.provider.resolved_model().to_string();
+            let outcome = verify::verify_findings(&self.provider, &critic_model, scoped).await;
             if outcome.tokens.total() > 0 {
                 total_tokens += outcome.tokens;
-                let critic_model = self.config.provider.resolved_model().to_string();
                 *tokens_by_model.entry(critic_model).or_default() += outcome.tokens;
             }
             let audit = if self.audit_enabled {

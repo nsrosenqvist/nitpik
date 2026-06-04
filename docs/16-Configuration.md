@@ -24,6 +24,12 @@ name = "anthropic"
 model = "claude-sonnet-4-5-20250929"
 # base_url = "https://custom-endpoint.example.com/v1"  # for openai-compatible
 
+# Optional: use a cheaper model for non-review tasks (same provider/key).
+# Each falls back to `model` above when unset.
+[provider.models]
+# triage  = "claude-haiku-4-5-20251001"   # auto profile selection + threat triage
+# summary = "claude-haiku-4-5-20251001"   # rolling PR summary
+
 [review]
 default_profiles = ["backend", "security"]
 fail_on = "warning"
@@ -65,6 +71,15 @@ The project config overrides the global config, so teams can set project-level s
 | `model` | string | *(per-provider)* | Model identifier passed to the provider. If omitted, nitpik uses a [sensible default for each provider](03-Providers#default-models). |
 | `base_url` | string | *(none)* | Custom API endpoint. Required for `openai-compatible`, optional for others. |
 | `api_key` | string | *(none)* | API key. Prefer env vars over config files for secrets. |
+
+### `[provider.models]`
+
+Per-task model overrides — let cheaper, non-review tasks run on a smaller model than the main per-file review. They use the **same provider and API key**; only the model identifier differs. Each falls back to `[provider] model` when unset, so omitting this table preserves the previous behavior. The per-file review and the critic/verify pass always use `[provider] model` (the critic is judgment-heavy and intentionally not downgradable).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `triage` | string | *(falls back to `model`)* | Model for triage-style calls: `auto` profile selection and threat triage. Env: `NITPIK_TRIAGE_MODEL`. |
+| `summary` | string | *(falls back to `model`)* | Model for the rolling PR summary (`--pr-summary`). Env: `NITPIK_SUMMARY_MODEL`. |
 
 ### `[review]`
 
@@ -124,6 +139,8 @@ The project config overrides the global config, so teams can set project-level s
 |---|---|
 | `NITPIK_PROVIDER` | LLM provider name (overrides `[provider].name`) |
 | `NITPIK_MODEL` | Model identifier (overrides `[provider].model`) |
+| `NITPIK_TRIAGE_MODEL` | Model for triage-style calls — auto profile selection + threat triage (overrides `[provider.models].triage`). Falls back to `NITPIK_MODEL`. |
+| `NITPIK_SUMMARY_MODEL` | Model for the rolling PR summary (overrides `[provider.models].summary`). Falls back to `NITPIK_MODEL`. |
 | `NITPIK_API_KEY` | Universal API key fallback — used when no provider-specific key is set |
 | `NITPIK_BASE_URL` | Custom API endpoint (overrides `[provider].base_url`) |
 

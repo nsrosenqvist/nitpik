@@ -154,12 +154,14 @@ pub trait ReviewProvider: Send + Sync {
         max_tool_calls: usize,
     ) -> Result<ReviewOutcome, ProviderError>;
 
-    /// Classify threat findings via a single-turn structured-output call.
+    /// Run a single-turn structured-output verdict call on `model`.
     ///
-    /// Used by the threat scanner's triage step to reclassify pattern
-    /// matches as confirmed, dismissed, or downgraded.
+    /// Backs several cheaper-than-review tasks — `auto` profile selection,
+    /// threat triage, and the critic/verify pass — so the caller picks the
+    /// model (see [`ProviderConfig::model_for`](crate::config::ProviderConfig::model_for)).
     async fn triage(
         &self,
+        model: &str,
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError>;
@@ -173,6 +175,7 @@ pub trait ReviewProvider: Send + Sync {
     /// it. An empty result means "no summary" and is never injected.
     async fn summarize(
         &self,
+        _model: &str,
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> Result<SummaryOutcome, ProviderError> {

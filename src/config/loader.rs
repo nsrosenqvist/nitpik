@@ -110,6 +110,33 @@ impl Default for ContextConfig {
     }
 }
 
+/// A specific LLM-backed task whose model can be configured independently
+/// of the main per-file review model.
+///
+/// Only the cheaper, non-review tasks are configurable: review uses the
+/// provider's primary [`model`](ProviderConfig::model), and the critic /
+/// verify pass deliberately stays pinned to that same review model because
+/// it is judgment-heavy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelTask {
+    /// Cheap classification calls: `auto` profile selection and threat
+    /// triage. Both go through `ReviewProvider::triage`.
+    Triage,
+    /// The rolling cross-run PR summary (`ReviewProvider::summarize`).
+    Summary,
+}
+
+/// Optional per-task model overrides. Each falls back to the provider's
+/// primary model when unset, so the default behavior is unchanged.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TaskModels {
+    /// Model for triage-style calls (auto profile selection + threat triage).
+    pub triage: Option<String>,
+    /// Model for the rolling PR summary.
+    pub summary: Option<String>,
+}
+
 /// LLM provider configuration.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -118,6 +145,8 @@ pub struct ProviderConfig {
     pub model: Option<String>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
+    /// Per-task model overrides (same provider/key as the primary model).
+    pub models: TaskModels,
 }
 
 impl ProviderConfig {
@@ -130,6 +159,19 @@ impl ProviderConfig {
             .as_deref()
             .unwrap_or_else(|| self.name.default_model())
     }
+
+    /// Resolve the model for a specific [`ModelTask`].
+    ///
+    /// Returns the task-specific override if configured, otherwise falls
+    /// back to [`resolved_model`](Self::resolved_model) — so an unconfigured
+    /// task behaves exactly as before (same model as the review).
+    pub fn model_for(&self, task: ModelTask) -> &str {
+        let override_model = match task {
+            ModelTask::Triage => self.models.triage.as_deref(),
+            ModelTask::Summary => self.models.summary.as_deref(),
+        };
+        override_model.unwrap_or_else(|| self.resolved_model())
+    }
 }
 
 impl std::fmt::Debug for ProviderConfig {
@@ -139,6 +181,7 @@ impl std::fmt::Debug for ProviderConfig {
             .field("model", &self.model)
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("models", &self.models)
             .finish()
     }
 }
@@ -150,6 +193,7 @@ impl Default for ProviderConfig {
             model: None,
             base_url: None,
             api_key: None,
+            models: TaskModels::default(),
         }
     }
 }
@@ -319,6 +363,8 @@ impl Config {
         merge_if_some!(self.provider.model, other.provider.model);
         merge_if_some!(self.provider.base_url, other.provider.base_url);
         merge_if_some!(self.provider.api_key, other.provider.api_key);
+        merge_if_some!(self.provider.models.triage, other.provider.models.triage);
+        merge_if_some!(self.provider.models.summary, other.provider.models.summary);
 
         // Secret settings
         if other.secrets.enabled {
@@ -363,6 +409,12 @@ impl Config {
         }
         if let Ok(val) = env.var(crate::constants::ENV_MODEL) {
             self.provider.model = Some(val);
+        }
+        if let Ok(val) = env.var(crate::constants::ENV_TRIAGE_MODEL) {
+            self.provider.models.triage = Some(val);
+        }
+        if let Ok(val) = env.var(crate::constants::ENV_SUMMARY_MODEL) {
+            self.provider.models.summary = Some(val);
         }
         if let Ok(val) = env.var(crate::constants::ENV_BASE_URL) {
             self.provider.base_url = Some(val);
@@ -618,6 +670,101 @@ model = "gpt-4o"
         assert_eq!(
             config.provider.base_url,
             Some("https://custom.api/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_provider_models_table() {
+        let toml = r#"
+[provider]
+name = "anthropic"
+model = "claude-opus-4-8"
+
+[provider.models]
+triage = "claude-haiku-4-5"
+summary = "claude-haiku-4-5"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.provider.models.triage.as_deref(),
+            Some("claude-haiku-4-5")
+        );
+        assert_eq!(
+            config.provider.models.summary.as_deref(),
+            Some("claude-haiku-4-5")
+        );
+        // An omitted table leaves both None (default behavior preserved).
+        let bare: Config = toml::from_str("[provider]\nname = \"anthropic\"\n").unwrap();
+        assert!(bare.provider.models.triage.is_none());
+        assert!(bare.provider.models.summary.is_none());
+    }
+
+    #[test]
+    fn model_for_falls_back_to_review_model_when_unset() {
+        let mut config = Config::default();
+        config.provider.model = Some("claude-opus-4-8".to_string());
+        // No per-task overrides → both tasks use the review model.
+        assert_eq!(
+            config.provider.model_for(ModelTask::Triage),
+            "claude-opus-4-8"
+        );
+        assert_eq!(
+            config.provider.model_for(ModelTask::Summary),
+            "claude-opus-4-8"
+        );
+    }
+
+    #[test]
+    fn model_for_uses_task_override_when_set() {
+        let mut config = Config::default();
+        config.provider.model = Some("claude-opus-4-8".to_string());
+        config.provider.models.triage = Some("claude-haiku-4-5".to_string());
+        // Triage overridden; summary still falls back to the review model.
+        assert_eq!(
+            config.provider.model_for(ModelTask::Triage),
+            "claude-haiku-4-5"
+        );
+        assert_eq!(
+            config.provider.model_for(ModelTask::Summary),
+            "claude-opus-4-8"
+        );
+    }
+
+    #[test]
+    fn apply_env_vars_task_models() {
+        let env = Env::mock([
+            ("NITPIK_TRIAGE_MODEL", "claude-haiku-4-5"),
+            ("NITPIK_SUMMARY_MODEL", "gpt-4o-mini"),
+        ]);
+        let mut config = Config::default();
+        config.apply_env_vars(&env);
+        assert_eq!(
+            config.provider.models.triage.as_deref(),
+            Some("claude-haiku-4-5")
+        );
+        assert_eq!(
+            config.provider.models.summary.as_deref(),
+            Some("gpt-4o-mini")
+        );
+        assert_eq!(
+            config.provider.model_for(ModelTask::Triage),
+            "claude-haiku-4-5"
+        );
+    }
+
+    #[test]
+    fn task_models_merge_layers() {
+        // A repo-local layer setting only `triage` must not clobber a
+        // global-layer `summary`, and vice versa.
+        let mut base = Config::default();
+        base.provider.models.summary = Some("global-summary".to_string());
+        let mut other = Config::default();
+        other.provider.models.triage = Some("local-triage".to_string());
+        base.merge(other);
+        assert_eq!(base.provider.models.triage.as_deref(), Some("local-triage"));
+        assert_eq!(
+            base.provider.models.summary.as_deref(),
+            Some("global-summary")
         );
     }
 
