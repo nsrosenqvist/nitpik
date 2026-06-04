@@ -188,9 +188,12 @@ pub struct ReviewArgs {
     pub no_fail: bool,
 
     // --- Agentic ---
-    /// Enable agentic context gathering (tools for LLM).
-    #[arg(long, default_value_t = false)]
-    pub agent: bool,
+    /// Agentic-review policy: `auto` (default — honor each reviewer's own
+    /// setting), `on` (force tools on for every reviewer), or `off` (force
+    /// single-shot everywhere). Bare `--agent` means `on`. When omitted,
+    /// falls back to `[review.agentic] enabled` (true → on) else `auto`.
+    #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "on")]
+    pub agent: Option<AgentPolicyArg>,
 
     /// Max agentic loop turns per file×agent.
     #[arg(long, default_value_t = 10)]
@@ -341,6 +344,28 @@ pub struct ReviewArgs {
 pub use crate::agents::auto::AutoMode;
 
 /// Output format options.
+/// CLI surface for the `--agent` agentic-review policy. Maps to
+/// [`nitpik::models::AgentPolicy`] in the composition root.
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum AgentPolicyArg {
+    /// Honor each reviewer's own `agentic` setting.
+    Auto,
+    /// Force tools on for every reviewer.
+    On,
+    /// Force single-shot for every reviewer.
+    Off,
+}
+
+impl From<AgentPolicyArg> for nitpik::models::AgentPolicy {
+    fn from(arg: AgentPolicyArg) -> Self {
+        match arg {
+            AgentPolicyArg::Auto => nitpik::models::AgentPolicy::Auto,
+            AgentPolicyArg::On => nitpik::models::AgentPolicy::On,
+            AgentPolicyArg::Off => nitpik::models::AgentPolicy::Off,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum OutputFormat {
     Terminal,
@@ -483,7 +508,7 @@ mod tests {
             format: OutputFormat::Terminal,
             fail_on: None,
             no_fail: false,
-            agent: false,
+            agent: None,
             max_turns: 10,
             max_tool_calls: 10,
             scan_secrets: false,

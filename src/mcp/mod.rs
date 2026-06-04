@@ -213,7 +213,7 @@ impl ServerHandler for NitpikMcpServer {
 /// extension's shim) does not expose OpenAI `response_format`.
 fn server_options(config: &Config) -> ReviewOptions {
     ReviewOptions {
-        use_agent: true,
+        agent_policy: crate::models::AgentPolicy::On,
         scan_secrets: config.secrets.enabled,
         scan_threats: config.threats.enabled,
         ..ReviewOptions::default()

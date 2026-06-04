@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-pub use agent::AgentDefinition;
+pub use agent::{AgentDefinition, AgentPolicy, LensScope};
 pub use context::{BaselineContext, ReviewContext};
 pub use diff::FileDiff;
 pub use finding::Severity;

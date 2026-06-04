@@ -375,7 +375,7 @@ fn severity_to_lsp(s: crate::models::Severity) -> DiagnosticSeverity {
 /// the MCP server).
 fn server_options(config: &Config) -> ReviewOptions {
     ReviewOptions {
-        use_agent: true,
+        agent_policy: crate::models::AgentPolicy::On,
         scan_secrets: config.secrets.enabled,
         scan_threats: config.threats.enabled,
         ..ReviewOptions::default()

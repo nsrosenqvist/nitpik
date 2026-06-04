@@ -138,6 +138,38 @@ pub enum LensScope {
     Diff,
 }
 
+/// Run-level policy for agentic (tool-using) review, layered on top of each
+/// reviewer's own [`agentic`](AgentProfile::agentic) intent.
+///
+/// `--agent` on the CLI selects this; absent, it defaults to [`Auto`].
+///
+/// [`Auto`]: AgentPolicy::Auto
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentPolicy {
+    /// Honor each reviewer's declared `agentic` field — cheap local lenses
+    /// stay single-shot, cross-cutting lenses use tools. The default.
+    #[default]
+    Auto,
+    /// Force every reviewer agentic, overriding their declaration —
+    /// maximum thoroughness, higher cost.
+    On,
+    /// Force every reviewer single-shot — caps cost/latency, even for
+    /// lenses that would normally explore.
+    Off,
+}
+
+impl AgentPolicy {
+    /// Resolve the effective agentic mode for a reviewer given its declared
+    /// per-lens intent.
+    pub fn resolve(self, lens_agentic: bool) -> bool {
+        match self {
+            AgentPolicy::On => true,
+            AgentPolicy::Off => false,
+            AgentPolicy::Auto => lens_agentic,
+        }
+    }
+}
+
 /// Serde `skip_serializing_if` predicate: omit `false` booleans so
 /// flags like `internal` don't add noise to serialized profile output.
 fn is_false(b: &bool) -> bool {
@@ -178,4 +210,37 @@ pub struct ToolParameter {
 
 fn default_param_type() -> String {
     "string".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_policy_default_is_auto() {
+        assert_eq!(AgentPolicy::default(), AgentPolicy::Auto);
+    }
+
+    #[test]
+    fn agent_policy_auto_honors_lens_intent() {
+        assert!(AgentPolicy::Auto.resolve(true));
+        assert!(!AgentPolicy::Auto.resolve(false));
+    }
+
+    #[test]
+    fn agent_policy_on_forces_agentic() {
+        assert!(AgentPolicy::On.resolve(false));
+        assert!(AgentPolicy::On.resolve(true));
+    }
+
+    #[test]
+    fn agent_policy_off_forces_single_shot() {
+        assert!(!AgentPolicy::Off.resolve(true));
+        assert!(!AgentPolicy::Off.resolve(false));
+    }
+
+    #[test]
+    fn lens_scope_defaults_to_chunk() {
+        assert_eq!(LensScope::default(), LensScope::Chunk);
+    }
 }

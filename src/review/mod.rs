@@ -52,8 +52,9 @@ pub struct ReviewOptions {
     pub auto_mode: Option<agents::auto::AutoMode>,
 
     // --- Engine toggles ---
-    /// Enable agentic context gathering (tools for the LLM).
-    pub use_agent: bool,
+    /// Run-level agentic-review policy, layered on each reviewer's own
+    /// `agentic` intent (see [`AgentPolicy`](crate::models::AgentPolicy)).
+    pub agent_policy: crate::models::AgentPolicy,
     /// Scan for and redact secrets before LLM calls.
     pub scan_secrets: bool,
     /// Scan diffs for threat patterns (then LLM-triage matches).
@@ -113,7 +114,7 @@ impl Default for ReviewOptions {
             profile_dir: None,
             tags: Vec::new(),
             auto_mode: None,
-            use_agent: false,
+            agent_policy: crate::models::AgentPolicy::default(),
             scan_secrets: false,
             scan_threats: false,
             secrets_rules: None,
@@ -271,7 +272,7 @@ pub async fn execute_review<'a>(
             &review_context,
             agent_defs,
             options.max_concurrent,
-            options.use_agent,
+            options.agent_policy,
             options.max_turns,
             options.max_tool_calls,
         )

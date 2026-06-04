@@ -64,7 +64,7 @@ Run a code review.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--agent` | `false` | Enable agentic mode — lets the LLM use tools to explore the codebase. |
+| `--agent [auto\|on\|off]` | `auto` | Agentic-review policy. `auto` (default) honors each reviewer's own setting — cheap reviewers stay single-shot, cross-cutting ones use tools. `on` (also the value of a bare `--agent`) forces tools on for every reviewer; `off` forces single-shot everywhere. When omitted, falls back to `[review.agentic] enabled` (true → `on`) else `auto`. |
 | `--max-turns <N>` | `10` | Max LLM round-trips (tool call → response) per file×agent task. |
 | `--max-tool-calls <N>` | `10` | Max tool invocations per file×agent task. |
 

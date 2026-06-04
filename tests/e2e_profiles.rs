@@ -247,7 +247,14 @@ async fn run_review_collecting_audit(
     );
 
     orchestrator
-        .run(&review_context, &agent_defs, 2, false, 10, 10)
+        .run(
+            &review_context,
+            &agent_defs,
+            2,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            10,
+        )
         .await
         .expect("orchestrator should succeed")
 }
@@ -329,7 +336,14 @@ async fn run_review(repo_path: &Path, profile_names: &[&str], config: &Config) -
     );
 
     let result = orchestrator
-        .run(&review_context, &agent_defs, 2, false, 10, 10)
+        .run(
+            &review_context,
+            &agent_defs,
+            2,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            10,
+        )
         .await
         .expect("orchestrator should succeed");
     result.findings
@@ -659,7 +673,14 @@ async fn e2e_custom_profile() {
     );
 
     let result = orchestrator
-        .run(&review_context, &agent_defs, 2, false, 10, 10)
+        .run(
+            &review_context,
+            &agent_defs,
+            2,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            10,
+        )
         .await
         .expect("orchestrator should succeed with custom profile");
     let findings = result.findings;
@@ -786,7 +807,14 @@ async fn e2e_custom_tool_agentic() {
 
         // agentic=true, max_turns=5, max_tool_calls=10
         let result = orchestrator
-            .run(&review_context, &agent_defs, 2, true, 5, 10)
+            .run(
+                &review_context,
+                &agent_defs,
+                2,
+                nitpik::models::AgentPolicy::On,
+                5,
+                10,
+            )
             .await
             .expect("agentic orchestrator should succeed with custom tool profile");
 
@@ -969,7 +997,14 @@ async fn e2e_builtin_tool_agentic() {
 
         // agentic=true, max_turns=5, max_tool_calls=10
         let result = orchestrator
-            .run(&review_context, &agent_defs, 2, true, 5, 10)
+            .run(
+                &review_context,
+                &agent_defs,
+                2,
+                nitpik::models::AgentPolicy::On,
+                5,
+                10,
+            )
             .await
             .expect("agentic orchestrator should succeed");
         findings = result.findings;
@@ -1201,7 +1236,14 @@ async fn e2e_cache_prior_findings() {
     );
 
     let result_v1 = orch1
-        .run(&review_context_v1, &agent_defs, 2, false, 10, 10)
+        .run(
+            &review_context_v1,
+            &agent_defs,
+            2,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            10,
+        )
         .await
         .expect("v1 review should succeed");
 
@@ -1271,7 +1313,14 @@ async fn e2e_cache_prior_findings() {
     );
 
     let result_v2 = orch2
-        .run(&review_context_v2, &agent_defs, 2, false, 10, 10)
+        .run(
+            &review_context_v2,
+            &agent_defs,
+            2,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            10,
+        )
         .await
         .expect("v2 review should succeed");
 
@@ -1385,7 +1434,14 @@ async fn e2e_agentic_mode() {
 
         // agentic=true, max_turns=5, max_tool_calls=10
         let result = orchestrator
-            .run(&review_context, &agent_defs, 2, true, 5, 10)
+            .run(
+                &review_context,
+                &agent_defs,
+                2,
+                nitpik::models::AgentPolicy::On,
+                5,
+                10,
+            )
             .await
             .expect("agentic orchestrator should succeed");
 

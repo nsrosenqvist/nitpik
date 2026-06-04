@@ -32,9 +32,9 @@ inputs:
     required: false
     default: "false"
   agent:
-    description: "Enable agentic mode (LLM explores your codebase)"
+    description: "Agentic-review policy: auto (honor each reviewer's own setting), on (force tools on everywhere), or off (force single-shot). Legacy true/false still accepted (true→on, false→off)."
     required: false
-    default: "false"
+    default: "auto"
   pr_review:
     description: "Post findings as a real inline PR review (needs permissions: pull-requests: write). Falls back to workflow annotations when false."
     required: false
@@ -119,9 +119,12 @@ runs:
           CMD="$CMD --scan-secrets"
         fi
 
-        if [ "${{ inputs.agent }}" = "true" ]; then
-          CMD="$CMD --agent"
-        fi
+        AGENT_MODE="${{ inputs.agent }}"
+        case "$AGENT_MODE" in
+          true) AGENT_MODE="on" ;;
+          false) AGENT_MODE="off" ;;
+        esac
+        CMD="$CMD --agent $AGENT_MODE"
 
         echo "::group::nitpik review"
         EXIT_CODE=0

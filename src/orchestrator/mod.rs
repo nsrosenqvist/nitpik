@@ -156,7 +156,7 @@ impl ReviewOrchestrator {
         context: &ReviewContext<'_>,
         agents: &[AgentDefinition],
         max_concurrent: usize,
-        agentic: bool,
+        agent_policy: crate::models::AgentPolicy,
         max_turns: usize,
         max_tool_calls: usize,
     ) -> Result<ReviewResult, OrchestratorError> {
@@ -199,7 +199,7 @@ impl ReviewOrchestrator {
                 &system_addendum,
                 None,
                 max_concurrent,
-                agentic,
+                agent_policy,
                 max_turns,
                 max_tool_calls,
                 1,
@@ -225,7 +225,7 @@ impl ReviewOrchestrator {
                     &system_addendum,
                     Some(&wave1_summary),
                     max_concurrent,
-                    agentic,
+                    agent_policy,
                     max_turns,
                     max_tool_calls,
                     2,
@@ -249,7 +249,7 @@ impl ReviewOrchestrator {
                     &system_addendum,
                     None,
                     max_concurrent,
-                    agentic,
+                    agent_policy,
                     max_turns,
                     max_tool_calls,
                     2,
@@ -350,7 +350,7 @@ impl ReviewOrchestrator {
         system_addendum: &str,
         wave_addendum: Option<&str>,
         max_concurrent: usize,
-        agentic: bool,
+        agent_policy: crate::models::AgentPolicy,
         max_turns: usize,
         max_tool_calls: usize,
         wave_number: u8,
@@ -411,6 +411,10 @@ impl ReviewOrchestrator {
             let no_prior_context = self.no_prior_context;
             let max_prior_findings = self.max_prior_findings;
             let review_scope = self.review_scope.clone();
+            // Resolve the run-level policy against this reviewer's declared
+            // agentic intent, so cheap lenses stay single-shot while
+            // cross-cutting lenses get tools — unless the policy forces it.
+            let task_agentic = agent_policy.resolve(agent.profile.agentic);
             let model = agent
                 .profile
                 .model
@@ -445,7 +449,7 @@ impl ReviewOrchestrator {
                 agent.system_prompt.push_str(addendum);
             }
 
-            let base_prompt = build_prompt(&chunk, context, &agent, all_agents, None, agentic);
+            let base_prompt = build_prompt(&chunk, context, &agent, all_agents, None, task_agentic);
             let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
 
             join_set.spawn(execute_review_task(ReviewTaskParams {
@@ -461,7 +465,7 @@ impl ReviewOrchestrator {
                 base_prompt,
                 no_prior_context,
                 max_prior_findings,
-                agentic,
+                agentic: task_agentic,
                 max_turns,
                 max_tool_calls,
                 audit_enabled: self.audit_enabled,

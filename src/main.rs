@@ -387,7 +387,14 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         Config::load(Some(repo_root_path), &env_real).context("failed to load configuration")?;
     let license_claims = verify_license(&config, &env_real).await;
 
-    let use_agent = args.agent || config.review.agentic.enabled;
+    // Agentic policy: an explicit `--agent[=auto|on|off]` wins; otherwise
+    // fall back to config (`[review.agentic] enabled` true → force on) and
+    // finally to `auto` (honor each reviewer's own declaration).
+    let agent_policy = match args.agent {
+        Some(arg) => arg.into(),
+        None if config.review.agentic.enabled => models::AgentPolicy::On,
+        None => models::AgentPolicy::Auto,
+    };
     let scan_secrets = args.scan_secrets || config.secrets.enabled;
     let scan_threats = args.scan_threats || config.threats.enabled;
 
@@ -429,7 +436,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         profile_dir: args.profile_dir.clone(),
         tags: args.tag.clone(),
         auto_mode: args.auto_mode,
-        use_agent,
+        agent_policy,
         scan_secrets,
         scan_threats,
         secrets_rules: args.secrets_rules.clone(),
@@ -512,8 +519,14 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
                 }
                 let chunks = chunker::chunk_diff(d, None);
                 for chunk in chunks {
-                    let user_prompt =
-                        build_prompt(&chunk, &review_ctx, agent, &agent_defs, None, use_agent);
+                    let user_prompt = build_prompt(
+                        &chunk,
+                        &review_ctx,
+                        agent,
+                        &agent_defs,
+                        None,
+                        agent_policy.resolve(agent.profile.agentic),
+                    );
                     println!("═══ {} × {} ═══", chunk.path(), agent.profile.name);
                     println!("── system prompt ──");
                     println!("{}", agent.system_prompt);
@@ -534,7 +547,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         &agent_defs,
         &baseline,
         &license_claims,
-        use_agent,
+        agent_policy != models::AgentPolicy::Off,
     );
 
     // `execute_review` owns the engine lifecycle, including progress
@@ -594,7 +607,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         let summary = audit::ConfigSummary {
             provider: config.provider.name.to_string(),
             model: output.resolved_model.clone(),
-            agentic: use_agent,
+            agentic: agent_policy != models::AgentPolicy::Off,
             max_turns: args.max_turns,
             max_tool_calls: args.max_tool_calls,
             max_concurrent: args.max_concurrent,

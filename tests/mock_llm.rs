@@ -238,7 +238,14 @@ async fn orchestrator_returns_findings_from_mock_provider() {
 
     let agents = vec![test_agent("test-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -283,7 +290,14 @@ async fn orchestrator_returns_empty_for_no_issues() {
 
     let agents = vec![test_agent("clean-reviewer")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -340,7 +354,14 @@ async fn orchestrator_aggregates_token_usage_across_tasks() {
 
     let agents = vec![test_agent("agent-1"), test_agent("agent-2")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -413,7 +434,14 @@ async fn orchestrator_splits_token_usage_by_model() {
         test_agent_with_model("slow", "gpt-4o"),
     ];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -451,7 +479,14 @@ async fn orchestrator_failed_task_contributes_zero_tokens() {
 
     let agents = vec![test_agent("good-agent"), test_agent("failing-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("partial failure should still succeed");
 
@@ -488,7 +523,16 @@ async fn orchestrator_errors_on_empty_diffs() {
     };
 
     let agents = vec![test_agent("any-agent")];
-    let result = orchestrator.run(&context, &agents, 4, false, 10, 50).await;
+    let result = orchestrator
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
+        .await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -532,7 +576,14 @@ async fn orchestrator_skips_binary_files() {
 
     let agents = vec![test_agent("test-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -588,7 +639,14 @@ async fn orchestrator_handles_multiple_agents_and_files() {
     // Two agents, two files = 4 combinations
     let agents = vec![test_agent("agent-a"), test_agent("agent-b")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -713,7 +771,14 @@ async fn orchestrator_errors_when_all_tasks_fail() {
     };
 
     let err = orchestrator
-        .run(&context, &[test_agent("failing-agent")], 4, false, 10, 50)
+        .run(
+            &context,
+            &[test_agent("failing-agent")],
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect_err("all-tasks-failed must surface as an error");
 
@@ -743,7 +808,14 @@ async fn orchestrator_partial_failure_returns_findings() {
 
     let agents = vec![test_agent("good-agent"), test_agent("failing-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("partial failure should still succeed");
 
@@ -829,7 +901,14 @@ async fn cache_prevents_duplicate_calls() {
 
     // First run — cache miss, should call provider
     let result1 = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("first run should succeed");
     assert_eq!(result1.findings.len(), 2);
@@ -838,7 +917,14 @@ async fn cache_prevents_duplicate_calls() {
 
     // Second run with same inputs — cache hit, should NOT call provider
     let result2 = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("second run should succeed");
     assert_eq!(result2.findings.len(), 2);
@@ -1060,7 +1146,14 @@ async fn prior_findings_injected_on_cache_invalidation() {
     );
 
     let result2 = orchestrator
-        .run(&context2, &agents, 4, false, 10, 50)
+        .run(
+            &context2,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("second run should succeed");
 
@@ -1211,7 +1304,14 @@ async fn no_prior_context_flag_suppresses_injection() {
     let agents = vec![test_agent("sec-agent")];
 
     let _result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("run should succeed");
 
@@ -1365,7 +1465,7 @@ async fn custom_tools_appear_in_agentic_prompt() {
 
     // Run with agentic=true
     let _result = orchestrator
-        .run(&context, &agents, 4, true, 5, 10)
+        .run(&context, &agents, 4, nitpik::models::AgentPolicy::On, 5, 10)
         .await
         .expect("orchestrator should succeed");
 
@@ -1489,7 +1589,14 @@ async fn custom_tools_absent_in_non_agentic_prompt() {
 
     // Run with agentic=false
     let _result = orchestrator
-        .run(&context, &agents, 4, false, 5, 10)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            5,
+            10,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -1913,7 +2020,14 @@ async fn orchestrator_verify_drops_findings_via_critic() {
     };
 
     let result = orchestrator
-        .run(&context, &[test_agent("test-agent")], 4, false, 10, 50)
+        .run(
+            &context,
+            &[test_agent("test-agent")],
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -1993,7 +2107,14 @@ async fn orchestrator_verify_fail_open_when_triage_errors() {
     };
 
     let result = orchestrator
-        .run(&context, &[test_agent("test-agent")], 4, false, 10, 50)
+        .run(
+            &context,
+            &[test_agent("test-agent")],
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2062,7 +2183,14 @@ async fn orchestrator_no_verify_leaves_findings_untouched() {
     };
 
     let result = orchestrator
-        .run(&context, &[test_agent("test-agent")], 4, false, 10, 50)
+        .run(
+            &context,
+            &[test_agent("test-agent")],
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2198,7 +2326,14 @@ async fn orchestrator_multi_wave_feeds_wave1_findings_into_wave2() {
 
     let agents = vec![test_agent("wave1-agent"), test_agent_wave2("wave2-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2297,7 +2432,14 @@ async fn orchestrator_runs_all_agents_in_one_wave_when_multi_wave_disabled() {
 
     let agents = vec![test_agent("wave1-agent"), test_agent_wave2("wave2-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2354,7 +2496,14 @@ async fn orchestrator_collects_task_audits_when_audit_enabled() {
 
     let agents = vec![test_agent("test-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2445,7 +2594,14 @@ async fn audit_records_agent_loop_diagnostics() {
 
     let agents = vec![test_agent("test-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, true, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::On,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2490,7 +2646,14 @@ async fn orchestrator_skips_audit_collection_when_disabled() {
 
     let agents = vec![test_agent("test-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2530,7 +2693,14 @@ async fn orchestrator_records_failed_task_in_audit() {
 
     let agents = vec![test_agent("good-agent"), test_agent("failing-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("partial failure should still succeed");
 
@@ -2596,7 +2766,14 @@ async fn orchestrator_populates_verify_audit_when_critic_drops() {
 
     let agents = vec![test_agent("test-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2649,7 +2826,14 @@ async fn audit_log_end_to_end_writes_valid_json_to_disk() {
 
     let agents = vec![test_agent("test-agent")];
     let result = orchestrator
-        .run(&context, &agents, 4, false, 10, 50)
+        .run(
+            &context,
+            &agents,
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("orchestrator should succeed");
 
@@ -2805,7 +2989,14 @@ async fn orchestrator_times_out_slow_provider_and_marks_failed() {
     // The sole task times out → every dispatched task failed → the run is
     // an error (a timed-out provider must not read as a clean review).
     let err = orchestrator
-        .run(&context, &[test_agent("slow-agent")], 4, false, 10, 50)
+        .run(
+            &context,
+            &[test_agent("slow-agent")],
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect_err("a fully timed-out run must surface as an error");
 
@@ -2854,7 +3045,14 @@ async fn orchestrator_completes_when_timeout_is_disabled() {
     };
 
     let result = orchestrator
-        .run(&context, &[test_agent("slow-agent")], 4, false, 10, 50)
+        .run(
+            &context,
+            &[test_agent("slow-agent")],
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
         .await
         .expect("run should succeed");
     assert_eq!(result.failed_tasks, 0);

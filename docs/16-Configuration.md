@@ -93,7 +93,7 @@ Per-task model overrides — let cheaper, non-review tasks run on a smaller mode
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `false` | Enable agentic mode by default. Equivalent to always passing `--agent`. |
+| `enabled` | bool | `false` | Force agentic mode on by default for every reviewer (equivalent to `--agent on`). When `false`, the policy is `auto` unless `--agent` overrides it — `auto` honors each reviewer's own setting rather than disabling tools outright. |
 | `max_turns` | integer | `10` | Max LLM round-trips per file×agent task. Higher values allow deeper exploration but increase cost. |
 | `max_tool_calls` | integer | `10` | Max tool invocations per file×agent task. Caps total tool calls regardless of turns. |
 
