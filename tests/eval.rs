@@ -534,9 +534,6 @@ async fn review_case(
         repo.display()
     );
 
-    let agent_defs = nitpik::agents::resolve_profiles(profiles, None)
-        .await
-        .expect("resolve profiles");
     let baseline =
         nitpik::context::build_baseline_context(repo, &diffs, config, false, &[], Vec::new(), None)
             .await;
@@ -548,12 +545,27 @@ async fn review_case(
             .expect("construct provider"),
     );
 
+    // Measure the *shipped default engine*: run `auto`, which resolves the
+    // always-on lenses (security, correctness) plus any conditional lenses the
+    // diff-substance triage selects — not the fixture's declared profiles.
+    // `profiles` is retained for documentation/back-compat of the fixtures.
+    let _ = profiles;
     let options = nitpik::review::ReviewOptions {
-        profiles: profiles.to_vec(),
+        profiles: vec!["auto".to_string()],
         verify: true,
         no_cache: true,
         ..Default::default()
     };
+    let agent_defs = nitpik::review::resolve_agents(
+        Some(provider.as_ref()),
+        &options,
+        config,
+        &diffs,
+        repo,
+    )
+    .await
+    .expect("resolve agents")
+    .agents;
     let progress = Arc::new(nitpik::progress::ProgressTracker::new(&[], &[], false));
 
     // A total provider failure (all tasks erroring) now surfaces as an
