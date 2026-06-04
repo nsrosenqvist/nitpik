@@ -11,6 +11,7 @@ pub mod checkstyle;
 pub mod escape;
 pub mod forgejo;
 pub mod github;
+pub mod github_pr_review;
 pub mod gitlab;
 pub mod json;
 pub mod terminal;

@@ -332,6 +332,9 @@ pub enum OutputFormat {
     Terminal,
     Json,
     Github,
+    /// Post a real PR review with inline comments via the GitHub REST API
+    /// (`--format github-pr-review`). Uses the workflow's `GITHUB_TOKEN`.
+    GithubPrReview,
     Gitlab,
     Bitbucket,
     Checkstyle,
@@ -346,6 +349,9 @@ impl OutputFormat {
             OutputFormat::Terminal => nitpik::output::terminal::TerminalFormatter.format(findings),
             OutputFormat::Json => nitpik::output::json::JsonFormatter.format(findings),
             OutputFormat::Github => nitpik::output::github::GithubFormatter.format(findings),
+            OutputFormat::GithubPrReview => {
+                nitpik::output::github_pr_review::GithubPrReviewFormatter.format(findings)
+            }
             OutputFormat::Gitlab => nitpik::output::gitlab::GitlabFormatter.format(findings),
             OutputFormat::Bitbucket => {
                 nitpik::output::bitbucket::BitbucketFormatter.format(findings)
@@ -361,6 +367,7 @@ impl OutputFormat {
     ///
     /// Bitbucket publishes when `BITBUCKET_WORKSPACE` is set.
     /// Forgejo publishes when `CI_FORGE_URL` is set.
+    /// GitHub PR review publishes when `GITHUB_TOKEN` is set.
     /// Other formats are no-ops.
     pub async fn publish(
         &self,
@@ -377,6 +384,11 @@ impl OutputFormat {
             }
             OutputFormat::Forgejo if env.is_set("CI_FORGE_URL") => {
                 nitpik::output::forgejo::ForgejoPublisher::new(env)
+                    .publish(findings)
+                    .await
+            }
+            OutputFormat::GithubPrReview if env.is_set("GITHUB_TOKEN") => {
+                nitpik::output::github_pr_review::GithubPrReviewPublisher::new(env)
                     .publish(findings)
                     .await
             }

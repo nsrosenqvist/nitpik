@@ -35,6 +35,10 @@ inputs:
     description: "Enable agentic mode (LLM explores your codebase)"
     required: false
     default: "false"
+  pr_review:
+    description: "Post findings as a real inline PR review (needs permissions: pull-requests: write). Falls back to workflow annotations when false."
+    required: false
+    default: "false"
 
 # ⚠ Security: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) must be passed
 #   via GitHub Secrets — never hardcode them in workflow files.
@@ -72,6 +76,10 @@ runs:
 
     - name: Run nitpik
       shell: bash
+      env:
+        # Exposed so `pr_review: true` (--format github-pr-review) can post
+        # a PR review. Unused by the default annotation path.
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         ARGS="${{ inputs.args }}"
@@ -83,7 +91,11 @@ runs:
         CMD="nitpik review"
         CMD="$CMD --diff-base ${{ steps.base.outputs.ref }}"
         CMD="$CMD --profile ${{ inputs.profiles }}"
-        CMD="$CMD --format github"
+        if [ "${{ inputs.pr_review }}" = "true" ]; then
+          CMD="$CMD --format github-pr-review"
+        else
+          CMD="$CMD --format github"
+        fi
 
         if [ -n "${{ inputs.fail_on }}" ]; then
           CMD="$CMD --fail-on ${{ inputs.fail_on }}"
