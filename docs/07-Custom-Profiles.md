@@ -33,7 +33,10 @@ Check for:
 | `model` | No | Override the global model for this profile. Useful for using a more capable model on security reviews or a cheaper one for style checks. |
 | `agentic_instructions` | No | Additional instructions injected only in `--agent` mode. Use this to tell the LLM how to use tools effectively for this profile's focus. Not included in standard (non-agentic) reviews. |
 | `environment` | No | List of env var names (or prefix globs like `AWS_*`) that custom command tools are allowed to inherit. See [Environment Passthrough](#environment-passthrough). |
-| `always_include` | No | When `true`, the profile is added to every `auto` review regardless of file heuristics. Defaults to `false`. See [Always-On Profiles](#always-on-profiles). |
+| `always_include` | No | When `true`, the profile runs on every `auto` review regardless of triage. Defaults to `false`. See [Always-On Profiles](#always-on-profiles). |
+| `auto_candidate` | No | When `true`, the profile joins the conditional **triage candidate pool** — `auto` mode may select it by diff substance, like the built-in lenses. Defaults to `false` (the profile runs only when named via `--profile`/`--tag`). |
+| `scope` | No | `chunk` (default) reviews one diff chunk per task; `diff` runs the profile once over the **whole change set** — for cross-cutting concerns (rename ripple, docs drift, whole-PR coherence). |
+| `agentic` | No | When `true`, this reviewer requests repository-exploration tools by default. The run-level `--agent` policy (`auto`/`on`/`off`) can override it. See [Agentic Mode](08-Agentic-Mode). |
 | `wave` | No | Either `1` (default) or `2`. Profiles set to `wave: 2` run after wave 1 completes when `--multi-wave` is enabled, and receive a summary of wave-1 findings as additional context. Ignored without `--multi-wave`. |
 | `tools` | No | Custom CLI tools the LLM can invoke in agentic mode. See [Custom Agentic Tools](#custom-agentic-tools). |
 
@@ -59,7 +62,7 @@ nitpik review --diff-base main --profile-dir ./agents --profile backend,team-con
 
 ## Overriding Built-In Profiles
 
-A custom profile whose `name` matches a built-in (`backend`, `frontend`, `architect`, `security`, `general`) replaces the built-in when `--profile-dir` is set. This lets you tune the shipped profiles to your team's needs without forking the project.
+A custom profile whose `name` matches a built-in (a lens like `security`, `correctness`, `a11y`, …, or a legacy profile like `backend`) replaces the built-in when `--profile-dir` is set. This lets you tune the shipped profiles to your team's needs without forking the project.
 
 For example, drop a file at `./agents/backend.md`:
 
@@ -107,34 +110,25 @@ See the [built-in profiles](https://github.com/nsrosenqvist/nitpik/tree/main/src
 
 ## Always-On Profiles
 
-Some reviewers should run on every change, regardless of which files were touched — security is the obvious example, but teams often want similar coverage for documentation drift, license headers, telemetry conventions, or other cross-cutting concerns.
+The built-in `security` and `correctness` lenses already run on every change. Teams often want similar always-on coverage for a project-specific concern — license headers, telemetry conventions, a house style rule, or a high-stakes subsystem.
 
 Set `always_include: true` in a profile's frontmatter to make it part of every `auto` review:
 
 ```markdown
 ---
-name: docs-drift
-description: Flags changes that may invalidate existing documentation
-tags: [docs, drift]
+name: license-headers
+description: Every new source file carries the SPDX license header
+tags: [license, compliance]
 always_include: true
 ---
 
-You are a documentation accuracy reviewer.
+You are a license-compliance reviewer.
 
-When a code change modifies a public API, configuration option, CLI flag, or
-documented behavior, check whether existing documentation still matches:
+For every newly added source file in the diff, check that it begins with the
+project's SPDX license header. Report a finding when a new file is missing it.
 
-1. **Scan related docs.** If the change is in `src/api/`, search `docs/api/`,
-   `README.md`, and any inline rustdoc for references to the changed symbol.
-2. **Flag drift, don't rewrite it.** Report stale paragraphs as findings —
-   tell the author which doc section is now inaccurate and what changed.
-   Don't suggest the new wording; that's a separate task.
-3. **Severity guidance.**
-   - `error` — public API contract changed and docs still describe the old behavior.
-   - `warning` — internal behavior changed in a way users would notice (defaults, error messages, output format).
-   - `info` — minor changes that may warrant a doc refresh but won't mislead users.
-
-Don't report on changes to test files, internal helpers, or undocumented code.
+- `warning` — a new source file has no license header.
+- Don't report on test fixtures, generated files, or non-source assets.
 ```
 
 Use it like any other profile — drop the file in your `--profile-dir` and `auto` picks it up automatically:
@@ -143,7 +137,9 @@ Use it like any other profile — drop the file in your `--profile-dir` and `aut
 nitpik review --diff-base main --profile-dir ./agents --profile auto
 ```
 
-> **Note:** `always_include` only applies to `auto` mode. Explicit `--profile` and `--tag` selections stay literal — if you list profiles by name, only those run.
+> **Tip:** for a reviewer that should run *conditionally* — only when the diff's substance calls for it, like the built-in lenses — set `auto_candidate: true` instead of `always_include: true`. Triage then selects it by diff substance rather than running it every time.
+
+> **Note:** `always_include`/`auto_candidate` only apply to `auto` mode. Explicit `--profile` and `--tag` selections stay literal — if you list profiles by name, only those run.
 
 ### Disabling a Built-In Always-On Profile
 

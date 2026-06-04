@@ -46,11 +46,13 @@ With `--multi-wave`, profiles whose YAML frontmatter declares `wave: 2` run **af
 
 ### Auto Profile Selection
 
-`--profile auto` picks reviewer profiles from the diff itself. The strategy is controlled by `--auto-mode`:
+`--profile auto` runs the always-on lenses (`security`, `correctness`) and selects conditional lenses from the diff itself. The selection strategy is controlled by `--auto-mode`:
 
-- `heuristic` — file/path/dependency rules only, no LLM call.
-- `llm` — always ask the model (using a built-in `triage` profile) to pick.
-- `hybrid` (default) — heuristics first; consult the LLM only when heuristics are inconclusive.
+- `heuristic` — file/path rules map signals to lenses, no LLM call.
+- `llm` — ask the model (using the built-in `triage` profile) to pick conditional lenses by substance.
+- `hybrid` (default) — consult the LLM every run; fall back to the heuristic if the triage call can't run or fails.
+
+See [Reviewer Profiles & Lenses](06-Reviewer-Profiles) for the full lens set.
 
 ## Verification (Critic Pass)
 
