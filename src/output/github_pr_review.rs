@@ -292,8 +292,7 @@ pub async fn post_review(findings: &[Finding], env: &Env) -> Result<(), GithubPr
 
     // Cross-run dedup: skip findings the bot already commented on. Fail open
     // (treat all as new) if the probe errors — never block a review on it.
-    let existing =
-        fetch_existing_markers(&client, api_base, owner, repo, pr_number, &token).await;
+    let existing = fetch_existing_markers(&client, api_base, owner, repo, pr_number, &token).await;
     let had_prior_comments = !existing.is_empty();
     let (new_findings, skipped) = partition_new(findings, &existing);
 

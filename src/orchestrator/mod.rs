@@ -503,7 +503,14 @@ impl ReviewOrchestrator {
                 }
             }
         }
-        (findings, failed, total, total_tokens, tokens_by_model, audits)
+        (
+            findings,
+            failed,
+            total,
+            total_tokens,
+            tokens_by_model,
+            audits,
+        )
     }
 }
 

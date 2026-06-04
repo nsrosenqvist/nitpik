@@ -142,12 +142,13 @@ impl ProfileRepository {
         if let Some(dir) = agent_dir
             && dir.is_dir()
         {
-            let mut entries = tokio::fs::read_dir(dir)
-                .await
-                .map_err(|e| AgentError::ReadError {
-                    path: dir.display().to_string(),
-                    source: e,
-                })?;
+            let mut entries =
+                tokio::fs::read_dir(dir)
+                    .await
+                    .map_err(|e| AgentError::ReadError {
+                        path: dir.display().to_string(),
+                        source: e,
+                    })?;
 
             while let Some(entry) =
                 entries
@@ -160,13 +161,12 @@ impl ProfileRepository {
             {
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "md") {
-                    let content =
-                        tokio::fs::read_to_string(&path)
-                            .await
-                            .map_err(|e| AgentError::ReadError {
-                                path: path.display().to_string(),
-                                source: e,
-                            })?;
+                    let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
+                        AgentError::ReadError {
+                            path: path.display().to_string(),
+                            source: e,
+                        }
+                    })?;
                     match parser::parse_agent_definition(&content) {
                         Ok(agent) => upsert(&mut profiles, agent),
                         Err(e) => eprintln!("Warning: skipping {}: {e}", path.display()),

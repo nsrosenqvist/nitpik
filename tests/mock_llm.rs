@@ -739,7 +739,10 @@ async fn orchestrator_partial_failure_returns_findings() {
         .await
         .expect("partial failure should still succeed");
 
-    assert!(!result.findings.is_empty(), "successful agent's findings kept");
+    assert!(
+        !result.findings.is_empty(),
+        "successful agent's findings kept"
+    );
     assert_eq!(result.failed_tasks, 1, "the failing agent is reported");
 }
 

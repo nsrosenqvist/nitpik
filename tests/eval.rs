@@ -89,8 +89,7 @@ fn severity_rank(s: Severity) -> u8 {
 /// A produced finding matches a label when it is on the same file, within
 /// [`LINE_TOLERANCE`] lines, and at least as severe as the label requires.
 fn finding_matches_label(finding: &Finding, label: &Label) -> bool {
-    let same_file =
-        finding.file == label.file || Path::new(&finding.file).ends_with(&label.file);
+    let same_file = finding.file == label.file || Path::new(&finding.file).ends_with(&label.file);
     if !same_file {
         return false;
     }
@@ -176,7 +175,10 @@ impl Scorecard {
         self.labels_caught() as f64 / total as f64
     }
     fn negatives(&self) -> usize {
-        self.cases.iter().filter(|c| c.kind == CaseKind::Negative).count()
+        self.cases
+            .iter()
+            .filter(|c| c.kind == CaseKind::Negative)
+            .count()
     }
     fn clean_negatives(&self) -> usize {
         self.cases
@@ -204,7 +206,11 @@ impl Scorecard {
                 }
                 CaseKind::Negative => {
                     let mark = if c.noise == 0 { "clean" } else { "NOISE" };
-                    let _ = writeln!(s, "  [neg] {:<24} {} ({} warning+ findings)", c.name, mark, c.noise);
+                    let _ = writeln!(
+                        s,
+                        "  [neg] {:<24} {} ({} warning+ findings)",
+                        c.name, mark, c.noise
+                    );
                 }
             }
         }
@@ -298,11 +304,26 @@ mod scoring_tests {
     #[test]
     fn match_within_tolerance_and_severity() {
         let l = label("a.py", 10, Severity::Warning);
-        assert!(finding_matches_label(&finding("a.py", 12, Severity::Warning), &l)); // +2 ok
-        assert!(finding_matches_label(&finding("a.py", 8, Severity::Error), &l)); // higher sev ok
-        assert!(!finding_matches_label(&finding("a.py", 13, Severity::Error), &l)); // too far
-        assert!(!finding_matches_label(&finding("a.py", 10, Severity::Info), &l)); // too mild
-        assert!(!finding_matches_label(&finding("b.py", 10, Severity::Error), &l)); // wrong file
+        assert!(finding_matches_label(
+            &finding("a.py", 12, Severity::Warning),
+            &l
+        )); // +2 ok
+        assert!(finding_matches_label(
+            &finding("a.py", 8, Severity::Error),
+            &l
+        )); // higher sev ok
+        assert!(!finding_matches_label(
+            &finding("a.py", 13, Severity::Error),
+            &l
+        )); // too far
+        assert!(!finding_matches_label(
+            &finding("a.py", 10, Severity::Info),
+            &l
+        )); // too mild
+        assert!(!finding_matches_label(
+            &finding("b.py", 10, Severity::Error),
+            &l
+        )); // wrong file
     }
 
     #[test]
@@ -310,15 +331,18 @@ mod scoring_tests {
         // Finding paths may be repo-relative subpaths; a label naming the
         // bare file should still match.
         let l = label("repo.py", 2, Severity::Error);
-        assert!(finding_matches_label(&finding("src/repo.py", 2, Severity::Error), &l));
+        assert!(finding_matches_label(
+            &finding("src/repo.py", 2, Severity::Error),
+            &l
+        ));
     }
 
     #[test]
     fn positive_case_counts_caught_and_extra() {
         let case = positive(vec![label("a.py", 5, Severity::Warning)]);
         let findings = vec![
-            finding("a.py", 5, Severity::Error),  // catches the label
-            finding("a.py", 40, Severity::Info),  // unrelated extra
+            finding("a.py", 5, Severity::Error), // catches the label
+            finding("a.py", 40, Severity::Info), // unrelated extra
         ];
         let s = score_case("c", &case, &findings);
         assert_eq!(s.caught, 1);
@@ -387,8 +411,7 @@ fn fixtures_dir() -> PathBuf {
 }
 
 fn has_api_key() -> bool {
-    let config =
-        nitpik::config::Config::load(None, &nitpik::env::Env::real()).unwrap_or_default();
+    let config = nitpik::config::Config::load(None, &nitpik::env::Env::real()).unwrap_or_default();
     if config.provider.api_key.is_none() {
         eprintln!(
             "SKIPPING eval: no API key for provider '{}'. Set ANTHROPIC_API_KEY (or NITPIK_API_KEY).",
@@ -415,7 +438,10 @@ async fn run_git(repo_dir: &Path, args: &[&str]) {
 }
 
 fn copy_tree(src: &Path, dst: &Path) {
-    for entry in walkdir::WalkDir::new(src).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(src)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let rel = entry.path().strip_prefix(src).unwrap();
         let target = dst.join(rel);
         if entry.file_type().is_dir() {
@@ -496,16 +522,23 @@ async fn diffs_owned(repo: &Path) -> Vec<nitpik::models::diff::FileDiff<'static>
 
 /// Run the full review pipeline (with the verify pass on, since the eval
 /// is meant to reflect what ships) and return the findings.
-async fn review_case(repo: &Path, profiles: &[String], config: &nitpik::config::Config) -> Vec<Finding> {
+async fn review_case(
+    repo: &Path,
+    profiles: &[String],
+    config: &nitpik::config::Config,
+) -> Vec<Finding> {
     let diffs = diffs_owned(repo).await;
-    assert!(!diffs.is_empty(), "changeset produced no diff in {}", repo.display());
+    assert!(
+        !diffs.is_empty(),
+        "changeset produced no diff in {}",
+        repo.display()
+    );
 
     let agent_defs = nitpik::agents::resolve_profiles(profiles, None)
         .await
         .expect("resolve profiles");
     let baseline =
-        nitpik::context::build_baseline_context(repo, &diffs, config, false, &[], Vec::new())
-            .await;
+        nitpik::context::build_baseline_context(repo, &diffs, config, false, &[], Vec::new()).await;
 
     let options = nitpik::review::ReviewOptions {
         profiles: profiles.to_vec(),
@@ -571,10 +604,7 @@ async fn eval_corpus_scorecard() {
         // Dump each finding's anchor so a miss (a finding outside the
         // label's ±tolerance window) is diagnosable without a re-run.
         for f in &findings {
-            eprintln!(
-                "      {}:{} [{}] {}",
-                f.file, f.line, f.severity, f.title
-            );
+            eprintln!("      {}:{} [{}] {}", f.file, f.line, f.severity, f.title);
         }
         cases.push(score_case(&name, &case, &findings));
     }
@@ -583,8 +613,11 @@ async fn eval_corpus_scorecard() {
     eprintln!("{}", card.render());
 
     if let Ok(path) = std::env::var("NITPIK_EVAL_BASELINE") {
-        std::fs::write(&path, serde_json::to_string_pretty(&card.to_json()).unwrap())
-            .expect("write baseline");
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&card.to_json()).unwrap(),
+        )
+        .expect("write baseline");
         eprintln!("  wrote baseline → {path}");
     }
 }

@@ -25,13 +25,34 @@ struct Builtin {
 /// internal (`critic`, `triage`) is declared in its own frontmatter via
 /// `internal: true`, not duplicated here.
 const BUILTINS: &[Builtin] = &[
-    Builtin { name: "backend", body: BACKEND_MD },
-    Builtin { name: "frontend", body: FRONTEND_MD },
-    Builtin { name: "architect", body: ARCHITECT_MD },
-    Builtin { name: "security", body: SECURITY_MD },
-    Builtin { name: "general", body: GENERAL_MD },
-    Builtin { name: "critic", body: CRITIC_MD },
-    Builtin { name: "triage", body: TRIAGE_MD },
+    Builtin {
+        name: "backend",
+        body: BACKEND_MD,
+    },
+    Builtin {
+        name: "frontend",
+        body: FRONTEND_MD,
+    },
+    Builtin {
+        name: "architect",
+        body: ARCHITECT_MD,
+    },
+    Builtin {
+        name: "security",
+        body: SECURITY_MD,
+    },
+    Builtin {
+        name: "general",
+        body: GENERAL_MD,
+    },
+    Builtin {
+        name: "critic",
+        body: CRITIC_MD,
+    },
+    Builtin {
+        name: "triage",
+        body: TRIAGE_MD,
+    },
 ];
 
 /// Get a built-in agent definition by name.
