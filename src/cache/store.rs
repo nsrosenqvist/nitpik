@@ -167,6 +167,45 @@ impl FileStore {
         let _ = tokio::fs::write(&sidecar, cache_key).await;
     }
 
+    /// Retrieve the rolling PR summary for a review scope (branch), if one
+    /// was persisted by an earlier run. Returns `None` on first run or any
+    /// I/O error.
+    pub async fn get_summary(&self, review_scope: &str) -> Option<String> {
+        let path = self.summary_path(review_scope)?;
+        let text = tokio::fs::read_to_string(&path).await.ok()?;
+        let text = text.trim();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text.to_string())
+        }
+    }
+
+    /// Persist (overwrite) the rolling PR summary for a review scope.
+    /// Best-effort: silently does nothing if the cache dir is unavailable.
+    pub async fn put_summary(&self, review_scope: &str, summary: &str) {
+        let Some(path) = self.summary_path(review_scope) else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let _ = tokio::fs::write(&path, summary).await;
+    }
+
+    /// Compute the `.summary` path for a review scope. Scope-hashed so
+    /// parallel branches/PRs keep independent rolling summaries, mirroring
+    /// the sidecar scope isolation. The `.summary` extension keeps it
+    /// distinct from `.json` cache entries and `.meta` sidecars.
+    fn summary_path(&self, review_scope: &str) -> Option<PathBuf> {
+        self.cache_dir.as_ref().map(|dir| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"summary|");
+            hasher.update(review_scope.as_bytes());
+            dir.join(format!("{}.summary", hex::encode(hasher.finalize())))
+        })
+    }
+
     /// Get the file path for a cache key.
     fn key_path(&self, key: &str) -> Option<PathBuf> {
         self.cache_dir
@@ -641,6 +680,59 @@ mod tests {
             .unwrap();
         assert!(fresh_meta.exists());
         assert!(store.get("key-new").await.is_some());
+    }
+
+    // ── Rolling PR summary tests ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn summary_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+        assert!(store.get_summary("feature-a").await.is_none());
+
+        store
+            .put_summary("feature-a", "Adds billing retries.")
+            .await;
+        assert_eq!(
+            store.get_summary("feature-a").await.as_deref(),
+            Some("Adds billing retries.")
+        );
+    }
+
+    #[tokio::test]
+    async fn summary_is_isolated_by_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+        store.put_summary("feature-a", "summary A").await;
+        store.put_summary("feature-b", "summary B").await;
+        assert_eq!(
+            store.get_summary("feature-a").await.as_deref(),
+            Some("summary A")
+        );
+        assert_eq!(
+            store.get_summary("feature-b").await.as_deref(),
+            Some("summary B")
+        );
+    }
+
+    #[tokio::test]
+    async fn summary_overwrites_on_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+        store.put_summary("main", "first pass").await;
+        store.put_summary("main", "refreshed").await;
+        assert_eq!(
+            store.get_summary("main").await.as_deref(),
+            Some("refreshed")
+        );
+    }
+
+    #[tokio::test]
+    async fn summary_empty_is_treated_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(dir.path());
+        store.put_summary("main", "   \n").await;
+        assert!(store.get_summary("main").await.is_none());
     }
 
     #[tokio::test]

@@ -55,6 +55,16 @@ pub struct VerdictsResponse {
     pub verdicts: Vec<TriageVerdict>,
 }
 
+/// JSON-schema wrapper for the rolling pull-request summary, produced via
+/// structured-output mode (the same single-field-object pattern as
+/// [`FindingsResponse`], so strict-schema endpoints accept it).
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct PrSummaryResponse {
+    /// A concise functional summary of the PR: what it does, the
+    /// subsystems it touches, and any open risks.
+    pub summary: String,
+}
+
 /// Raw triage verdict produced by the LLM for a single threat finding.
 ///
 /// The classification string is kept as-is so the providers layer does
@@ -115,6 +125,16 @@ pub struct TriageOutcome {
     pub tokens: TokenUsage,
 }
 
+/// Outcome of a single `ReviewProvider::summarize` call.
+#[derive(Debug, Clone, Default)]
+pub struct SummaryOutcome {
+    /// The functional PR summary text (may be empty if the model
+    /// declined or the implementation does not support summaries).
+    pub summary: String,
+    /// Token usage for the summary call.
+    pub tokens: TokenUsage,
+}
+
 /// Trait for LLM-backed code review.
 ///
 /// Implementations handle agent construction, prompt building,
@@ -143,4 +163,19 @@ pub trait ReviewProvider: Send + Sync {
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<TriageOutcome, ProviderError>;
+
+    /// Produce a concise functional summary of a pull request via a
+    /// single-turn structured-output call. Used for the rolling cross-run
+    /// PR summary fed into reviewer context.
+    ///
+    /// Defaults to an empty summary so non-LLM test doubles need not
+    /// implement it; the real [`RigProvider`](rig::RigProvider) overrides
+    /// it. An empty result means "no summary" and is never injected.
+    async fn summarize(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<SummaryOutcome, ProviderError> {
+        Ok(SummaryOutcome::default())
+    }
 }

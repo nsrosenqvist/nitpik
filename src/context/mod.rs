@@ -49,6 +49,9 @@ pub async fn build_baseline_context(
         file_contents,
         project_docs,
         commit_log,
+        // Populated later by the review engine when the rolling-summary
+        // feature is enabled; the caller assembles a summary-free baseline.
+        pr_summary: None,
     }
 }
 

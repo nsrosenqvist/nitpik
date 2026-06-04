@@ -36,6 +36,7 @@ max_tool_calls = 10
 [review.context]
 max_file_lines = 1000
 surrounding_lines = 100
+rolling_summary = false
 
 [secrets]
 enabled = false
@@ -87,6 +88,7 @@ The project config overrides the global config, so teams can set project-level s
 |---|---|---|---|
 | `max_file_lines` | integer | `1000` | Files with more lines than this get hunk excerpts instead of full content. Larger values give the LLM more context but increase token cost. |
 | `surrounding_lines` | integer | `100` | Number of context lines around each diff hunk for large files. Only applies when the file exceeds `max_file_lines`. |
+| `rolling_summary` | boolean | `false` | Generate a functional summary of the whole change (one extra LLM call per run) and feed it into every reviewer's context. Persisted per branch in the cache, so on re-runs it accumulates context across pushes. Also enabled per-run with `--pr-summary`. |
 
 ### `[secrets]`
 

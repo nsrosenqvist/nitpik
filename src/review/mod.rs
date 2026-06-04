@@ -13,6 +13,8 @@
 //! stay with the caller, which is why the function returns a fully-owned
 //! [`ReviewOutput`] rather than printing anything itself.
 
+pub mod summary;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -71,6 +73,10 @@ pub struct ReviewOptions {
     pub no_commit_context: bool,
     /// Project documentation files to exclude by name.
     pub exclude_doc: Vec<String>,
+    /// Generate/refresh a rolling functional PR summary (one extra LLM call
+    /// per run) and inject it into every reviewer's context. Persisted per
+    /// branch so it accumulates across pushes. Off by default.
+    pub rolling_summary: bool,
 
     // --- Performance / cache ---
     /// Disable result caching (force fresh LLM calls).
@@ -117,6 +123,7 @@ impl Default for ReviewOptions {
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: Vec::new(),
+            rolling_summary: false,
             no_cache: false,
             no_prior_context: false,
             max_prior_findings: None,
@@ -222,9 +229,6 @@ pub async fn execute_review<'a>(
     let agent_profile_names: Vec<String> =
         agent_defs.iter().map(|a| a.profile.name.clone()).collect();
 
-    let (review_context, secret_findings) =
-        build_review_context(options, config, diffs, baseline, repo_root, is_path_scan)?;
-
     let (provider, orchestrator) = create_orchestrator(
         config,
         repo_root_path,
@@ -238,6 +242,20 @@ pub async fn execute_review<'a>(
         options.timeout,
     )
     .await?;
+
+    // Rolling PR summary (Phase C, gap c): an optional extra LLM call whose
+    // result is injected into every reviewer's baseline context and
+    // persisted per branch so it accumulates across pushes. Fail-open — a
+    // summary failure never blocks the review.
+    let mut baseline = baseline;
+    let mut summary_tokens = models::TokenUsage::default();
+    if options.rolling_summary {
+        summary_tokens =
+            refresh_pr_summary(provider.as_ref(), repo_root_path, diffs, &mut baseline).await;
+    }
+
+    let (review_context, secret_findings) =
+        build_review_context(options, config, diffs, baseline, repo_root, is_path_scan)?;
 
     progress.start();
     let review_result = orchestrator
@@ -270,11 +288,12 @@ pub async fn execute_review<'a>(
             .then(a.line.cmp(&b.line))
     });
 
-    let total_tokens = review_result.tokens + triage_tokens;
+    let total_tokens = review_result.tokens + triage_tokens + summary_tokens;
     let mut tokens_by_model = review_result.tokens_by_model.clone();
-    if triage_tokens.total() > 0 {
-        let triage_model = config.provider.resolved_model().to_string();
-        *tokens_by_model.entry(triage_model).or_default() += triage_tokens;
+    let aux_tokens = triage_tokens + summary_tokens;
+    if aux_tokens.total() > 0 {
+        let model = config.provider.resolved_model().to_string();
+        *tokens_by_model.entry(model).or_default() += aux_tokens;
     }
 
     Ok(ReviewOutput {
@@ -345,6 +364,47 @@ async fn create_orchestrator(
         timeout,
     );
     Ok((provider, orchestrator))
+}
+
+/// Generate/refresh the rolling PR summary and write it into `baseline`.
+///
+/// Loads any prior summary for this branch, asks the provider for a
+/// refreshed one (folding in the prior), persists it, and sets
+/// `baseline.pr_summary`. Fail-open at every step: on an empty result or a
+/// provider error it falls back to the prior summary (or none) and returns
+/// zero tokens, so the rest of the review proceeds unaffected. Returns the
+/// tokens the summary call consumed (for accounting).
+async fn refresh_pr_summary(
+    provider: &dyn ReviewProvider,
+    repo_root_path: &Path,
+    diffs: &[models::FileDiff<'_>],
+    baseline: &mut models::BaselineContext,
+) -> models::TokenUsage {
+    let store = cache::store::FileStore::new();
+    let scope = diff::git::detect_branch(repo_root_path, &Env::real()).await;
+    let prior = store.get_summary(&scope).await;
+
+    let system_prompt = summary::summary_system_prompt();
+    let user_prompt = summary::build_summary_user_prompt(diffs, prior.as_deref());
+
+    match provider.summarize(&system_prompt, &user_prompt).await {
+        Ok(outcome) if !outcome.summary.trim().is_empty() => {
+            store.put_summary(&scope, &outcome.summary).await;
+            baseline.pr_summary = Some(outcome.summary);
+            outcome.tokens
+        }
+        Ok(_) => {
+            // Empty result (e.g. a provider without summary support) — keep
+            // whatever prior summary we had.
+            baseline.pr_summary = prior;
+            models::TokenUsage::default()
+        }
+        Err(e) => {
+            eprintln!("Warning: PR summary generation failed ({e}); using prior summary if any.");
+            baseline.pr_summary = prior;
+            models::TokenUsage::default()
+        }
+    }
 }
 
 /// Resolve the set of agent profiles to run for this review.
@@ -524,6 +584,7 @@ fn build_review_context<'a>(
             file_contents: redacted_contents,
             project_docs: baseline.project_docs.clone(),
             commit_log: baseline.commit_log.clone(),
+            pr_summary: baseline.pr_summary.clone(),
         },
         repo_root: repo_root.to_string(),
         is_path_scan,

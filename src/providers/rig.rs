@@ -597,6 +597,37 @@ impl ReviewProvider for RigProvider {
             tokens: result.tokens,
         })
     }
+
+    async fn summarize(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<crate::providers::SummaryOutcome, ProviderError> {
+        let result = self
+            .call::<crate::providers::PrSummaryResponse>(
+                self.config.resolved_model(),
+                CallArgs {
+                    system_prompt,
+                    user_prompt,
+                    label: "Summary",
+                    max_tokens: self.resolved_max_tokens(),
+                    agentic: None,
+                },
+            )
+            .await?;
+
+        // Structured-output yields `{"summary": "..."}`; if the model
+        // emitted prose instead (lenient endpoints), fall back to the raw
+        // text rather than failing the whole run.
+        let summary = serde_json::from_str::<crate::providers::PrSummaryResponse>(&result.text)
+            .map(|r| r.summary)
+            .unwrap_or_else(|_| result.text.trim().to_string());
+
+        Ok(crate::providers::SummaryOutcome {
+            summary,
+            tokens: result.tokens,
+        })
+    }
 }
 
 /// Re-export response parsing and retry utilities for backward compatibility.
@@ -620,7 +651,10 @@ mod tests {
         assert!(props["line"].get("minimum").is_none(), "minimum stripped");
         assert!(props["line"].get("format").is_none(), "format stripped");
         assert_eq!(props["line"]["type"], "integer", "type preserved");
-        assert!(props["range"]["items"].get("maximum").is_none(), "nested stripped");
+        assert!(
+            props["range"]["items"].get("maximum").is_none(),
+            "nested stripped"
+        );
     }
 
     #[test]
@@ -629,7 +663,10 @@ mod tests {
         // the keyword Anthropic's tool schema rejects. It must be gone.
         let schema = review_output_schema::<crate::providers::FindingsResponse>();
         let text = serde_json::to_string(&schema.to_value()).unwrap();
-        assert!(!text.contains("\"minimum\""), "schema must not carry `minimum`: {text}");
+        assert!(
+            !text.contains("\"minimum\""),
+            "schema must not carry `minimum`: {text}"
+        );
     }
 
     #[test]

@@ -94,6 +94,10 @@ impl Default for AgenticConfig {
 pub struct ContextConfig {
     pub max_file_lines: usize,
     pub surrounding_lines: usize,
+    /// Generate a rolling functional PR summary (one extra LLM call per
+    /// run) and feed it into every reviewer's context. Off by default —
+    /// opt in via config or the `--pr-summary` flag.
+    pub rolling_summary: bool,
 }
 
 impl Default for ContextConfig {
@@ -101,6 +105,7 @@ impl Default for ContextConfig {
         Self {
             max_file_lines: 1000,
             surrounding_lines: 100,
+            rolling_summary: false,
         }
     }
 }
@@ -301,6 +306,11 @@ impl Config {
             other.review.context.surrounding_lines,
             dc.surrounding_lines
         );
+        merge_if_changed!(
+            self.review.context.rolling_summary,
+            other.review.context.rolling_summary,
+            dc.rolling_summary
+        );
         merge_if_some!(self.review.audit_log, other.review.audit_log);
 
         // Provider settings
@@ -402,7 +412,10 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.provider.name, ProviderName::Anthropic);
         assert!(config.provider.model.is_none());
-        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-5-20250929");
+        assert_eq!(
+            config.provider.resolved_model(),
+            "claude-sonnet-4-5-20250929"
+        );
         assert_eq!(config.review.default_profiles, vec!["auto"]);
         assert_eq!(config.review.agentic.max_turns, 10);
         assert!(!config.secrets.enabled);
@@ -631,7 +644,10 @@ model = "gpt-4o"
     fn resolved_model_uses_provider_default_when_no_model_set() {
         let mut config = Config::default();
         // No explicit model set — resolved_model() should use provider default
-        assert_eq!(config.provider.resolved_model(), "claude-sonnet-4-5-20250929");
+        assert_eq!(
+            config.provider.resolved_model(),
+            "claude-sonnet-4-5-20250929"
+        );
 
         // Switch provider without setting model — should get new provider's default
         config.provider.name = ProviderName::Gemini;

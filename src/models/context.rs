@@ -15,6 +15,11 @@ pub struct BaselineContext {
     /// Commit summaries between the diff base and HEAD (reverse chronological).
     /// Empty when the input is not a git ref diff (e.g. stdin, file, scan).
     pub commit_log: Vec<String>,
+    /// Rolling functional PR summary carried across runs (what the PR does,
+    /// subsystems touched, open risks). `None` unless the rolling-summary
+    /// feature is enabled and a summary was generated or restored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_summary: Option<String>,
 }
 
 /// The complete context for a single review request.

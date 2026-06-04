@@ -315,6 +315,13 @@ pub struct ReviewArgs {
     #[arg(long, value_name = "FILENAME", value_delimiter = ',')]
     pub exclude_doc: Vec<String>,
 
+    /// Generate a rolling functional PR summary (one extra LLM call per run)
+    /// and feed it into every reviewer's context. Persisted per branch so it
+    /// accumulates across pushes. Also settable via `[review.context]
+    /// rolling_summary` in `.nitpik.toml`.
+    #[arg(long, default_value_t = false)]
+    pub pr_summary: bool,
+
     /// Print the constructed prompts (system + user) for each task and exit
     /// without calling the LLM. Only available in debug builds.
     #[cfg(debug_assertions)]
@@ -492,6 +499,7 @@ mod tests {
             no_project_docs: false,
             no_commit_context: false,
             exclude_doc: vec![],
+            pr_summary: false,
             #[cfg(debug_assertions)]
             debug_prompt: false,
         }

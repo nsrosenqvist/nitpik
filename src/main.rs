@@ -436,6 +436,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         no_project_docs: args.no_project_docs,
         no_commit_context: args.no_commit_context,
         exclude_doc: args.exclude_doc.clone(),
+        rolling_summary: args.pr_summary || config.review.context.rolling_summary,
         no_cache: args.no_cache,
         no_prior_context: args.no_prior_context,
         max_prior_findings: args.max_prior_findings,
