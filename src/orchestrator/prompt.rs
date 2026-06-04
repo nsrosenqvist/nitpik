@@ -448,6 +448,28 @@ pub fn build_agentic_system_prompt(
         ));
     }
     prompt.push_str(
+        "\n### Investigation playbook\n\n\
+         Spend tool calls on the situations where guessing most often produces a \
+         wrong finding:\n\n\
+         - **Load-bearing assumptions about a symbol's behavior.** Before flagging \
+         that a function, method, or macro is misused, `search_text` for its \
+         definition and `read_file` it. Judge against what it actually does — not \
+         what its name suggests. If its behavior cannot be confirmed from the repo \
+         (e.g. a third-party API), say so in the finding and lower the severity \
+         rather than asserting a bug you cannot verify.\n\
+         - **Rename / removal / signature changes.** When the diff renames, deletes, \
+         or changes the signature of a symbol, `search_text` for every remaining \
+         reference to it. Stale callers the diff failed to update are real bugs the \
+         diff alone won't show; an unchanged call site outside the diff that now \
+         breaks is in scope because this change introduced the breakage.\n\
+         - **\"Symmetric\" obligations.** If the diff adds one half of a pair, search \
+         for the other: a new acquire wants a release, a new migration wants a \
+         rollback, a new error variant wants its handlers. Absence is the finding.\n\
+         - **Stop when confirmed.** Once you've read enough to confirm or refute a \
+         concern, stop searching and move on — don't spend the budget re-deriving \
+         something you've already established.\n",
+    );
+    prompt.push_str(
         "\n## Reporting Findings\n\n\
          When your review is complete, call the `submit_findings` tool **exactly \
          once** with your full list of findings. The tool's schema is the \
@@ -895,6 +917,21 @@ mod tests {
             enhanced.contains("\"filter\""),
             "run_tests example should reference filter param"
         );
+    }
+
+    #[test]
+    fn agentic_prompt_includes_investigation_playbook() {
+        let prompt = build_agentic_system_prompt("Base.", &[], None);
+        assert!(prompt.contains("Investigation playbook"));
+        // Targets the high-value classes: assumption verification, rename/removal
+        // impact tracing, and symmetric obligations.
+        assert!(prompt.contains("Load-bearing assumptions"));
+        assert!(prompt.contains("Rename / removal"));
+        assert!(prompt.contains("Symmetric"));
+        // Playbook sits before the reporting instructions.
+        let playbook = prompt.find("Investigation playbook").unwrap();
+        let reporting = prompt.find("## Reporting Findings").unwrap();
+        assert!(playbook < reporting);
     }
 
     #[test]
