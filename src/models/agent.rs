@@ -97,10 +97,45 @@ pub struct AgentProfile {
     /// regardless of this field.
     #[serde(default = "default_wave")]
     pub wave: u8,
+
+    /// What slice of the change this reviewer sees per task.
+    ///
+    /// `chunk` (default) runs the reviewer once per diff chunk (the
+    /// surrounding file plus the chunk) — cheap, parallel, the bulk of
+    /// review. `diff` runs it once over the *whole* change set, for
+    /// cross-cutting concerns (impact/rename tracing, contract changes,
+    /// symmetric-obligation checks) that a single chunk can't reveal.
+    ///
+    /// This is the per-lens half of the lens model; see
+    /// `plans/pr-native-review/lens-model.md`.
+    #[serde(default)]
+    pub scope: LensScope,
+
+    /// Whether this reviewer wants repository-exploration tools (agentic
+    /// mode) by default.
+    ///
+    /// Expresses the reviewer's *intent*: cheap local lenses leave this
+    /// `false`; cross-cutting lenses that must read beyond the diff set
+    /// it `true`. The run-level `--agent` policy can still force agentic
+    /// mode on or off across every reviewer, overriding this default.
+    #[serde(default)]
+    pub agentic: bool,
 }
 
 fn default_wave() -> u8 {
     1
+}
+
+/// The slice of a change set a reviewer operates on per task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LensScope {
+    /// One task per diff chunk (chunk + surrounding file). The default —
+    /// cheap, parallel, and how every reviewer has always run.
+    #[default]
+    Chunk,
+    /// One task over the entire change set, for cross-cutting concerns.
+    Diff,
 }
 
 /// Serde `skip_serializing_if` predicate: omit `false` booleans so

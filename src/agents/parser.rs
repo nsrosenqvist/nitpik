@@ -286,6 +286,37 @@ Review docs."#;
     }
 
     #[test]
+    fn parse_lens_scope_and_agentic_defaults() {
+        use crate::models::agent::LensScope;
+        let content = r#"---
+name: basic
+description: Basic reviewer
+---
+
+Review."#;
+        let agent = parse_agent_definition(content).unwrap();
+        // Backward-compatible defaults: chunk-scoped, non-agentic.
+        assert_eq!(agent.profile.scope, LensScope::Chunk);
+        assert!(!agent.profile.agentic);
+    }
+
+    #[test]
+    fn parse_lens_scope_diff_and_agentic_true() {
+        use crate::models::agent::LensScope;
+        let content = r#"---
+name: impact
+description: Cross-cutting impact lens
+scope: diff
+agentic: true
+---
+
+Trace the blast radius of this change."#;
+        let agent = parse_agent_definition(content).unwrap();
+        assert_eq!(agent.profile.scope, LensScope::Diff);
+        assert!(agent.profile.agentic);
+    }
+
+    #[test]
     fn parse_agent_always_include_defaults_to_false() {
         let content = r#"---
 name: basic
