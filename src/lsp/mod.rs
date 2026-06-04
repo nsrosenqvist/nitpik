@@ -123,7 +123,9 @@ impl Backend {
             options.no_prior_context = true;
         }
 
-        let agent_defs = review::resolve_agents(&options, &config, diffs, repo_root_path).await?;
+        let agent_defs = review::resolve_agents(&options, &config, diffs, repo_root_path)
+            .await?
+            .agents;
         let commit_log =
             review::build_commit_log(options.no_commit_context, &input_mode, repo_root_path).await;
         let baseline = crate::context::build_baseline_context(

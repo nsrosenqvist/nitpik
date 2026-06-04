@@ -454,7 +454,11 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         show_threat_progress,
     };
 
-    let agent_defs = review::resolve_agents(&options, &config, diffs, repo_root_path).await?;
+    let review::ResolvedAgents {
+        agents: agent_defs,
+        selection_tokens,
+        selection_model,
+    } = review::resolve_agents(&options, &config, diffs, repo_root_path).await?;
 
     let commit_log =
         review::build_commit_log(args.no_commit_context, &input_mode, repo_root_path).await;
@@ -526,6 +530,17 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         Arc::clone(&progress) as Arc<dyn progress::ProgressReporter>,
     )
     .await?;
+
+    // Fold in the tokens spent on `auto` profile selection (an LLM call
+    // made before the review proper) so the totals and per-model breakdown
+    // account for every call this run made.
+    let mut output = output;
+    if selection_tokens.total() > 0 {
+        output.tokens += selection_tokens;
+        if let Some(model) = &selection_model {
+            *output.tokens_by_model.entry(model.clone()).or_default() += selection_tokens;
+        }
+    }
 
     let findings = output.findings;
 

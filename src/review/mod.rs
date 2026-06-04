@@ -429,6 +429,23 @@ async fn refresh_pr_summary(
     }
 }
 
+/// Result of [`resolve_agents`]: the agents to run plus the tokens spent
+/// resolving them.
+///
+/// `auto` profile selection can make an LLM (triage) call before the review
+/// proper begins; its cost is surfaced here so callers fold it into the
+/// run's total and per-model token accounting rather than dropping it.
+pub struct ResolvedAgents {
+    /// The resolved agent definitions to run.
+    pub agents: Vec<AgentDefinition>,
+    /// Tokens consumed by `auto` profile selection (zero when no LLM call
+    /// was made, e.g. heuristic-only selection or a non-`auto` profile set).
+    pub selection_tokens: models::TokenUsage,
+    /// The model that ran the selection call, when it spent tokens — lets
+    /// the caller attribute the cost to the right model.
+    pub selection_model: Option<String>,
+}
+
 /// Resolve the set of agent profiles to run for this review.
 ///
 /// Exposed as a building block for callers (e.g. the CLI's debug
@@ -438,7 +455,7 @@ pub async fn resolve_agents(
     config: &Config,
     diffs: &[models::FileDiff<'_>],
     repo_root_path: &Path,
-) -> Result<Vec<AgentDefinition>> {
+) -> Result<ResolvedAgents> {
     let profile_names = if options.profiles == vec![DEFAULT_PROFILE.to_string()] {
         // CLI default — check config for overrides
         if !config.review.default_profiles.is_empty() {
@@ -454,10 +471,10 @@ pub async fn resolve_agents(
     if !used_auto && options.auto_mode.is_some() {
         eprintln!("warning: auto-mode is ignored because the profile set does not include 'auto'");
     }
-    let profiles = if used_auto {
+    let (profiles, selection_tokens) = if used_auto {
         select_auto_profiles(options, config, diffs, repo_root_path).await?
     } else {
-        profile_names
+        (profile_names, models::TokenUsage::default())
     };
 
     let mut agent_defs = agents::resolve_profiles(&profiles, options.profile_dir.as_deref())
@@ -493,19 +510,38 @@ pub async fn resolve_agents(
         }
     }
 
-    Ok(agent_defs)
+    let selection_model = if selection_tokens.total() > 0 {
+        Some(
+            config
+                .provider
+                .model_for(crate::config::ModelTask::Triage)
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
+    Ok(ResolvedAgents {
+        agents: agent_defs,
+        selection_tokens,
+        selection_model,
+    })
 }
 
 /// Pick reviewer profiles for `auto`, honoring the auto-mode strategy.
 ///
-/// Fails open: any provider error falls back to the heuristic result.
+/// Returns the chosen profiles plus the tokens the selection triage call
+/// consumed (zero when no LLM call was made). Fails open: any provider
+/// error falls back to the heuristic result — but tokens already spent on
+/// a call that then errored or returned nothing are still reported.
 async fn select_auto_profiles(
     options: &ReviewOptions,
     config: &Config,
     diffs: &[models::FileDiff<'_>],
     repo_root_path: &Path,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, models::TokenUsage)> {
     use agents::auto::AutoMode;
+    let no_tokens = models::TokenUsage::default();
     let (heuristic, confidence) =
         agents::auto::auto_select_profiles_with_confidence(diffs, repo_root_path);
 
@@ -515,19 +551,19 @@ async fn select_auto_profiles(
         AutoMode::Hybrid => confidence == agents::auto::HeuristicConfidence::Low,
     };
     if !need_llm {
-        return Ok(heuristic);
+        return Ok((heuristic, no_tokens));
     }
 
     let triage_agent = match agents::builtin::get_builtin("triage") {
         Some(a) => a,
-        None => return Ok(heuristic),
+        None => return Ok((heuristic, no_tokens)),
     };
     let provider: Arc<dyn ReviewProvider> =
         match RigProvider::new(config.provider.clone(), repo_root_path.to_path_buf()) {
             Ok(p) => Arc::new(p),
             Err(e) => {
                 eprintln!("Warning: triage provider init failed ({e}); using heuristic profiles.");
-                return Ok(heuristic);
+                return Ok((heuristic, no_tokens));
             }
         };
 
@@ -544,15 +580,12 @@ async fn select_auto_profiles(
             {
                 picked.push("architect".to_string());
             }
-            if picked.is_empty() {
-                Ok(heuristic)
-            } else {
-                Ok(picked)
-            }
+            let profiles = if picked.is_empty() { heuristic } else { picked };
+            Ok((profiles, outcome.tokens))
         }
         Err(e) => {
             eprintln!("Warning: triage call failed ({e}); using heuristic profiles.");
-            Ok(heuristic)
+            Ok((heuristic, no_tokens))
         }
     }
 }
@@ -704,4 +737,27 @@ async fn run_threat_scan(
             .collect::<Vec<_>>(),
         triage_tokens,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A non-`auto` profile set makes no selection LLM call, so it must
+    /// report zero selection tokens and no selection model — the signal
+    /// `main` uses to decide whether to fold anything into the totals.
+    #[tokio::test]
+    async fn resolve_agents_explicit_profiles_spend_no_selection_tokens() {
+        let options = ReviewOptions {
+            profiles: vec!["backend".to_string()],
+            ..Default::default()
+        };
+        let config = Config::default();
+        let resolved = resolve_agents(&options, &config, &[], Path::new("."))
+            .await
+            .expect("resolve explicit profile");
+        assert!(resolved.agents.iter().any(|a| a.profile.name == "backend"));
+        assert_eq!(resolved.selection_tokens.total(), 0);
+        assert!(resolved.selection_model.is_none());
+    }
 }
