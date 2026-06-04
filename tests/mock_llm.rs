@@ -258,6 +258,105 @@ async fn orchestrator_returns_findings_from_mock_provider() {
 }
 
 #[tokio::test]
+async fn diff_scoped_agent_runs_one_whole_diff_task() {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Records each prompt and how many times review() is called.
+    struct CountingProvider {
+        calls: AtomicUsize,
+        prompts: Mutex<Vec<String>>,
+    }
+    #[async_trait]
+    impl ReviewProvider for CountingProvider {
+        async fn review(
+            &self,
+            _agent: &AgentDefinition,
+            prompt: &str,
+            _agentic: bool,
+            _max_turns: usize,
+            _max_tool_calls: usize,
+        ) -> Result<ReviewOutcome, ProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.prompts.lock().unwrap().push(prompt.to_string());
+            Ok(ReviewOutcome::default())
+        }
+        async fn triage(
+            &self,
+            _model: &str,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> Result<TriageOutcome, ProviderError> {
+            Ok(TriageOutcome::default())
+        }
+    }
+
+    let provider = Arc::new(CountingProvider {
+        calls: AtomicUsize::new(0),
+        prompts: Mutex::new(Vec::new()),
+    });
+    let config = Config::default();
+    let cache = CacheEngine::new(false);
+    let progress = Arc::new(ProgressTracker::new(&[], &[], false));
+    let orchestrator = ReviewOrchestrator::new(
+        Arc::clone(&provider) as Arc<dyn ReviewProvider>,
+        &config,
+        cache,
+        progress,
+        false,
+        None,
+        String::new(),
+        false,
+        false,
+        false,
+        None,
+    );
+
+    // Two changed files: a per-chunk agent would yield two tasks, but a
+    // scope: diff agent must see both in a single whole-diff task.
+    let context = ReviewContext {
+        diffs: vec![
+            test_diff("src/a.rs", "let a = 1;"),
+            test_diff("src/b.rs", "let b = 2;"),
+        ],
+        baseline: BaselineContext::default(),
+        repo_root: "/tmp/test-repo".to_string(),
+        is_path_scan: false,
+    };
+
+    let mut agent = test_agent("cross-cutting");
+    agent.profile.scope = nitpik::models::LensScope::Diff;
+
+    orchestrator
+        .run(
+            &context,
+            &[agent],
+            4,
+            nitpik::models::AgentPolicy::Off,
+            10,
+            50,
+        )
+        .await
+        .expect("orchestrator should succeed");
+
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        1,
+        "scope: diff agent should produce exactly one task for the whole change set"
+    );
+    let prompts = provider.prompts.lock().unwrap();
+    assert!(
+        prompts[0].contains("src/a.rs"),
+        "whole-diff prompt has file a"
+    );
+    assert!(
+        prompts[0].contains("src/b.rs"),
+        "whole-diff prompt has file b"
+    );
+    assert!(prompts[0].contains("Entire Change Set"));
+}
+
+#[tokio::test]
 async fn orchestrator_returns_empty_for_no_issues() {
     let provider = Arc::new(MockProvider::empty());
     let config = Config::default();

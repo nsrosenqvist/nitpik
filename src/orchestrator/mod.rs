@@ -36,7 +36,9 @@ use crate::providers::response::{classify_error, is_retryable, retry_backoff};
 
 use crate::constants::MAX_RETRIES;
 
-use prompt::{build_prompt, build_prompt_with_prior, build_system_addendum};
+use prompt::{
+    build_prompt, build_prompt_with_prior, build_system_addendum, build_whole_diff_prompt,
+};
 use scope::filter_to_diff_scope;
 use verify::DroppedFinding;
 
@@ -376,13 +378,38 @@ impl ReviewOrchestrator {
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         let mut join_set = JoinSet::new();
 
+        /// What a single task reviews: one diff chunk, or the whole change
+        /// set at once (a `scope: diff` cross-cutting lens).
+        enum TaskInput<'a> {
+            Chunk(crate::models::diff::FileDiff<'a>),
+            WholeDiff,
+        }
         struct Task<'a> {
-            chunk: crate::models::diff::FileDiff<'a>,
+            input: TaskInput<'a>,
             agent: AgentDefinition,
             line_count: usize,
         }
         let mut tasks: Vec<Task<'_>> = Vec::new();
         for agent in wave_agents {
+            if agent.profile.scope == crate::models::LensScope::Diff {
+                // One task over every changed line in the change set.
+                let line_count: usize = context
+                    .diffs
+                    .iter()
+                    .filter(|d| !d.is_binary)
+                    .flat_map(|d| &d.hunks)
+                    .map(|h| h.lines.len())
+                    .sum();
+                if line_count == 0 {
+                    continue; // nothing reviewable (e.g. only binary files)
+                }
+                tasks.push(Task {
+                    input: TaskInput::WholeDiff,
+                    agent: (*agent).clone(),
+                    line_count,
+                });
+                continue;
+            }
             for diff in &context.diffs {
                 if diff.is_binary {
                     continue;
@@ -391,7 +418,7 @@ impl ReviewOrchestrator {
                 for chunk in chunks {
                     let line_count: usize = chunk.hunks.iter().map(|h| h.lines.len()).sum();
                     tasks.push(Task {
-                        chunk,
+                        input: TaskInput::Chunk(chunk),
                         agent: (*agent).clone(),
                         line_count,
                     });
@@ -401,7 +428,7 @@ impl ReviewOrchestrator {
         tasks.sort_by_key(|t| t.line_count);
 
         for Task {
-            chunk, mut agent, ..
+            input, mut agent, ..
         } in tasks
         {
             let provider = Arc::clone(&self.provider);
@@ -421,7 +448,6 @@ impl ReviewOrchestrator {
                 .as_deref()
                 .unwrap_or_else(|| self.config.provider.resolved_model())
                 .to_string();
-            let file_path = chunk.path().to_string();
 
             // Augment the per-task agent's system prompt with the
             // static (run-wide) context. The result remains constant
@@ -449,7 +475,19 @@ impl ReviewOrchestrator {
                 agent.system_prompt.push_str(addendum);
             }
 
-            let base_prompt = build_prompt(&chunk, context, &agent, all_agents, None, task_agentic);
+            // Build the user prompt for this task's input shape. A
+            // chunk task reviews one file slice; a whole-diff task sees
+            // the entire change set.
+            let (file_path, base_prompt) = match &input {
+                TaskInput::Chunk(chunk) => (
+                    chunk.path().to_string(),
+                    build_prompt(chunk, context, &agent, all_agents, None, task_agentic),
+                ),
+                TaskInput::WholeDiff => (
+                    "the entire change set".to_string(),
+                    build_whole_diff_prompt(context, &agent, all_agents, task_agentic),
+                ),
+            };
             let cache_key = cache::cache_key(&base_prompt, &agent.profile.name, &model);
 
             join_set.spawn(execute_review_task(ReviewTaskParams {
