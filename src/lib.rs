@@ -14,6 +14,7 @@ pub mod constants;
 pub mod context;
 pub mod diff;
 pub mod env;
+pub mod forge;
 pub(crate) mod http;
 pub mod license;
 pub mod lsp;
