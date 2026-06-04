@@ -254,6 +254,16 @@ fn upsert(profiles: &mut Vec<AgentDefinition>, def: AgentDefinition) {
 mod tests {
     use super::*;
 
+    /// Number of user-selectable built-in profiles (all built-ins minus the
+    /// internal `critic`/`triage`). Computed so adding a lens doesn't churn
+    /// every count assertion below.
+    fn selectable_builtins() -> usize {
+        builtin::all()
+            .iter()
+            .filter(|a| !a.profile.internal)
+            .count()
+    }
+
     #[tokio::test]
     async fn resolve_builtin_profile() {
         let agents = resolve_profiles(&["backend".to_string()], None)
@@ -408,7 +418,10 @@ mod tests {
         assert!(names.contains(&"architect"));
         assert!(names.contains(&"security"));
         assert!(names.contains(&"general"));
-        assert_eq!(agents.len(), 5);
+        // Plus the new lenses (correctness, concurrency, …).
+        assert!(names.contains(&"correctness"));
+        assert!(names.contains(&"docs-drift"));
+        assert_eq!(agents.len(), selectable_builtins());
     }
 
     #[tokio::test]
@@ -426,7 +439,7 @@ mod tests {
         let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
         assert!(names.contains(&"backend"));
         assert!(names.contains(&"custom"));
-        assert_eq!(agents.len(), 6);
+        assert_eq!(agents.len(), selectable_builtins() + 1);
     }
 
     #[tokio::test]
@@ -436,7 +449,7 @@ mod tests {
 
         let agents = list_all_profiles(Some(dir.path())).await.unwrap();
         // Only built-ins, bad.md skipped with warning
-        assert_eq!(agents.len(), 5);
+        assert_eq!(agents.len(), selectable_builtins());
     }
 
     #[tokio::test]
@@ -445,7 +458,7 @@ mod tests {
             list_all_profiles(Some(std::path::Path::new("/tmp/nitpik_no_such_dir_xyz"))).await;
         // Non-existent dir is not an error — it's just not a directory, so skip
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 5); // just built-ins
+        assert_eq!(result.unwrap().len(), selectable_builtins()); // just built-ins
     }
 
     // -----------------------------------------------------------------------
@@ -573,7 +586,7 @@ mod tests {
         assert!(names.contains(&"architect"));
         assert!(names.contains(&"security"));
         assert!(names.contains(&"general"));
-        assert_eq!(agents.len(), 5);
+        assert_eq!(agents.len(), selectable_builtins());
     }
 
     #[tokio::test]

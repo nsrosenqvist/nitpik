@@ -41,8 +41,10 @@ async fn profiles_includes_custom_from_agent_dir() {
 async fn profiles_empty_agent_dir() {
     let dir = tempfile::tempdir().unwrap();
     let agents = agents::list_all_profiles(Some(dir.path())).await.unwrap();
-    // Only built-ins
-    assert_eq!(agents.len(), 5);
+    // Only built-ins (lenses + legacy domain profiles; internal excluded).
+    let expected = agents::list_all_profiles(None).await.unwrap().len();
+    assert_eq!(agents.len(), expected);
+    assert!(agents.iter().any(|a| a.profile.name == "correctness"));
 }
 
 // ---------------------------------------------------------------------------
@@ -264,16 +266,17 @@ async fn tag_selects_matching_builtin_profiles() {
 async fn tag_selects_custom_profiles_from_dir() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
-        dir.path().join("a11y.md"),
-        "---\nname: a11y-checker\ndescription: Accessibility\ntags: [a11y, wcag]\n---\nCheck WCAG.",
+        dir.path().join("house-style.md"),
+        "---\nname: house-style\ndescription: Team style rules\ntags: [house-style]\n---\nCheck house style.",
     )
     .unwrap();
 
-    let agents = agents::resolve_profiles_by_tags(&["wcag".to_string()], Some(dir.path()))
+    // A tag unique to the custom profile (no built-in lens carries it).
+    let agents = agents::resolve_profiles_by_tags(&["house-style".to_string()], Some(dir.path()))
         .await
         .unwrap();
     let names: Vec<_> = agents.iter().map(|a| a.profile.name.as_str()).collect();
-    assert_eq!(names, vec!["a11y-checker"]);
+    assert_eq!(names, vec!["house-style"]);
 }
 
 #[tokio::test]

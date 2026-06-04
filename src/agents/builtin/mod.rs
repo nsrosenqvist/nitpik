@@ -5,11 +5,29 @@
 use crate::agents::parser;
 use crate::models::AgentDefinition;
 
+// Issue-typed lenses — the default review engine (see
+// plans/pr-native-review/lens-model.md). `security` and `correctness` are
+// always-on; the rest are triage-selected.
+const SECURITY_MD: &str = include_str!("security.md");
+const CORRECTNESS_MD: &str = include_str!("correctness.md");
+const CONCURRENCY_MD: &str = include_str!("concurrency.md");
+const PERFORMANCE_MD: &str = include_str!("performance.md");
+const TEST_INTEGRITY_MD: &str = include_str!("test-integrity.md");
+const OPERATIONAL_MD: &str = include_str!("operational.md");
+const A11Y_MD: &str = include_str!("a11y.md");
+const USER_JOURNEY_MD: &str = include_str!("user-journey.md");
+const CONTRACT_IMPACT_MD: &str = include_str!("contract-impact.md");
+const DOCS_DRIFT_MD: &str = include_str!("docs-drift.md");
+const HOLISTIC_MD: &str = include_str!("holistic.md");
+
+// Legacy domain profiles — retired from the default path but still
+// resolvable via `--profile`/`--tag` for back-compat.
 const BACKEND_MD: &str = include_str!("backend.md");
 const FRONTEND_MD: &str = include_str!("frontend.md");
 const ARCHITECT_MD: &str = include_str!("architect.md");
-const SECURITY_MD: &str = include_str!("security.md");
 const GENERAL_MD: &str = include_str!("general.md");
+
+// Internal profiles for nitpik's own passes.
 const CRITIC_MD: &str = include_str!("critic.md");
 const TRIAGE_MD: &str = include_str!("triage.md");
 
@@ -25,6 +43,52 @@ struct Builtin {
 /// internal (`critic`, `triage`) is declared in its own frontmatter via
 /// `internal: true`, not duplicated here.
 const BUILTINS: &[Builtin] = &[
+    // Lenses (default engine).
+    Builtin {
+        name: "security",
+        body: SECURITY_MD,
+    },
+    Builtin {
+        name: "correctness",
+        body: CORRECTNESS_MD,
+    },
+    Builtin {
+        name: "concurrency",
+        body: CONCURRENCY_MD,
+    },
+    Builtin {
+        name: "performance",
+        body: PERFORMANCE_MD,
+    },
+    Builtin {
+        name: "test-integrity",
+        body: TEST_INTEGRITY_MD,
+    },
+    Builtin {
+        name: "operational",
+        body: OPERATIONAL_MD,
+    },
+    Builtin {
+        name: "a11y",
+        body: A11Y_MD,
+    },
+    Builtin {
+        name: "user-journey",
+        body: USER_JOURNEY_MD,
+    },
+    Builtin {
+        name: "contract-impact",
+        body: CONTRACT_IMPACT_MD,
+    },
+    Builtin {
+        name: "docs-drift",
+        body: DOCS_DRIFT_MD,
+    },
+    Builtin {
+        name: "holistic",
+        body: HOLISTIC_MD,
+    },
+    // Legacy domain profiles (back-compat, --profile only).
     Builtin {
         name: "backend",
         body: BACKEND_MD,
@@ -38,13 +102,10 @@ const BUILTINS: &[Builtin] = &[
         body: ARCHITECT_MD,
     },
     Builtin {
-        name: "security",
-        body: SECURITY_MD,
-    },
-    Builtin {
         name: "general",
         body: GENERAL_MD,
     },
+    // Internal passes.
     Builtin {
         name: "critic",
         body: CRITIC_MD,
@@ -125,13 +186,51 @@ mod tests {
     }
 
     #[test]
+    fn correctness_is_always_include() {
+        let correctness = get_builtin("correctness").unwrap();
+        assert!(
+            correctness.profile.always_include,
+            "built-in correctness must opt into always_include"
+        );
+    }
+
+    #[test]
     fn other_builtins_are_not_always_include() {
-        for name in ["backend", "frontend", "architect", "general"] {
+        // The always-on floor is exactly security + correctness; every other
+        // lens and legacy profile is conditional / opt-in.
+        for name in [
+            "concurrency",
+            "performance",
+            "test-integrity",
+            "operational",
+            "a11y",
+            "user-journey",
+            "contract-impact",
+            "docs-drift",
+            "holistic",
+            "backend",
+            "frontend",
+            "architect",
+            "general",
+        ] {
             let agent = get_builtin(name).unwrap();
             assert!(
                 !agent.profile.always_include,
                 "{name} should not be always-on by default"
             );
+        }
+    }
+
+    #[test]
+    fn whole_diff_lenses_declare_scope_and_agentic() {
+        for name in ["contract-impact", "docs-drift", "holistic"] {
+            let agent = get_builtin(name).unwrap();
+            assert_eq!(
+                agent.profile.scope,
+                crate::models::LensScope::Diff,
+                "{name} must be a whole-diff lens"
+            );
+            assert!(agent.profile.agentic, "{name} must be agentic");
         }
     }
 
