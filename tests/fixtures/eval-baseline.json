@@ -106,7 +106,7 @@
     },
     {
       "caught": 0,
-      "extra": 1,
+      "extra": 2,
       "kind": "positive",
       "name": "resource-leak",
       "noise": 0,
@@ -121,7 +121,7 @@
       "total_labels": 1
     },
     {
-      "caught": 0,
+      "caught": 1,
       "extra": 0,
       "kind": "positive",
       "name": "swallowed-exception",
@@ -145,10 +145,10 @@
       "total_labels": 1
     }
   ],
-  "labels_caught": 10,
+  "labels_caught": 11,
   "labels_total": 12,
   "negatives_clean": 6,
   "negatives_total": 6,
-  "recall": 0.8333333333333334,
+  "recall": 0.9166666666666666,
   "total_noise": 0
 }
