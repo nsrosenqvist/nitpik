@@ -382,8 +382,13 @@ fn require_env(env: &Env, name: &str) -> Result<String, ForgeError> {
 }
 
 /// Resolve the PR number from `GITHUB_REF` (`refs/pull/<n>/merge`) or the
-/// `pull_request.number` / `number` field of the event payload at
-/// `GITHUB_EVENT_PATH`.
+/// event payload at `GITHUB_EVENT_PATH`. Three payload shapes are handled:
+///
+/// - `pull_request` events — `pull_request.number`,
+/// - `issue_comment` events (e.g. `@nitpik review`) and `repository_dispatch`
+///   — `issue.number`, but only when `issue.pull_request` is present (so a
+///   comment on a plain issue is *not* mistaken for a PR),
+/// - a top-level `number` as a last resort.
 pub fn resolve_pr_number(env: &Env) -> Result<u64, ForgeError> {
     if let Ok(gh_ref) = env.var("GITHUB_REF")
         && let Some(n) = gh_ref
@@ -401,6 +406,11 @@ pub fn resolve_pr_number(env: &Env) -> Result<u64, ForgeError> {
         let n = json
             .get("pull_request")
             .and_then(|pr| pr.get("number"))
+            .or_else(|| {
+                json.get("issue")
+                    .filter(|issue| issue.get("pull_request").is_some())
+                    .and_then(|issue| issue.get("number"))
+            })
             .or_else(|| json.get("number"))
             .and_then(|n| n.as_u64());
         if let Some(n) = n {
@@ -527,6 +537,34 @@ mod tests {
         std::fs::write(&path, r#"{"pull_request":{"number":77}}"#).unwrap();
         let env = Env::mock([("GITHUB_EVENT_PATH", path.to_str().unwrap())]);
         assert_eq!(resolve_pr_number(&env).unwrap(), 77);
+    }
+
+    #[test]
+    fn resolve_pr_number_from_issue_comment_payload() {
+        // issue_comment events (e.g. `@nitpik review`) carry the PR number in
+        // issue.number, with issue.pull_request present to mark it as a PR.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("event.json");
+        std::fs::write(
+            &path,
+            r#"{"issue":{"number":88,"pull_request":{"url":"https://api.github.com/…/pulls/88"}}}"#,
+        )
+        .unwrap();
+        let env = Env::mock([("GITHUB_EVENT_PATH", path.to_str().unwrap())]);
+        assert_eq!(resolve_pr_number(&env).unwrap(), 88);
+    }
+
+    #[test]
+    fn resolve_pr_number_ignores_plain_issue_comment() {
+        // A comment on a non-PR issue has no issue.pull_request → not a PR.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("event.json");
+        std::fs::write(&path, r#"{"issue":{"number":88}}"#).unwrap();
+        let env = Env::mock([("GITHUB_EVENT_PATH", path.to_str().unwrap())]);
+        assert!(matches!(
+            resolve_pr_number(&env),
+            Err(ForgeError::NoPullRequest)
+        ));
     }
 
     #[test]

@@ -698,7 +698,14 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
             .or(config.review.fail_on)
             .or(Some(Severity::Error))
     };
-    render_and_output(&args.format, &findings, fail_on_severity, args.request_changes).await;
+    render_and_output(
+        &args.format,
+        &findings,
+        fail_on_severity,
+        args.request_changes,
+        args.force_review,
+    )
+    .await;
 
     // Ensure the telemetry POST completes before the runtime shuts down.
     if let Some(h) = heartbeat {
@@ -908,6 +915,7 @@ async fn render_and_output(
     findings: &[models::finding::Finding],
     fail_on: Option<Severity>,
     request_changes: Option<Severity>,
+    force_review: bool,
 ) {
     use std::io::Write;
 
@@ -926,7 +934,10 @@ async fn render_and_output(
     let review_event = nitpik::forge::review_event_for(findings, request_changes);
 
     // Publish to external APIs where applicable (Bitbucket, Forgejo, GitHub PR review)
-    if let Err(e) = format.publish(findings, fail_on, review_event, &env).await {
+    if let Err(e) = format
+        .publish(findings, fail_on, review_event, force_review, &env)
+        .await
+    {
         eprintln!("Warning: failed to publish findings: {e}");
     }
 }

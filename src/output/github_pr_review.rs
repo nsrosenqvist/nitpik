@@ -37,13 +37,16 @@ impl OutputFormatter for GithubPrReviewFormatter {
 pub struct GithubPrReviewPublisher<'a> {
     env: &'a Env,
     event: ReviewEvent,
+    force: bool,
 }
 
 impl<'a> GithubPrReviewPublisher<'a> {
     /// `event` is the review action to post (typically derived from
-    /// findings via [`forge::review_event_for`]).
-    pub fn new(env: &'a Env, event: ReviewEvent) -> Self {
-        Self { env, event }
+    /// findings via [`forge::review_event_for`]). `force` posts a review even
+    /// when a prior run already covered the PR (bypasses the quiet-on-re-run
+    /// gate), for an explicit `@nitpik review` re-trigger.
+    pub fn new(env: &'a Env, event: ReviewEvent, force: bool) -> Self {
+        Self { env, event, force }
     }
 }
 
@@ -53,7 +56,7 @@ impl OutputPublisher for GithubPrReviewPublisher<'_> {
         findings: &[Finding],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let forge = GithubForge::from_env(self.env)?;
-        forge::publish_review(&forge, findings, self.event).await?;
+        forge::publish_review(&forge, findings, self.event, self.force).await?;
         Ok(())
     }
 }
@@ -90,7 +93,7 @@ mod tests {
     #[tokio::test]
     async fn publish_errors_without_github_env() {
         let env = Env::mock(Vec::<(&str, &str)>::new());
-        let err = GithubPrReviewPublisher::new(&env, ReviewEvent::Comment)
+        let err = GithubPrReviewPublisher::new(&env, ReviewEvent::Comment, false)
             .publish(&sample_findings())
             .await
             .unwrap_err();

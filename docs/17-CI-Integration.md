@@ -112,6 +112,54 @@ jobs:
 
 > **Security:** Always pass API keys via `${{ secrets.* }}` — never hardcode them in workflow files.
 
+### Trigger a review from a PR comment
+
+`--format github-pr-review` posts a real PR review (inline comments + summary) rather than
+annotations, and nitpik resolves the PR number from an `issue_comment` event, so you can let
+contributors re-run a review on demand by commenting `@nitpik review`:
+
+```yaml
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  pull-requests: write   # required to post the review
+
+jobs:
+  review:
+    # Only on PR comments that ask for a review.
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@nitpik review') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # issue_comment runs on the default branch — check out the PR head.
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+      - name: Install nitpik
+        run: curl -sSfL https://github.com/nsrosenqvist/nitpik/releases/latest/download/nitpik-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
+      - name: AI Code Review
+        run: |
+          nitpik review \
+            --diff-base "origin/${{ github.event.pull_request.base.ref || 'main' }}" \
+            --profile security,performance \
+            --format github-pr-review \
+            --force-review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NITPIK_PROVIDER: ${{ vars.NITPIK_PROVIDER }}
+          NITPIK_MODEL: ${{ vars.NITPIK_MODEL }}
+          NITPIK_API_KEY: ${{ secrets.NITPIK_API_KEY }}
+          NITPIK_LICENSE_KEY: ${{ secrets.NITPIK_LICENSE_KEY }}
+```
+
+**Key details:**
+- `if: github.event.issue.pull_request` ensures the job only runs on comments on **pull requests**, not plain issues.
+- `--format github-pr-review` posts inline review comments via `GITHUB_TOKEN`; it needs `permissions: pull-requests: write`.
+- `--force-review` posts a fresh review even when nothing changed since the last run — without it, an explicit re-trigger on an unchanged PR would stay quiet (nitpik suppresses re-runs that would only repeat themselves). Per-finding dedup still applies, so already-posted findings won't spawn duplicate comment threads.
+- Pair with `--pr-threads` (feed prior comments + replies into the review) and `--resolve-addressed` (auto-resolve threads a later push fixed) for a fully conversational re-review.
+
 ## GitLab CI/CD
 
 ```yaml

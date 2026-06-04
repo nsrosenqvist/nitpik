@@ -367,6 +367,15 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub resolve_addressed: bool,
 
+    /// Post a review even when a prior run already covered this PR with
+    /// nothing new to add — for an explicit re-trigger (e.g. an
+    /// `@nitpik review` comment). Without this, nitpik stays quiet on a
+    /// re-run that would only repeat itself. Per-finding dedup still applies,
+    /// so an already-posted finding won't spawn a duplicate comment thread.
+    /// Only affects `--format github-pr-review`.
+    #[arg(long, default_value_t = false)]
+    pub force_review: bool,
+
     /// Print the constructed prompts (system + user) for each task and exit
     /// without calling the LLM. Only available in debug builds.
     #[cfg(debug_assertions)]
@@ -449,6 +458,7 @@ impl OutputFormat {
         findings: &[nitpik::models::finding::Finding],
         fail_on: Option<nitpik::models::finding::Severity>,
         review_event: nitpik::forge::ReviewEvent,
+        force_review: bool,
         env: &nitpik::env::Env,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use nitpik::output::OutputPublisher;
@@ -464,9 +474,13 @@ impl OutputFormat {
                     .await
             }
             OutputFormat::GithubPrReview if env.is_set("GITHUB_TOKEN") => {
-                nitpik::output::github_pr_review::GithubPrReviewPublisher::new(env, review_event)
-                    .publish(findings)
-                    .await
+                nitpik::output::github_pr_review::GithubPrReviewPublisher::new(
+                    env,
+                    review_event,
+                    force_review,
+                )
+                .publish(findings)
+                .await
             }
             _ => Ok(()),
         }
@@ -573,6 +587,7 @@ mod tests {
             pr_summary: false,
             pr_threads: false,
             resolve_addressed: false,
+            force_review: false,
             #[cfg(debug_assertions)]
             debug_prompt: false,
         }

@@ -214,17 +214,24 @@ pub fn detect(env: &Env) -> Option<Box<dyn Forge>> {
 /// `Ok(true)` if a review was posted, `Ok(false)` if posting was skipped
 /// (nothing new). Reading existing comments fails open: a probe error
 /// degrades to "post everything" rather than blocking the review.
+///
+/// `force` bypasses the quiet-on-re-run gate ([`should_post`]) so an
+/// explicit re-review (e.g. `@nitpik review`) always posts a summary even
+/// when nothing changed. Per-finding dedup still applies — inline comments
+/// are only added for findings not already posted — so a forced re-review
+/// doesn't duplicate existing comment threads.
 pub async fn publish_review(
     forge: &dyn Forge,
     findings: &[Finding],
     event: ReviewEvent,
+    force: bool,
 ) -> Result<bool, ForgeError> {
     let existing = forge.existing_review_comments().await.unwrap_or_default();
     let markers = extract_markers(existing.iter().map(|c| c.body.as_str()));
     let had_prior = !markers.is_empty();
     let (fresh, skipped) = partition_new(findings, &markers);
 
-    if !should_post(findings.len(), fresh.len(), had_prior) {
+    if !force && !should_post(findings.len(), fresh.len(), had_prior) {
         return Ok(false);
     }
 
@@ -541,6 +548,68 @@ mod tests {
         assert!(should_post(0, 0, false));
         assert!(!should_post(0, 0, true));
         assert!(!should_post(3, 0, true));
+    }
+
+    /// A mock forge that reports its PR as already carrying every sample
+    /// finding (so the quiet-on-re-run gate would normally suppress), and
+    /// records the draft it was asked to post.
+    struct RecordingForge {
+        prior: Vec<ExistingComment>,
+        posted: std::sync::Mutex<Option<ReviewDraft>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Forge for RecordingForge {
+        async fn pull_request(&self) -> Result<PullRequest, ForgeError> {
+            Err(ForgeError::NoPullRequest)
+        }
+        async fn existing_review_comments(&self) -> Result<Vec<ExistingComment>, ForgeError> {
+            Ok(self.prior.clone())
+        }
+        async fn post_review(&self, draft: &ReviewDraft) -> Result<(), ForgeError> {
+            *self.posted.lock().unwrap() = Some(draft.clone());
+            Ok(())
+        }
+    }
+
+    /// Build a forge whose PR already has both sample findings posted.
+    fn forge_with_all_posted() -> RecordingForge {
+        let prior = sample_findings()
+            .iter()
+            .map(|f| ExistingComment {
+                body: format_comment_body(f),
+                author: Some("nitpik".into()),
+            })
+            .collect();
+        RecordingForge {
+            prior,
+            posted: std::sync::Mutex::new(None),
+        }
+    }
+
+    #[tokio::test]
+    async fn publish_skips_re_run_with_nothing_new() {
+        let forge = forge_with_all_posted();
+        let posted =
+            publish_review(&forge, &sample_findings(), ReviewEvent::Comment, false)
+                .await
+                .unwrap();
+        assert!(!posted, "should stay quiet when nothing is new");
+        assert!(forge.posted.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn force_posts_even_when_nothing_new() {
+        let forge = forge_with_all_posted();
+        let posted = publish_review(&forge, &sample_findings(), ReviewEvent::Comment, true)
+            .await
+            .unwrap();
+        assert!(posted, "force must post a review on re-run");
+        let draft = forge.posted.lock().unwrap().clone().unwrap();
+        // Per-finding dedup still applies: both findings are already posted,
+        // so the forced review carries a summary but no duplicate threads.
+        assert!(draft.comments.is_empty());
+        assert!(draft.summary.contains("2 findings"));
     }
 
     #[test]
