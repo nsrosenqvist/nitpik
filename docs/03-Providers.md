@@ -143,6 +143,31 @@ model: claude-sonnet-4-5-20250929
 
 See [Custom Profiles](07-Custom-Profiles) for the full profile format.
 
+## Per-Task Model Overrides
+
+A review run makes several kinds of LLM call, and the cheaper, non-review ones don't need a top-tier model. You can point them at a smaller/faster model — on the **same provider and API key** — while the per-file review keeps the strong one:
+
+```toml
+[provider]
+name = "anthropic"
+model = "claude-opus-4-8"               # per-file review
+
+[provider.models]
+triage  = "claude-haiku-4-5-20251001"   # auto profile selection + threat triage
+summary = "claude-haiku-4-5-20251001"   # rolling PR summary (--pr-summary)
+```
+
+Or via environment variables:
+
+```bash
+export NITPIK_TRIAGE_MODEL=claude-haiku-4-5-20251001
+export NITPIK_SUMMARY_MODEL=claude-haiku-4-5-20251001
+```
+
+Each override falls back to `[provider] model` (or `NITPIK_MODEL`) when unset, so omitting them keeps the previous single-model behavior. Only `triage` and `summary` are configurable: the per-file review and the critic/verify pass always use the primary model — the critic is judgment-heavy and intentionally stays on it. Token usage is attributed per model, so the run summary shows what each model cost.
+
+See [Configuration](16-Configuration) for the full reference.
+
 ## Config File Setup
 
 Instead of environment variables, configure the provider in `.nitpik.toml`:
