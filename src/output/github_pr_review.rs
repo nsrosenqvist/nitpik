@@ -15,7 +15,7 @@
 //! environment variables.
 
 use crate::env::Env;
-use crate::forge::{self, github::GithubForge};
+use crate::forge::{self, ReviewEvent, github::GithubForge};
 use crate::models::finding::Finding;
 use crate::output::{OutputFormatter, OutputPublisher};
 
@@ -24,9 +24,10 @@ pub struct GithubPrReviewFormatter;
 
 impl OutputFormatter for GithubPrReviewFormatter {
     fn format(&self, findings: &[Finding]) -> String {
-        // Pure: the run-link footer and cross-run dedup are applied by the
-        // publisher; the rendered payload comments on every finding.
-        let draft = forge::build_review_draft(findings, findings, "");
+        // Pure preview: the run-link footer, cross-run dedup, and the
+        // request-changes decision are applied by the publisher. The
+        // rendered payload comments on every finding as a plain COMMENT.
+        let draft = forge::build_review_draft(findings, findings, "", ReviewEvent::Comment);
         let payload = forge::github::review_payload(&draft);
         serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string())
     }
@@ -35,11 +36,14 @@ impl OutputFormatter for GithubPrReviewFormatter {
 /// GitHub PR review publisher.
 pub struct GithubPrReviewPublisher<'a> {
     env: &'a Env,
+    event: ReviewEvent,
 }
 
 impl<'a> GithubPrReviewPublisher<'a> {
-    pub fn new(env: &'a Env) -> Self {
-        Self { env }
+    /// `event` is the review action to post (typically derived from
+    /// findings via [`forge::review_event_for`]).
+    pub fn new(env: &'a Env, event: ReviewEvent) -> Self {
+        Self { env, event }
     }
 }
 
@@ -49,7 +53,7 @@ impl OutputPublisher for GithubPrReviewPublisher<'_> {
         findings: &[Finding],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let forge = GithubForge::from_env(self.env)?;
-        forge::publish_review(&forge, findings).await?;
+        forge::publish_review(&forge, findings, self.event).await?;
         Ok(())
     }
 }
@@ -86,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn publish_errors_without_github_env() {
         let env = Env::mock(Vec::<(&str, &str)>::new());
-        let err = GithubPrReviewPublisher::new(&env)
+        let err = GithubPrReviewPublisher::new(&env, ReviewEvent::Comment)
             .publish(&sample_findings())
             .await
             .unwrap_err();

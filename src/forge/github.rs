@@ -307,7 +307,23 @@ mod tests {
     }
 
     fn payload(findings: &[Finding]) -> serde_json::Value {
-        review_payload(&build_review_draft(findings, findings, ""))
+        review_payload(&build_review_draft(
+            findings,
+            findings,
+            "",
+            ReviewEvent::Comment,
+        ))
+    }
+
+    #[test]
+    fn request_changes_event_maps_to_request_changes() {
+        let p = review_payload(&build_review_draft(
+            &sample_findings(),
+            &sample_findings(),
+            "",
+            ReviewEvent::RequestChanges,
+        ));
+        assert_eq!(p["event"], "REQUEST_CHANGES");
     }
 
     #[test]

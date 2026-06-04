@@ -193,6 +193,17 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false, conflicts_with = "fail_on")]
     pub no_fail: bool,
 
+    /// Post the PR review as "changes requested" (a blocking review) when any
+    /// finding meets this severity, instead of an advisory comment. Only
+    /// affects `--format github-pr-review`; other formats ignore it. Bare
+    /// `--request-changes` means `error`. Omitted → always post a comment.
+    ///
+    /// Note: GitHub rejects a "changes requested" review on your own PR, so a
+    /// bot posting under the PR author's token will fall back to a failed
+    /// publish — use a token whose identity differs from the PR author.
+    #[arg(long, value_name = "SEVERITY", num_args = 0..=1, default_missing_value = "error")]
+    pub request_changes: Option<Severity>,
+
     // --- Agentic ---
     /// Agentic-review policy: `auto` (default — honor each reviewer's own
     /// setting), `on` (force tools on for every reviewer), or `off` (force
@@ -412,12 +423,14 @@ impl OutputFormat {
     ///
     /// Bitbucket publishes when `BITBUCKET_WORKSPACE` is set.
     /// Forgejo publishes when `CI_FORGE_URL` is set.
-    /// GitHub PR review publishes when `GITHUB_TOKEN` is set.
+    /// GitHub PR review publishes when `GITHUB_TOKEN` is set, posting with
+    /// `review_event` (comment vs. changes-requested).
     /// Other formats are no-ops.
     pub async fn publish(
         &self,
         findings: &[nitpik::models::finding::Finding],
         fail_on: Option<nitpik::models::finding::Severity>,
+        review_event: nitpik::forge::ReviewEvent,
         env: &nitpik::env::Env,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use nitpik::output::OutputPublisher;
@@ -433,7 +446,7 @@ impl OutputFormat {
                     .await
             }
             OutputFormat::GithubPrReview if env.is_set("GITHUB_TOKEN") => {
-                nitpik::output::github_pr_review::GithubPrReviewPublisher::new(env)
+                nitpik::output::github_pr_review::GithubPrReviewPublisher::new(env, review_event)
                     .publish(findings)
                     .await
             }
@@ -514,6 +527,7 @@ mod tests {
             format: OutputFormat::Terminal,
             fail_on: None,
             no_fail: false,
+            request_changes: None,
             agent: None,
             max_turns: 10,
             max_tool_calls: 10,

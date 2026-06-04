@@ -39,7 +39,7 @@ use std::collections::HashSet;
 use thiserror::Error;
 
 use crate::env::Env;
-use crate::models::finding::Finding;
+use crate::models::finding::{Finding, Severity};
 
 // ── Neutral data model ──────────────────────────────────────────────
 
@@ -168,10 +168,15 @@ pub fn detect(env: &Env) -> Option<Box<dyn Forge>> {
 /// Read existing comments, suppress findings already posted, and post a
 /// review — staying quiet on a re-run with nothing new to say.
 ///
-/// Returns `Ok(true)` if a review was posted, `Ok(false)` if posting was
-/// skipped (nothing new). Reading existing comments fails open: a probe
-/// error degrades to "post everything" rather than blocking the review.
-pub async fn publish_review(forge: &dyn Forge, findings: &[Finding]) -> Result<bool, ForgeError> {
+/// `event` is the review action (see [`review_event_for`]). Returns
+/// `Ok(true)` if a review was posted, `Ok(false)` if posting was skipped
+/// (nothing new). Reading existing comments fails open: a probe error
+/// degrades to "post everything" rather than blocking the review.
+pub async fn publish_review(
+    forge: &dyn Forge,
+    findings: &[Finding],
+    event: ReviewEvent,
+) -> Result<bool, ForgeError> {
     let existing = forge.existing_review_comments().await.unwrap_or_default();
     let markers = extract_markers(existing.iter().map(|c| c.body.as_str()));
     let had_prior = !markers.is_empty();
@@ -187,9 +192,23 @@ pub async fn publish_review(forge: &dyn Forge, findings: &[Finding]) -> Result<b
             "\n\n_({skipped} finding(s) already reported in earlier reviews.)_"
         ));
     }
-    let draft = build_review_draft(findings, &fresh, &footer);
+    let draft = build_review_draft(findings, &fresh, &footer, event);
     forge.post_review(&draft).await?;
     Ok(true)
+}
+
+/// Choose the review action from findings and an optional request-changes
+/// threshold. With a threshold set, the review is [`ReviewEvent::RequestChanges`]
+/// when any finding is at or above it; otherwise — and by default (no
+/// threshold) — [`ReviewEvent::Comment`]. nitpik never auto-approves, so a
+/// human still owns the approval state.
+pub fn review_event_for(findings: &[Finding], request_changes: Option<Severity>) -> ReviewEvent {
+    match request_changes {
+        Some(threshold) if findings.iter().any(|f| f.severity >= threshold) => {
+            ReviewEvent::RequestChanges
+        }
+        _ => ReviewEvent::Comment,
+    }
 }
 
 // ── ReviewDraft construction (forge-agnostic) ───────────────────────
@@ -203,10 +222,11 @@ pub fn build_review_draft(
     summary_findings: &[Finding],
     comment_findings: &[Finding],
     footer: &str,
+    event: ReviewEvent,
 ) -> ReviewDraft {
     ReviewDraft {
         summary: review_body(summary_findings, footer),
-        event: ReviewEvent::Comment,
+        event,
         comments: comment_findings.iter().map(inline_comment).collect(),
     }
 }
@@ -356,11 +376,52 @@ mod tests {
     fn draft_summary_counts_all_inline_comments_only_fresh() {
         let all = sample_findings();
         let fresh = &all[1..]; // pretend the first was already posted
-        let draft = build_review_draft(&all, fresh, "");
+        let draft = build_review_draft(&all, fresh, "", ReviewEvent::Comment);
         assert_eq!(draft.event, ReviewEvent::Comment);
         assert!(draft.summary.contains("2 findings"));
         assert_eq!(draft.comments.len(), 1);
         assert_eq!(draft.comments[0].path, "src/lib.rs");
+    }
+
+    #[test]
+    fn draft_carries_the_chosen_event() {
+        let all = sample_findings();
+        let draft = build_review_draft(&all, &all, "", ReviewEvent::RequestChanges);
+        assert_eq!(draft.event, ReviewEvent::RequestChanges);
+    }
+
+    #[test]
+    fn review_event_defaults_to_comment_without_threshold() {
+        let f = sample_findings(); // contains an error + a warning
+        assert_eq!(review_event_for(&f, None), ReviewEvent::Comment);
+    }
+
+    #[test]
+    fn review_event_requests_changes_when_threshold_met() {
+        let f = sample_findings(); // has an Error finding
+        assert_eq!(
+            review_event_for(&f, Some(Severity::Error)),
+            ReviewEvent::RequestChanges
+        );
+        assert_eq!(
+            review_event_for(&f, Some(Severity::Warning)),
+            ReviewEvent::RequestChanges
+        );
+    }
+
+    #[test]
+    fn review_event_comments_when_threshold_not_met() {
+        // Only an info finding, threshold error → stays a comment.
+        let f = vec![Finding {
+            severity: Severity::Info,
+            ..sample_findings().remove(0)
+        }];
+        assert_eq!(
+            review_event_for(&f, Some(Severity::Error)),
+            ReviewEvent::Comment
+        );
+        // No findings at all → comment (never request changes on a clean PR).
+        assert_eq!(review_event_for(&[], Some(Severity::Error)), ReviewEvent::Comment);
     }
 
     #[test]
