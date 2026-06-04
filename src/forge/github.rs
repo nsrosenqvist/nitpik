@@ -411,6 +411,13 @@ pub fn resolve_pr_number(env: &Env) -> Result<u64, ForgeError> {
                     .filter(|issue| issue.get("pull_request").is_some())
                     .and_then(|issue| issue.get("number"))
             })
+            // repository_dispatch (e.g. the GitHub App firing `nitpik-review`):
+            // GITHUB_REF is the default branch, and the PR number rides in
+            // client_payload.pr — no pull_request/issue object in the payload.
+            .or_else(|| {
+                json.get("client_payload")
+                    .and_then(|cp| cp.get("pr").or_else(|| cp.get("number")))
+            })
             .or_else(|| json.get("number"))
             .and_then(|n| n.as_u64());
         if let Some(n) = n {
@@ -565,6 +572,25 @@ mod tests {
             resolve_pr_number(&env),
             Err(ForgeError::NoPullRequest)
         ));
+    }
+
+    #[test]
+    fn resolve_pr_number_from_repository_dispatch_payload() {
+        // The GitHub App fires repository_dispatch with the PR number in
+        // client_payload.pr; GITHUB_REF points at the default branch, so the
+        // refs/pull/N/merge fast path doesn't apply.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("event.json");
+        std::fs::write(
+            &path,
+            r#"{"action":"nitpik-review","client_payload":{"pr":42,"force":true}}"#,
+        )
+        .unwrap();
+        let env = Env::mock([
+            ("GITHUB_REF", "refs/heads/main"),
+            ("GITHUB_EVENT_PATH", path.to_str().unwrap()),
+        ]);
+        assert_eq!(resolve_pr_number(&env).unwrap(), 42);
     }
 
     #[test]
