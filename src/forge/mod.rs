@@ -30,6 +30,7 @@
 //! exercised by two real backends from the start, but it is **not yet
 //! advertised** pending live testing — see `plans/pr-native-review/`.
 
+pub mod forgejo;
 pub mod github;
 pub mod gitlab;
 
@@ -144,14 +145,19 @@ pub trait Forge: Send + Sync {
 /// Detect the active forge from the environment, returning an adapter or
 /// `None` (no forge → caller behaves like the annotation-only path).
 ///
-/// GitHub is preferred when its token is present; GitLab is tried next.
-/// Only GitHub is advertised today — the GitLab branch keeps the
-/// abstraction honest (two real backends) but is gated on live testing.
+/// GitHub is preferred when its token is present; GitLab, then Forgejo,
+/// are tried next. Each adapter keys on distinct env vars, so the order
+/// only matters if two forges' variables are present at once. Only GitHub
+/// is advertised today — the GitLab and Forgejo branches keep the
+/// abstraction honest (real backends) but are gated on live testing.
 pub fn detect(env: &Env) -> Option<Box<dyn Forge>> {
     if let Ok(f) = github::GithubForge::from_env(env) {
         return Some(Box::new(f));
     }
     if let Ok(f) = gitlab::GitlabForge::from_env(env) {
+        return Some(Box::new(f));
+    }
+    if let Ok(f) = forgejo::ForgejoForge::from_env(env) {
         return Some(Box::new(f));
     }
     None
@@ -456,6 +462,19 @@ mod tests {
             ("CI_PROJECT_ID", "1"),
             ("CI_MERGE_REQUEST_IID", "2"),
             ("GITLAB_TOKEN", "g"),
+        ]);
+        assert!(detect(&env).is_some());
+    }
+
+    #[test]
+    fn detect_falls_through_to_forgejo() {
+        let env = Env::mock([
+            ("CI_FORGE_URL", "https://codeberg.org"),
+            ("CI_REPO_OWNER", "o"),
+            ("CI_REPO_NAME", "r"),
+            ("CI_COMMIT_PULL_REQUEST", "7"),
+            ("CI_COMMIT_SHA", "abc123"),
+            ("FORGEJO_TOKEN", "tok"),
         ]);
         assert!(detect(&env).is_some());
     }
