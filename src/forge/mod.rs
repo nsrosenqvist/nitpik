@@ -474,7 +474,10 @@ mod tests {
             ReviewEvent::Comment
         );
         // No findings at all → comment (never request changes on a clean PR).
-        assert_eq!(review_event_for(&[], Some(Severity::Error)), ReviewEvent::Comment);
+        assert_eq!(
+            review_event_for(&[], Some(Severity::Error)),
+            ReviewEvent::Comment
+        );
     }
 
     #[test]
@@ -594,10 +597,9 @@ mod tests {
     #[tokio::test]
     async fn publish_skips_re_run_with_nothing_new() {
         let forge = forge_with_all_posted();
-        let posted =
-            publish_review(&forge, &sample_findings(), ReviewEvent::Comment, false)
-                .await
-                .unwrap();
+        let posted = publish_review(&forge, &sample_findings(), ReviewEvent::Comment, false)
+            .await
+            .unwrap();
         assert!(!posted, "should stay quiet when nothing is new");
         assert!(forge.posted.lock().unwrap().is_none());
     }

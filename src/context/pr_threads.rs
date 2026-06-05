@@ -130,7 +130,10 @@ mod tests {
                 "🔴 **SQL injection** (error)\n\nUse a parameterized query.\n\n<!-- nitpik:abc123 -->",
                 Some("nitpik-bot"),
             ),
-            comment("Won't fix — user_id is an int from the router.", Some("alice")),
+            comment(
+                "Won't fix — user_id is an int from the router.",
+                Some("alice"),
+            ),
         ];
         let out = format_threads(&comments).unwrap();
         assert!(out.contains("[nitpik] 🔴 **SQL injection** (error) Use a parameterized query."));
@@ -153,8 +156,9 @@ mod tests {
 
     #[test]
     fn caps_number_of_comments() {
-        let many: Vec<ExistingComment> =
-            (0..50).map(|i| comment(&format!("comment {i}"), Some("u"))).collect();
+        let many: Vec<ExistingComment> = (0..50)
+            .map(|i| comment(&format!("comment {i}"), Some("u")))
+            .collect();
         let out = format_threads(&many).unwrap();
         assert_eq!(out.lines().count(), MAX_COMMENTS);
     }

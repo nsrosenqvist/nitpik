@@ -118,9 +118,7 @@ pub async fn resolve_addressed_threads(
 /// Build the judge's user prompt: a numbered list of prior findings, each
 /// with the current diff for its file and the outdated hint.
 fn build_judge_prompt(threads: &[ReviewThread], diffs: &[FileDiff<'_>]) -> String {
-    let mut s = String::from(
-        "Prior review findings to judge against the current diff:\n\n",
-    );
+    let mut s = String::from("Prior review findings to judge against the current diff:\n\n");
     for (i, t) in threads.iter().enumerate() {
         s.push_str(&format!("### Finding {i}\n"));
         s.push_str(&format!("- file: `{}`", t.path));
@@ -336,7 +334,8 @@ mod tests {
             tokens: TokenUsage::default(),
         }));
         let diffs = vec![diff("a.py"), diff("b.py")];
-        let out = resolve_addressed_threads(&provider, "m", &forge, &diffs, Some("deadbeefcafe")).await;
+        let out =
+            resolve_addressed_threads(&provider, "m", &forge, &diffs, Some("deadbeefcafe")).await;
         assert_eq!(out.considered, 2);
         assert_eq!(out.resolved, vec!["a.py".to_string()]);
         // Only thread T0 was resolved on the forge.

@@ -605,7 +605,10 @@ mod tests {
     #[test]
     fn from_env_requires_token_repo_and_pr() {
         // Missing token
-        let env = Env::mock([("GITHUB_REPOSITORY", "o/r"), ("GITHUB_REF", "refs/pull/1/merge")]);
+        let env = Env::mock([
+            ("GITHUB_REPOSITORY", "o/r"),
+            ("GITHUB_REF", "refs/pull/1/merge"),
+        ]);
         assert!(matches!(
             GithubForge::from_env(&env),
             Err(ForgeError::MissingEnvVar(_))

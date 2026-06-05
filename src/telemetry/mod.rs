@@ -187,7 +187,10 @@ mod tests {
     fn forge_omitted_from_json_when_none() {
         let payload = HeartbeatPayload::from_review(1, 1, 1, false, None);
         let json = serde_json::to_value(&payload).expect("serialization should succeed");
-        assert!(json.get("forge").is_none(), "forge should be omitted when None");
+        assert!(
+            json.get("forge").is_none(),
+            "forge should be omitted when None"
+        );
     }
 
     #[test]

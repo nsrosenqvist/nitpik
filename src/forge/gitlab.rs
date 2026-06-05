@@ -63,15 +63,17 @@ impl GitlabForge {
         let api_base = env
             .var("CI_API_V4_URL")
             .ok()
-            .or_else(|| env.var("CI_SERVER_URL").ok().map(|u| format!("{}/api/v4", u.trim_end_matches('/'))))
+            .or_else(|| {
+                env.var("CI_SERVER_URL")
+                    .ok()
+                    .map(|u| format!("{}/api/v4", u.trim_end_matches('/')))
+            })
             .ok_or_else(|| ForgeError::MissingEnvVar("CI_API_V4_URL".into()))?;
         let api_base = api_base.trim_end_matches('/').to_string();
 
         let project_id = require_env(env, "CI_PROJECT_ID")?;
         let mr_iid_str = require_env(env, "CI_MERGE_REQUEST_IID")?;
-        let mr_iid: u64 = mr_iid_str
-            .parse()
-            .map_err(|_| ForgeError::NoPullRequest)?;
+        let mr_iid: u64 = mr_iid_str.parse().map_err(|_| ForgeError::NoPullRequest)?;
 
         let auth = if let Ok(t) = env.var("GITLAB_TOKEN") {
             ("PRIVATE-TOKEN", t)
@@ -154,7 +156,10 @@ impl super::Forge for GitlabForge {
                 .or_else(|| json["sha"].as_str())
                 .unwrap_or_default()
                 .to_string(),
-            base_ref: json["target_branch"].as_str().unwrap_or_default().to_string(),
+            base_ref: json["target_branch"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             author: json["author"]["username"].as_str().map(String::from),
         })
     }

@@ -319,7 +319,10 @@ mod tests {
     #[test]
     fn review_payload_carries_commit_and_inline_positions() {
         let f = sample_findings();
-        let p = review_payload("abc123", &build_review_draft(&f, &f, "", ReviewEvent::Comment));
+        let p = review_payload(
+            "abc123",
+            &build_review_draft(&f, &f, "", ReviewEvent::Comment),
+        );
         assert_eq!(p["event"], "COMMENT");
         assert_eq!(p["commit_id"], "abc123");
         assert!(p["body"].as_str().unwrap().contains("2 findings"));

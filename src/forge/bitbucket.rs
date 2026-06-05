@@ -221,7 +221,8 @@ pub fn inline_comment_payload(c: &InlineComment) -> serde_json::Value {
 }
 
 fn require_env(env: &Env, name: &str) -> Result<String, ForgeError> {
-    env.var(name).map_err(|_| ForgeError::MissingEnvVar(name.into()))
+    env.var(name)
+        .map_err(|_| ForgeError::MissingEnvVar(name.into()))
 }
 
 #[cfg(test)]

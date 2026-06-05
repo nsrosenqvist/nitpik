@@ -69,9 +69,9 @@ const OFFLINE_GRACE_SECONDS: i64 = 7 * 24 * 60 * 60;
 const TRUSTED_KEYS: &[TrustedKey] = &[TrustedKey {
     kid: "ed25519-2026-01",
     bytes: [
-        0xa2, 0x6c, 0xad, 0xbb, 0xb2, 0x28, 0xcb, 0x75, 0x15, 0x9b, 0x4e,
-        0x3d, 0xda, 0x2c, 0x70, 0x3b, 0xc5, 0x3b, 0xac, 0x75, 0x4b, 0x61,
-        0xfe, 0xd3, 0x8e, 0xca, 0x0d, 0xa8, 0x48, 0x4f, 0xdd, 0x40,
+        0xa2, 0x6c, 0xad, 0xbb, 0xb2, 0x28, 0xcb, 0x75, 0x15, 0x9b, 0x4e, 0x3d, 0xda, 0x2c, 0x70,
+        0x3b, 0xc5, 0x3b, 0xac, 0x75, 0x4b, 0x61, 0xfe, 0xd3, 0x8e, 0xca, 0x0d, 0xa8, 0x48, 0x4f,
+        0xdd, 0x40,
     ],
 }];
 
@@ -660,8 +660,7 @@ mod tests {
     fn verify_jwt_allow_expired_still_rejects_bad_signature() {
         // Grace must not weaken signature/issuer checks — only the exp check.
         let (sk, _) = signing_keypair();
-        let payload =
-            r#"{"iss":"https://evil.example","sub":"x","iat":0,"exp":0,"subscription_id":"s","plan":"monthly","type":"online"}"#;
+        let payload = r#"{"iss":"https://evil.example","sub":"x","iat":0,"exp":0,"subscription_id":"s","plan":"monthly","type":"online"}"#;
         let jwt = sign_test_jwt(&sk, "ed25519-2026-01", payload);
         // Wrong issuer is still rejected even when ignoring exp.
         assert!(matches!(
