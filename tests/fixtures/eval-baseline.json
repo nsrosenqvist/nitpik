@@ -28,6 +28,15 @@
       "total_labels": 1
     },
     {
+      "caught": 0,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "negative",
+      "name": "benign-path-open",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
       "caught": 1,
       "extra": 0,
       "extra_significant": 0,
@@ -109,6 +118,15 @@
       "total_labels": 0
     },
     {
+      "caught": 1,
+      "extra": 1,
+      "extra_significant": 1,
+      "kind": "positive",
+      "name": "path-traversal-tainted",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
       "caught": 0,
       "extra": 0,
       "extra_significant": 0,
@@ -119,8 +137,8 @@
     },
     {
       "caught": 1,
-      "extra": 1,
-      "extra_significant": 1,
+      "extra": 0,
+      "extra_significant": 0,
       "kind": "positive",
       "name": "resource-leak",
       "noise": 0,
@@ -137,8 +155,8 @@
     },
     {
       "caught": 0,
-      "extra": 1,
-      "extra_significant": 1,
+      "extra": 0,
+      "extra_significant": 0,
       "kind": "positive",
       "name": "swallowed-exception",
       "noise": 0,
@@ -163,13 +181,13 @@
       "total_labels": 1
     }
   ],
-  "labels_caught": 11,
-  "labels_total": 12,
-  "negatives_clean": 6,
-  "negatives_total": 6,
-  "precision_lower_bound": 0.8461538461538461,
-  "recall": 0.9166666666666666,
-  "total_extra": 2,
+  "labels_caught": 12,
+  "labels_total": 13,
+  "negatives_clean": 7,
+  "negatives_total": 7,
+  "precision_lower_bound": 0.9230769230769231,
+  "recall": 0.9230769230769231,
+  "total_extra": 1,
   "total_noise": 0,
-  "total_significant_extra": 2
+  "total_significant_extra": 1
 }

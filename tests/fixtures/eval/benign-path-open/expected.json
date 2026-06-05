@@ -1,0 +1,6 @@
+{
+  "description": "Benign refactor of a file reader to a context manager. `path` is a plain function parameter with no untrusted source in view, so flagging 'path traversal' on `open(path)` is speculative noise — the operation is the function's normal job.",
+  "kind": "negative",
+  "profiles": ["security"],
+  "expected": []
+}

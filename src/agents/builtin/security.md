@@ -41,6 +41,7 @@ On diffs that contain no application code (e.g. documentation, generic configura
 
 - Non-security concerns (performance, code style, architecture) — leave those to other specialized reviewers
 - Theoretical vulnerabilities where the input is already validated/escaped in the code path you can see
+- **Benign operations that are only dangerous given an unseen untrusted source.** Opening, reading, or writing a path the function receives as a parameter is its normal job. Do not report "path traversal" on a bare `open(path)` / `read(path)` — nor SSRF on `fetch(url)`, nor an open redirect on `redirect(target)` — unless an untrusted source for that value is actually visible in the code under review (it is read from a request/CLI/env, or concatenated with such input). Absent a visible tainted source, this is at most an `info` hardening note, never a `warning`. Reserve `warning`/`error` for an **intrinsically unsafe construction** (string-built SQL/shell/HTML, deserialization of untrusted data) or a **traceable source→sink flow** you can point to. Interpolating any value into a raw SQL/shell string is intrinsically unsafe and stays a finding; passing a parameter to `open` is not.
 - Issues in test code or fixtures that don't affect production
 
 Reference CWE numbers where applicable (e.g., CWE-89 for SQL injection).

@@ -1,0 +1,15 @@
+{
+  "description": "Untrusted `request.args['file']` is concatenated into a filesystem path and opened — a real path traversal (CWE-22). The source (request) and sink (open) are both visible, so the source-to-sink flow is fully traceable.",
+  "kind": "positive",
+  "profiles": ["security"],
+  "expected": [
+    {
+      "file": "download.py",
+      "line": 2,
+      "end_line": 3,
+      "min_severity": "warning",
+      "keywords": ["traversal", "path", "..", "sanitiz", "untrusted", "request", "escape", "arbitrary file"],
+      "note": "tainted request.args['file'] (line 2) flows into open() (line 3)"
+    }
+  ]
+}

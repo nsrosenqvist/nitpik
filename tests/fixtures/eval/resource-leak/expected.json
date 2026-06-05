@@ -1,15 +1,15 @@
 {
-  "description": "Refactor from a context manager to manual open/close introduces a file-handle leak: the early `return \"\"` on an empty file skips `f.close()`.",
+  "description": "An early `return` is added between `_cache_lock.acquire()` and `_cache_lock.release()`: when the key already exists the function returns while still holding the module-global lock, so every subsequent acquire deadlocks. Unlike a refcount-closed file handle, this is an unambiguous, non-recoverable bug.",
   "kind": "positive",
   "profiles": ["backend"],
   "expected": [
     {
       "file": "reader.py",
-      "line": 2,
-      "end_line": 6,
+      "line": 8,
+      "end_line": 12,
       "min_severity": "warning",
-      "keywords": ["leak", "close", "handle", "resource", "context manager", "not closed"],
-      "note": "the leak spans open() on line 2 through the skipped f.close() on line 6 (early return on line 5); a finding anchored anywhere in that span counts"
+      "keywords": ["lock", "release", "acquire", "deadlock", "held", "not released", "unlock"],
+      "note": "early return on line 10 skips _cache_lock.release(); the acquire/leak span is lines 8-12"
     }
   ]
 }
