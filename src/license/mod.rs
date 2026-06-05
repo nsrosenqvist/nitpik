@@ -51,6 +51,17 @@ struct TrustedKey {
 /// signed by a trusted key but issued by some other service is rejected.
 const EXPECTED_ISS: &str = "https://nitpik.dev";
 
+/// How long a previously-valid entitlement keeps working after its `exp`
+/// when nitpik.dev can't be reached to refresh it. This decouples the
+/// (short) refresh/metering cadence from outage resilience: a transient
+/// nitpik.dev outage never fails a review — the cached entitlement is
+/// honored for up to this window. Only a *confirmed* negative answer
+/// (revoked key / inactive subscription) downgrades immediately; an
+/// inability to reach us does not. 14 days comfortably spans any realistic
+/// outage while still bounding how long a since-canceled subscription could
+/// coast offline.
+const OFFLINE_GRACE_SECONDS: i64 = 14 * 24 * 60 * 60;
+
 const TRUSTED_KEYS: &[TrustedKey] = &[TrustedKey {
     kid: "ed25519-2026-01",
     bytes: [
@@ -174,6 +185,20 @@ struct JwtPayload {
 /// matches [`EXPECTED_ISS`] and that `exp` is in the future with
 /// ±5 minutes of skew tolerance.
 pub fn verify_jwt(jwt: &str) -> Result<LicenseClaims, LicenseError> {
+    verify_jwt_inner(jwt, true)
+}
+
+/// Like [`verify_jwt`] but does **not** reject an expired token. The
+/// signature, `kid`, issuer, and claim shape are still fully validated —
+/// only the `exp` freshness check is skipped. Used by the offline-grace
+/// path: a previously-valid entitlement stays trustworthy enough to keep
+/// reviews running when nitpik.dev is temporarily unreachable. The caller
+/// is responsible for bounding how stale a token it will accept.
+pub fn verify_jwt_allow_expired(jwt: &str) -> Result<LicenseClaims, LicenseError> {
+    verify_jwt_inner(jwt, false)
+}
+
+fn verify_jwt_inner(jwt: &str, check_exp: bool) -> Result<LicenseClaims, LicenseError> {
     let parts: Vec<&str> = jwt.trim().split('.').collect();
     if parts.len() != 3 {
         return Err(LicenseError::InvalidJwtFormat);
@@ -214,9 +239,11 @@ pub fn verify_jwt(jwt: &str) -> Result<LicenseClaims, LicenseError> {
     }
 
     // ±5 min skew tolerance.
-    let now = current_unix_seconds();
-    if payload.exp + 300 < now {
-        return Err(LicenseError::Expired);
+    if check_exp {
+        let now = current_unix_seconds();
+        if payload.exp + 300 < now {
+            return Err(LicenseError::Expired);
+        }
     }
 
     let kind = match payload.token_type.as_str() {
@@ -427,6 +454,21 @@ pub async fn verify_entitlement(
             None
         }
         Err(LicenseError::Network(msg)) => {
+            // Outage path: fail open. If we still hold a recently-valid
+            // entitlement (signature/issuer intact, expired within the grace
+            // window), keep the review licensed rather than punishing the
+            // customer for our downtime. A confirmed negative (UnknownKey /
+            // SubscriptionInactive above) does NOT reach here — those downgrade.
+            if let Some(cached_token) = read_cache(api_key)
+                && let Ok(claims) = verify_jwt_allow_expired(&cached_token)
+                && current_unix_seconds() < claims.expires_at + OFFLINE_GRACE_SECONDS
+            {
+                eprintln!(
+                    "Warning: could not reach nitpik.dev to refresh license ({msg}); \
+                     using cached entitlement (grace period)."
+                );
+                return Some(claims);
+            }
             eprintln!("Warning: could not reach nitpik.dev to verify license: {msg}");
             None
         }
@@ -574,6 +616,54 @@ mod tests {
         );
         let jwt = sign_test_jwt(&sk, "ed25519-2026-01", &payload);
         assert!(matches!(verify_jwt(&jwt), Err(LicenseError::Expired)));
+    }
+
+    #[test]
+    fn verify_jwt_allow_expired_accepts_recently_expired_token() {
+        // The offline-grace primitive: an expired-but-otherwise-valid token
+        // verifies (signature/issuer intact). verify_jwt rejects it; the
+        // allow-expired variant returns the claims so the caller can apply
+        // its own grace bound.
+        let (sk, _) = signing_keypair();
+        let past_exp = current_unix_seconds() - 24 * 60 * 60;
+        let payload = format!(
+            r#"{{"iss":"https://nitpik.dev","sub":"usr_grace","iat":0,"exp":{past_exp},"subscription_id":"sub_x","plan":"monthly","type":"online"}}"#
+        );
+        let jwt = sign_test_jwt(&sk, "ed25519-2026-01", &payload);
+        assert!(matches!(verify_jwt(&jwt), Err(LicenseError::Expired)));
+        let claims = verify_jwt_allow_expired(&jwt).expect("expired-but-signed token verifies");
+        assert_eq!(claims.user_id, "usr_grace");
+        assert_eq!(claims.expires_at, past_exp);
+        // The grace bound the caller applies: still within the window.
+        assert!(current_unix_seconds() < claims.expires_at + OFFLINE_GRACE_SECONDS);
+    }
+
+    #[test]
+    fn verify_jwt_allow_expired_still_rejects_bad_signature() {
+        // Grace must not weaken signature/issuer checks — only the exp check.
+        let (sk, _) = signing_keypair();
+        let payload =
+            r#"{"iss":"https://evil.example","sub":"x","iat":0,"exp":0,"subscription_id":"s","plan":"monthly","type":"online"}"#;
+        let jwt = sign_test_jwt(&sk, "ed25519-2026-01", payload);
+        // Wrong issuer is still rejected even when ignoring exp.
+        assert!(matches!(
+            verify_jwt_allow_expired(&jwt),
+            Err(LicenseError::InvalidClaims(_))
+        ));
+
+        // Tampered signature is rejected.
+        let mut parts: Vec<&str> = jwt.split('.').collect();
+        let tampered = format!("{}.{}.{}", parts[0], parts[1], "AAAA");
+        parts.clear();
+        assert!(verify_jwt_allow_expired(&tampered).is_err());
+    }
+
+    #[test]
+    fn beyond_grace_window_is_not_honored() {
+        // A token expired longer ago than the grace window must fall outside
+        // the bound the outage path checks.
+        let expired_long_ago = current_unix_seconds() - OFFLINE_GRACE_SECONDS - 24 * 60 * 60;
+        assert!(current_unix_seconds() >= expired_long_ago + OFFLINE_GRACE_SECONDS);
     }
 
     #[test]

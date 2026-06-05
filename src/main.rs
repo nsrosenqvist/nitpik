@@ -552,7 +552,14 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         return Ok(());
     }
 
-    let heartbeat = fire_telemetry(&config, diffs, &agent_defs, &license_claims, no_telemetry);
+    let heartbeat = fire_telemetry(
+        &config,
+        diffs,
+        &agent_defs,
+        &license_claims,
+        args.format.forge_name(),
+        no_telemetry,
+    );
 
     let progress = setup_progress(
         &args,
@@ -778,6 +785,7 @@ fn fire_telemetry(
     diffs: &[models::FileDiff<'_>],
     agents: &[models::AgentDefinition],
     license_claims: &Option<license::LicenseClaims>,
+    forge: Option<&'static str>,
     no_telemetry: bool,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if !config.telemetry.enabled || no_telemetry {
@@ -795,6 +803,7 @@ fn fire_telemetry(
         diff_lines,
         agents.len(),
         license_claims.is_some(),
+        forge,
     );
     Some(telemetry::send_heartbeat(payload))
 }

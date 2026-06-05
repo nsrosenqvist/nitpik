@@ -36,6 +36,12 @@ pub struct HeartbeatPayload {
     pub licensed: bool,
     /// Whether the run appears to be inside a CI environment.
     pub is_ci: bool,
+    /// Target forge for this run, derived from the output format
+    /// (`github`/`gitlab`/`forgejo`/`bitbucket`), or `None` for
+    /// forge-agnostic formats (terminal/json/checkstyle). Anonymous — a
+    /// product-analytics dimension only, carrying no identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forge: Option<&'static str>,
     /// CLI version string.
     pub version: &'static str,
 }
@@ -47,6 +53,7 @@ impl HeartbeatPayload {
         diff_lines: usize,
         agent_count: usize,
         licensed: bool,
+        forge: Option<&'static str>,
     ) -> Self {
         Self {
             run_id: uuid::Uuid::new_v4().to_string(),
@@ -55,6 +62,7 @@ impl HeartbeatPayload {
             agent_count,
             licensed,
             is_ci: crate::ci::is_ci(),
+            forge,
             version: crate::constants::FULL_VERSION,
         }
     }
@@ -149,6 +157,7 @@ mod tests {
             agent_count: 2,
             licensed: false,
             is_ci: false,
+            forge: Some("github"),
             version: crate::constants::FULL_VERSION,
         };
         let json = serde_json::to_value(&payload).expect("serialization should succeed");
@@ -157,19 +166,28 @@ mod tests {
         assert_eq!(json["agent_count"], 2);
         assert_eq!(json["licensed"], false);
         assert_eq!(json["is_ci"], false);
+        assert_eq!(json["forge"], "github");
         assert_eq!(json["run_id"], "test-run-id");
         assert_eq!(json["version"], crate::constants::FULL_VERSION);
     }
 
     #[test]
     fn from_review_builds_valid_payload() {
-        let payload = HeartbeatPayload::from_review(5, 100, 3, false);
+        let payload = HeartbeatPayload::from_review(5, 100, 3, false, Some("gitlab"));
         assert_eq!(payload.file_count, 5);
         assert_eq!(payload.diff_lines, 100);
         assert_eq!(payload.agent_count, 3);
         assert!(!payload.licensed);
+        assert_eq!(payload.forge, Some("gitlab"));
         // run_id is a valid UUID
         uuid::Uuid::parse_str(&payload.run_id).expect("run_id should be valid UUID");
+    }
+
+    #[test]
+    fn forge_omitted_from_json_when_none() {
+        let payload = HeartbeatPayload::from_review(1, 1, 1, false, None);
+        let json = serde_json::to_value(&payload).expect("serialization should succeed");
+        assert!(json.get("forge").is_none(), "forge should be omitted when None");
     }
 
     #[test]
@@ -191,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_heartbeat_does_not_panic_on_unreachable_url() {
-        let payload = HeartbeatPayload::from_review(1, 10, 1, false);
+        let payload = HeartbeatPayload::from_review(1, 10, 1, false, None);
         // This should silently discard the error (unreachable host)
         send_heartbeat(payload);
         // Give the spawned task a moment to run

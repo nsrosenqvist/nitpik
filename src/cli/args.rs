@@ -431,6 +431,18 @@ pub enum OutputFormat {
 
 impl OutputFormat {
     /// Format findings using the formatter for this output format.
+    /// The target forge for this output format, for anonymous telemetry.
+    /// Forge-agnostic formats (terminal/json/checkstyle) return `None`.
+    pub fn forge_name(&self) -> Option<&'static str> {
+        match self {
+            OutputFormat::Github | OutputFormat::GithubPrReview => Some("github"),
+            OutputFormat::Gitlab | OutputFormat::GitlabMrReview => Some("gitlab"),
+            OutputFormat::Forgejo => Some("forgejo"),
+            OutputFormat::Bitbucket => Some("bitbucket"),
+            OutputFormat::Terminal | OutputFormat::Json | OutputFormat::Checkstyle => None,
+        }
+    }
+
     pub fn render(&self, findings: &[nitpik::models::finding::Finding]) -> String {
         use nitpik::output::OutputFormatter;
         match self {
