@@ -22,6 +22,8 @@ const HOLISTIC_MD: &str = include_str!("holistic.md");
 
 // Internal profiles for nitpik's own passes.
 const CRITIC_MD: &str = include_str!("critic.md");
+const CRITIC_SOUNDNESS_MD: &str = include_str!("critic-soundness.md");
+const CRITIC_GROUNDING_MD: &str = include_str!("critic-grounding.md");
 const TRIAGE_MD: &str = include_str!("triage.md");
 
 /// One built-in profile: its canonical name and embedded markdown body.
@@ -85,6 +87,14 @@ const BUILTINS: &[Builtin] = &[
     Builtin {
         name: "critic",
         body: CRITIC_MD,
+    },
+    Builtin {
+        name: "critic-soundness",
+        body: CRITIC_SOUNDNESS_MD,
+    },
+    Builtin {
+        name: "critic-grounding",
+        body: CRITIC_GROUNDING_MD,
     },
     Builtin {
         name: "triage",

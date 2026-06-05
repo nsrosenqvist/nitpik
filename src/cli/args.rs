@@ -279,9 +279,12 @@ pub struct ReviewArgs {
     #[arg(long, default_value_t = false)]
     pub no_tokens: bool,
 
-    /// Run a critic pass after the main review to drop probable
-    /// false positives. Adds one extra LLM call per file with findings;
-    /// disabled by default to keep latency and tokens low.
+    /// Run a perspective-diverse critic panel after the main review to
+    /// drop probable false positives. Three independent lenses (balanced,
+    /// soundness, grounding) vote in parallel; a finding is dropped only on
+    /// a majority vote, and a cross-lens-corroborated finding only on a
+    /// unanimous one. Adds a few small parallel LLM calls when there are
+    /// findings; disabled by default to keep latency and tokens low.
     #[arg(long, default_value_t = false)]
     pub verify: bool,
 

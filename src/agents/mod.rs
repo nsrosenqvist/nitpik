@@ -55,7 +55,8 @@ pub async fn resolve_profiles(
 }
 
 /// List all user-selectable profiles: built-ins plus any custom ones
-/// from `agent_dir`, excluding internal profiles (`critic`, `triage`).
+/// from `agent_dir`, excluding internal profiles (the `critic*` verify
+/// lenses and `triage`).
 ///
 /// Custom profiles whose `name` matches a built-in replace the built-in entry.
 pub async fn list_all_profiles(

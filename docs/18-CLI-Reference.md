@@ -57,7 +57,7 @@ Run a code review.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--verify` | `false` | Run a critic pass after the main review that votes keep/drop on each finding to suppress probable false positives. Adds one extra LLM call per run with findings. |
+| `--verify` | `false` | Run a perspective-diverse critic panel after the main review: three independent lenses (balanced, soundness, grounding) vote keep/drop on each finding in parallel, dropping on a majority (unanimous for cross-lens-corroborated findings). Suppresses probable false positives. Adds a few small parallel LLM calls per run with findings. |
 | `--show-dropped` | `false` | Print findings the critic dropped (with rationale) to stderr. No effect without `--verify`. |
 
 ### Agentic Mode

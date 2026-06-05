@@ -307,9 +307,13 @@ impl ReviewOrchestrator {
             // The critic/verify pass is judgment-heavy, so it deliberately
             // runs on the primary review model (no per-task override).
             let critic_model = self.config.provider.resolved_model().to_string();
-            let outcome =
-                verify::verify_findings(&self.provider, &critic_model, scoped, &corroboration)
-                    .await;
+            let outcome = verify::verify_findings_panel(
+                &self.provider,
+                &critic_model,
+                scoped,
+                &corroboration,
+            )
+            .await;
             if outcome.tokens.total() > 0 {
                 total_tokens += outcome.tokens;
                 *tokens_by_model.entry(critic_model).or_default() += outcome.tokens;

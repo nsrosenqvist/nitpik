@@ -56,7 +56,7 @@ See [Reviewer Profiles & Lenses](06-Reviewer-Profiles) for the full lens set.
 
 ## Verification (Critic Pass)
 
-With `--verify`, nitpik runs a single extra LLM call after deduplication that votes keep/drop on each finding using a built-in `critic` profile. Findings the critic drops are removed from the output; the rest pass through unchanged. The critic fails open — a provider error keeps every finding.
+With `--verify`, nitpik runs a **perspective-diverse critic panel** after deduplication. Three independent lenses vote keep/drop on each finding in parallel: the balanced `critic`, a `critic-soundness` lens (is the described defect logically real?), and a `critic-grounding` lens (does it cite real symbols in the diff, or is it hallucinated/out of scope?). A finding is dropped only on a **majority** vote; a finding corroborated by 2+ independent reviewer lenses requires a **unanimous** vote to drop, so genuine cross-lens agreement is hard to overturn. Voting across diverse lenses catches the blind spots a single critic prompt shares with itself. The panel fails open at every level — a lens that errors abstains, and if all lenses error every finding is kept.
 
 Use `--show-dropped` to print the dropped findings (with rationale) to stderr for debugging.
 

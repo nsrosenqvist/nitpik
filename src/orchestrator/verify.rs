@@ -1,14 +1,22 @@
 //! Critic / verification pass.
 //!
-//! Runs a single-turn LLM call per file with findings, asking a
-//! built-in `critic` profile to vote keep/drop on each finding. Used
-//! to suppress probable false positives produced by upstream
-//! reviewers. Opt-in via `--verify`.
+//! Suppresses probable false positives produced by upstream reviewers.
+//! Opt-in via `--verify`.
 //!
-//! Calls the same [`ReviewProvider::triage`] machinery already in use
-//! for threat triage — single round, structured JSON output, no
-//! tools. The critic's verdict format intentionally mirrors
-//! [`TriageVerdict`] so we can reuse the parser path.
+//! The default path ([`verify_findings_panel`]) is **perspective-diverse**:
+//! it runs three independent critic lenses — the balanced `critic` plus a
+//! `critic-soundness` lens (is the defect logically real?) and a
+//! `critic-grounding` lens (is it anchored in the real diff?) — in parallel
+//! and combines their keep/drop verdicts by majority vote, requiring
+//! unanimity to drop a cross-lens-corroborated finding. Diversity across
+//! lenses catches the blind spots a single critic prompt shares with
+//! itself. [`verify_findings`] keeps the original single-critic behavior as
+//! a building block and graceful fallback.
+//!
+//! Every lens uses the same [`ReviewProvider::triage`] machinery already in
+//! use for threat triage — single round, structured JSON output, no tools.
+//! The verdict format intentionally mirrors [`TriageVerdict`] so we reuse
+//! the parser path.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -93,6 +101,161 @@ pub async fn verify_findings(
             }
         }
     }
+}
+
+/// Built-in critic lenses composing the perspective-diverse verify panel:
+/// the balanced [`critic`](crate::agents::builtin) plus two complementary
+/// single-axis lenses. Their keep/drop verdicts are combined by
+/// [`combine_panel`].
+const PANEL_LENSES: [&str; 3] = ["critic", "critic-soundness", "critic-grounding"];
+
+/// Perspective-diverse verification: run several independent critic lenses
+/// over the findings and combine their keep/drop verdicts by majority vote.
+///
+/// A finding is dropped only when a **majority** of the lenses that
+/// answered vote drop; a finding corroborated by 2+ independent reviewer
+/// lenses (per `corroboration`) requires a **unanimous** drop, so genuine
+/// cross-lens agreement is hard to overturn. Running diverse lenses and
+/// voting catches the blind spots a single critic prompt would share with
+/// itself — the same "0-or-2+, never exactly 1" logic the corroboration
+/// signal applies on the production side, applied here on the filtering
+/// side.
+///
+/// Fails open at every level: a lens that errors abstains from the vote,
+/// and if every lens errors all findings are kept. Falls back to the
+/// single-critic [`verify_findings`] when a panel profile can't be loaded.
+pub async fn verify_findings_panel(
+    provider: &Arc<dyn ReviewProvider>,
+    model: &str,
+    findings: Vec<Finding>,
+    corroboration: &HashMap<String, u32>,
+) -> VerifyOutcome {
+    if findings.is_empty() {
+        return VerifyOutcome {
+            kept: findings,
+            dropped: Vec::new(),
+            tokens: TokenUsage::default(),
+        };
+    }
+
+    // Load the lens system prompts; if any is missing, degrade to the
+    // single-critic pass rather than running a partial panel.
+    let mut prompts = Vec::with_capacity(PANEL_LENSES.len());
+    for name in PANEL_LENSES {
+        match crate::agents::builtin::get_builtin(name) {
+            Some(a) => prompts.push(a.system_prompt),
+            None => return verify_findings(provider, model, findings, corroboration).await,
+        }
+    }
+
+    let user_prompt = build_critic_prompt(&findings, corroboration);
+
+    // Run the lenses concurrently on this task — no spawn, so the provider
+    // reference is simply shared across the three futures.
+    let (a, b, c) = tokio::join!(
+        run_one_critic(provider, model, &prompts[0], &user_prompt),
+        run_one_critic(provider, model, &prompts[1], &user_prompt),
+        run_one_critic(provider, model, &prompts[2], &user_prompt),
+    );
+
+    let mut tokens = TokenUsage::default();
+    let mut lens_verdicts: Vec<Vec<crate::providers::TriageVerdict>> = Vec::new();
+    for (verdicts, lens_tokens) in [a, b, c].into_iter().flatten() {
+        tokens += lens_tokens;
+        lens_verdicts.push(verdicts);
+    }
+
+    if lens_verdicts.is_empty() {
+        // Every lens failed — fail open, keep everything.
+        eprintln!("Warning: all critic lenses failed; keeping all findings.");
+        return VerifyOutcome {
+            kept: findings,
+            dropped: Vec::new(),
+            tokens,
+        };
+    }
+
+    let (kept, dropped) = combine_panel(findings, &lens_verdicts, corroboration);
+    VerifyOutcome {
+        kept,
+        dropped,
+        tokens,
+    }
+}
+
+/// Run a single critic lens and return its per-finding verdicts, or `None`
+/// when the call fails after retries (the lens abstains from the vote).
+async fn run_one_critic(
+    provider: &Arc<dyn ReviewProvider>,
+    model: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Option<(Vec<crate::providers::TriageVerdict>, TokenUsage)> {
+    match crate::providers::response::retry_transient(crate::constants::MAX_AUX_RETRIES, || {
+        provider.triage(model, system_prompt, user_prompt)
+    })
+    .await
+    {
+        Ok(outcome) => Some((outcome.verdicts, outcome.tokens)),
+        Err(err) => {
+            eprintln!("Warning: a critic lens failed ({err}); it abstains from the vote.");
+            None
+        }
+    }
+}
+
+/// Combine per-lens verdicts into kept/dropped sets by majority vote.
+///
+/// `lens_verdicts` holds one verdict list per lens that answered (failed
+/// lenses are already excluded). A finding is dropped when the number of
+/// lenses voting drop reaches the threshold: a strict majority normally,
+/// or **all** answering lenses when the finding is corroborated by 2+
+/// reviewer lenses. A finding with no matching verdict from any lens
+/// defaults to keep (fail open).
+fn combine_panel(
+    findings: Vec<Finding>,
+    lens_verdicts: &[Vec<crate::providers::TriageVerdict>],
+    corroboration: &HashMap<String, u32>,
+) -> (Vec<Finding>, Vec<DroppedFinding>) {
+    use crate::orchestrator::dedup::fingerprint;
+
+    let n = lens_verdicts.len();
+    if n == 0 {
+        return (findings, Vec::new());
+    }
+
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+
+    for (i, finding) in findings.into_iter().enumerate() {
+        // Collect this finding's drop rationales across the answering lenses.
+        let drop_reasons: Vec<String> = lens_verdicts
+            .iter()
+            .filter_map(|verdicts| verdicts.iter().find(|v| v.index == i))
+            .filter(|v| v.classification.eq_ignore_ascii_case("drop"))
+            .map(|v| {
+                v.rationale
+                    .clone()
+                    .unwrap_or_else(|| "(no reason provided)".into())
+            })
+            .collect();
+
+        let corroborated = corroboration
+            .get(&fingerprint(&finding))
+            .is_some_and(|&c| c >= 2);
+        // Strict majority of the answering lenses; unanimity for
+        // corroborated findings.
+        let threshold = if corroborated { n } else { n / 2 + 1 };
+
+        if drop_reasons.len() >= threshold {
+            let reason = drop_reasons.join("; ");
+            dropped.push(DroppedFinding { finding, reason });
+        } else {
+            kept.push(finding);
+        }
+    }
+
+    (kept, dropped)
 }
 
 /// Build the critic's user prompt: a numbered list of findings, each
@@ -293,6 +456,128 @@ mod tests {
         assert!(!p.contains("flagged by 1 reviewers"));
         // And the system-facing explanation of the field is present.
         assert!(p.contains("independent"));
+    }
+
+    // ── Perspective-diverse panel ───────────────────────────────────
+
+    /// One lens's verdict list: `(index, drop?)` pairs.
+    fn lens(votes: &[(usize, bool)]) -> Vec<TriageVerdict> {
+        votes
+            .iter()
+            .map(|&(i, drop)| verdict(i, if drop { "drop" } else { "keep" }, Some("r")))
+            .collect()
+    }
+
+    #[test]
+    fn combine_panel_drops_on_majority_keeps_on_minority() {
+        // index 0: 2 of 3 drop → dropped. index 1: 1 of 3 drop → kept.
+        let findings = vec![f("a"), f("b")];
+        let lenses = vec![
+            lens(&[(0, true), (1, false)]),
+            lens(&[(0, true), (1, true)]),
+            lens(&[(0, false), (1, false)]),
+        ];
+        let (kept, dropped) = combine_panel(findings, &lenses, &HashMap::new());
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].finding.title, "a");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].title, "b");
+    }
+
+    #[test]
+    fn combine_panel_corroborated_finding_needs_unanimous_drop() {
+        use crate::orchestrator::dedup::fingerprint;
+        let corro_finding = f("corroborated");
+        let solo_finding = f("solo");
+        let mut corroboration = HashMap::new();
+        corroboration.insert(fingerprint(&corro_finding), 3);
+        // Both findings get a 2-of-3 drop vote.
+        let lenses = vec![
+            lens(&[(0, true), (1, true)]),
+            lens(&[(0, true), (1, true)]),
+            lens(&[(0, false), (1, false)]),
+        ];
+        let (kept, dropped) =
+            combine_panel(vec![corro_finding, solo_finding], &lenses, &corroboration);
+        // The corroborated one survives (needs 3/3); the solo one is dropped (2/3).
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].title, "corroborated");
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].finding.title, "solo");
+    }
+
+    #[test]
+    fn combine_panel_corroborated_dropped_only_when_all_agree() {
+        use crate::orchestrator::dedup::fingerprint;
+        let finding = f("corroborated");
+        let mut corroboration = HashMap::new();
+        corroboration.insert(fingerprint(&finding), 2);
+        let lenses = vec![lens(&[(0, true)]), lens(&[(0, true)]), lens(&[(0, true)])];
+        let (kept, dropped) = combine_panel(vec![finding], &lenses, &corroboration);
+        assert!(kept.is_empty());
+        assert_eq!(dropped.len(), 1);
+    }
+
+    #[test]
+    fn combine_panel_single_lens_decides() {
+        // With only one answering lens, its verdict is the majority.
+        let lenses = vec![lens(&[(0, true), (1, false)])];
+        let (kept, dropped) = combine_panel(vec![f("a"), f("b")], &lenses, &HashMap::new());
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].finding.title, "a");
+        assert_eq!(kept.len(), 1);
+    }
+
+    #[test]
+    fn combine_panel_no_lenses_keeps_all() {
+        let (kept, dropped) = combine_panel(vec![f("a"), f("b")], &[], &HashMap::new());
+        assert_eq!(kept.len(), 2);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn combine_panel_concatenates_drop_reasons() {
+        let lenses = vec![
+            vec![verdict(0, "drop", Some("hallucinated symbol"))],
+            vec![verdict(0, "drop", Some("not reachable"))],
+            vec![verdict(0, "keep", None)],
+        ];
+        let (_, dropped) = combine_panel(vec![f("a")], &lenses, &HashMap::new());
+        assert_eq!(dropped.len(), 1);
+        assert!(dropped[0].reason.contains("hallucinated symbol"));
+        assert!(dropped[0].reason.contains("not reachable"));
+    }
+
+    #[tokio::test]
+    async fn verify_panel_drops_when_lenses_agree() {
+        // MockTriage returns the same verdicts for every lens, so all three
+        // agree — index 1 is unanimously dropped.
+        let provider: Arc<dyn ReviewProvider> = Arc::new(MockTriage(TriageOutcome {
+            verdicts: vec![verdict(0, "keep", None), verdict(1, "drop", Some("nope"))],
+            tokens: TokenUsage::default(),
+        }));
+        let result =
+            verify_findings_panel(&provider, "m", vec![f("a"), f("b")], &HashMap::new()).await;
+        assert_eq!(result.kept.len(), 1);
+        assert_eq!(result.kept[0].title, "a");
+        assert_eq!(result.dropped.len(), 1);
+        assert_eq!(result.dropped[0].finding.title, "b");
+    }
+
+    #[tokio::test]
+    async fn verify_panel_fails_open_when_all_lenses_error() {
+        let provider: Arc<dyn ReviewProvider> = Arc::new(FailingTriage);
+        let result =
+            verify_findings_panel(&provider, "m", vec![f("a"), f("b")], &HashMap::new()).await;
+        assert_eq!(result.kept.len(), 2);
+        assert!(result.dropped.is_empty());
+    }
+
+    #[tokio::test]
+    async fn verify_panel_passes_through_empty_input() {
+        let provider: Arc<dyn ReviewProvider> = Arc::new(FailingTriage);
+        let result = verify_findings_panel(&provider, "m", Vec::new(), &HashMap::new()).await;
+        assert!(result.kept.is_empty());
     }
 
     /// Mock provider that returns a canned triage outcome.
