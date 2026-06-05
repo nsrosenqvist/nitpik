@@ -32,6 +32,7 @@ Prefer to keep:
 - **Security issues**: anything the security reviewer raises with specific evidence — tilt toward keeping these even when uncertain.
 - **Correctness regressions**: broken backward compatibility, shadowed names, broken control flow.
 - **Findings citing real symbols**: when the finding's evidence references a symbol or line that actually appears in the diff, default to keep.
+- **Corroborated findings**: when a finding carries a `corroboration` field, two or more *independent* reviewer lenses raised the same issue separately. Independent agreement is strong evidence the issue is real — apply a heavy keep-bias and drop such a finding only when you can name a specific, concrete reason it is wrong (a shared misconception, not mere uncertainty).
 
 ## Output Format
 

@@ -280,8 +280,13 @@ impl ReviewOrchestrator {
             });
         }
 
-        // Deduplicate findings
-        let deduped = dedup::deduplicate(all_findings);
+        // Deduplicate findings, keeping the cross-lens corroboration
+        // count so the critic can weigh independently corroborated
+        // findings more heavily than lone-lens ones.
+        let dedup::DedupOutcome {
+            findings: deduped,
+            corroboration,
+        } = dedup::deduplicate_with_corroboration(all_findings);
 
         // Filter out findings outside diff boundaries (skip for path-based scans
         // where all file content is in scope)
@@ -297,7 +302,9 @@ impl ReviewOrchestrator {
             // The critic/verify pass is judgment-heavy, so it deliberately
             // runs on the primary review model (no per-task override).
             let critic_model = self.config.provider.resolved_model().to_string();
-            let outcome = verify::verify_findings(&self.provider, &critic_model, scoped).await;
+            let outcome =
+                verify::verify_findings(&self.provider, &critic_model, scoped, &corroboration)
+                    .await;
             if outcome.tokens.total() > 0 {
                 total_tokens += outcome.tokens;
                 *tokens_by_model.entry(critic_model).or_default() += outcome.tokens;

@@ -10,50 +10,160 @@
 //!    concatenation of title + message, giving a larger corpus that
 //!    naturally includes shared variable/function names.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::models::finding::Finding;
 
+/// Outcome of corroboration-aware deduplication.
+pub struct DedupOutcome {
+    /// The deduplicated findings, one representative per cluster.
+    pub findings: Vec<Finding>,
+    /// Map from each kept finding's [`fingerprint`] to the number of
+    /// **distinct reviewer agents** that independently raised it. A
+    /// value of 1 means a single lens flagged the issue; 2+ means
+    /// cross-lens corroboration. Downstream passes (the critic) use
+    /// this as a confidence signal: independently corroborated findings
+    /// are far less likely to be false positives.
+    pub corroboration: HashMap<String, u32>,
+}
+
+/// Stable identity for a deduplicated finding.
+///
+/// Built from file, line, and a normalized title — the fields that
+/// stay fixed once a cluster's representative has been chosen. Lets a
+/// finding be re-associated with its corroboration count after later
+/// passes reorder or filter the set (e.g. diff-scope filtering), without
+/// threading a parallel vector that drifts out of alignment.
+pub fn fingerprint(f: &Finding) -> String {
+    format!(
+        "{}|{}|{}",
+        f.file.to_lowercase(),
+        f.line,
+        f.title.to_lowercase()
+    )
+}
+
 /// Deduplicate findings that are about the same issue.
+///
+/// Thin wrapper over [`deduplicate_with_corroboration`] for callers that
+/// don't need the per-finding agreement count.
+pub fn deduplicate(findings: Vec<Finding>) -> Vec<Finding> {
+    deduplicate_with_corroboration(findings).findings
+}
+
+/// Deduplicate findings, preserving the cross-lens corroboration signal.
 ///
 /// Two findings are considered duplicates if they have the same file,
 /// overlapping line ranges, and at least one of the similarity signals
-/// fires (title overlap, shared code symbol, or combined text overlap).
+/// fires (shared evidence, title overlap, shared code symbol, or combined
+/// text overlap).
+///
+/// Unlike a naive "keep the first" collapse, merging a cluster:
+/// - **counts the distinct agents** that raised it (the corroboration
+///   signal — multiple independent lenses agreeing is strong evidence the
+///   issue is real),
+/// - **unions the evidence** from every member so the representative
+///   carries the strongest set of anchors (capped at
+///   [`Finding::MAX_EVIDENCE`]), and
+/// - **keeps the best representative** — highest severity, then most
+///   evidence, then the fullest message — rather than whichever happened
+///   to sort first.
 ///
 /// Uses a file-keyed index so each finding is only compared against
 /// other findings in the same file — O(n × k) where k is the per-file
 /// count, instead of O(n²) over the entire result set.
-pub fn deduplicate(mut findings: Vec<Finding>) -> Vec<Finding> {
+pub fn deduplicate_with_corroboration(mut findings: Vec<Finding>) -> DedupOutcome {
     if findings.len() <= 1 {
-        return findings;
+        let corroboration = findings.iter().map(|f| (fingerprint(f), 1)).collect();
+        return DedupOutcome {
+            findings,
+            corroboration,
+        };
     }
 
     // Sort by file, then line for consistent dedup
     findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
 
-    let mut result: Vec<Finding> = Vec::new();
-    // Index from file path → range of indices in `result` for that file
+    /// One merged group of duplicate findings.
+    struct Cluster {
+        /// Best-phrased finding seen so far (see [`rep_rank`]).
+        rep: Finding,
+        /// Distinct agent names that raised a finding in this cluster.
+        agents: BTreeSet<String>,
+        /// Union of every member's evidence (case-insensitive, ordered).
+        evidence: Vec<String>,
+    }
+
+    let mut clusters: Vec<Cluster> = Vec::new();
+    // Index from file path → cluster indices for that file.
     let mut file_index: HashMap<String, Vec<usize>> = HashMap::new();
 
     for finding in findings {
-        let is_dup = file_index.get(&finding.file).is_some_and(|indices| {
-            indices.iter().any(|&i| {
-                let existing = &result[i];
-                lines_overlap(existing, &finding) && content_similar(existing, &finding)
+        let hit = file_index.get(&finding.file).and_then(|indices| {
+            indices.iter().copied().find(|&i| {
+                let rep = &clusters[i].rep;
+                lines_overlap(rep, &finding) && content_similar(rep, &finding)
             })
         });
 
-        if !is_dup {
-            let idx = result.len();
-            file_index
-                .entry(finding.file.clone())
-                .or_default()
-                .push(idx);
-            result.push(finding);
+        match hit {
+            Some(i) => {
+                let cluster = &mut clusters[i];
+                cluster.agents.insert(finding.agent.clone());
+                merge_evidence(&mut cluster.evidence, &finding.evidence);
+                // Promote to the stronger representative phrasing. The
+                // merged agent set and evidence union are unaffected.
+                if rep_rank(&finding) > rep_rank(&cluster.rep) {
+                    cluster.rep = finding;
+                }
+            }
+            None => {
+                let idx = clusters.len();
+                file_index
+                    .entry(finding.file.clone())
+                    .or_default()
+                    .push(idx);
+                let mut agents = BTreeSet::new();
+                agents.insert(finding.agent.clone());
+                let evidence = finding.evidence.clone();
+                clusters.push(Cluster {
+                    rep: finding,
+                    agents,
+                    evidence,
+                });
+            }
         }
     }
 
-    result
+    let mut result = Vec::with_capacity(clusters.len());
+    let mut corroboration = HashMap::with_capacity(clusters.len());
+    for mut cluster in clusters {
+        cluster.evidence.truncate(Finding::MAX_EVIDENCE);
+        cluster.rep.evidence = cluster.evidence;
+        corroboration.insert(fingerprint(&cluster.rep), cluster.agents.len() as u32);
+        result.push(cluster.rep);
+    }
+
+    DedupOutcome {
+        findings: result,
+        corroboration,
+    }
+}
+
+/// Rank a finding as a cluster representative: more severe wins, then
+/// the one carrying more evidence, then the fuller message. Compared as
+/// a tuple so the ordering is total and stable.
+fn rep_rank(f: &Finding) -> (u8, usize, usize) {
+    (f.severity as u8, f.evidence.len(), f.message.len())
+}
+
+/// Append `extra` evidence entries not already present (case-insensitive).
+fn merge_evidence(into: &mut Vec<String>, extra: &[String]) {
+    for e in extra {
+        if !into.iter().any(|x| x.eq_ignore_ascii_case(e)) {
+            into.push(e.clone());
+        }
+    }
 }
 
 /// Check if two findings have overlapping line ranges.
@@ -441,6 +551,85 @@ mod tests {
         ];
         let result = deduplicate(findings);
         assert_eq!(result.len(), 1);
+    }
+
+    // ── Corroboration ───────────────────────────────────────────────
+
+    #[test]
+    fn corroboration_counts_distinct_agents() {
+        // Three reviewers flag the same issue (one twice); the cluster
+        // should record three distinct lenses, not four findings.
+        let findings = vec![
+            make_finding("a.rs", 10, "SQL injection vulnerability", "security"),
+            make_finding("a.rs", 10, "SQL injection vulnerability here", "backend"),
+            make_finding("a.rs", 10, "SQL injection vulnerability found", "architect"),
+            make_finding("a.rs", 10, "SQL injection vulnerability again", "security"),
+        ];
+        let out = deduplicate_with_corroboration(findings);
+        assert_eq!(out.findings.len(), 1);
+        let key = fingerprint(&out.findings[0]);
+        // security, backend, architect — security's duplicate is not double-counted.
+        assert_eq!(out.corroboration.get(&key), Some(&3));
+    }
+
+    #[test]
+    fn lone_finding_has_corroboration_of_one() {
+        let findings = vec![make_finding("a.rs", 1, "Solo issue", "backend")];
+        let out = deduplicate_with_corroboration(findings);
+        assert_eq!(
+            out.corroboration.get(&fingerprint(&out.findings[0])),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn merge_keeps_highest_severity_representative() {
+        // Same issue, two lenses — the error-severity phrasing must win
+        // over the warning-severity one regardless of arrival order.
+        let mut warn = make_finding("a.rs", 5, "Null deref in `parse`", "backend");
+        warn.severity = Severity::Warning;
+        let mut err = make_finding("a.rs", 5, "Null deref in `parse`", "security");
+        err.severity = Severity::Error;
+
+        let out = deduplicate_with_corroboration(vec![warn, err]);
+        assert_eq!(out.findings.len(), 1);
+        assert_eq!(out.findings[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn merge_unions_evidence_across_lenses() {
+        let a = make_finding_with_evidence(
+            "a.rs",
+            5,
+            "Race on session lock",
+            "backend",
+            vec!["acquire_lock"],
+        );
+        let b = make_finding_with_evidence(
+            "a.rs",
+            5,
+            "Race on session lock state",
+            "security",
+            vec!["acquire_lock", "session_mutex"],
+        );
+        let out = deduplicate_with_corroboration(vec![a, b]);
+        assert_eq!(out.findings.len(), 1);
+        let ev = &out.findings[0].evidence;
+        assert!(ev.iter().any(|e| e == "acquire_lock"));
+        assert!(ev.iter().any(|e| e == "session_mutex"));
+        // No duplicate of the shared anchor.
+        assert_eq!(ev.iter().filter(|e| *e == "acquire_lock").count(), 1);
+    }
+
+    #[test]
+    fn merged_evidence_is_capped() {
+        let a =
+            make_finding_with_evidence("a.rs", 5, "Issue", "backend", vec!["e1", "e2", "e3", "e4"]);
+        let b =
+            make_finding_with_evidence("a.rs", 5, "Issue here", "security", vec!["e5", "e6", "e7"]);
+        let out = deduplicate_with_corroboration(vec![a, b]);
+        assert_eq!(out.findings.len(), 1);
+        assert!(out.findings[0].evidence.len() <= Finding::MAX_EVIDENCE);
     }
 
     #[test]

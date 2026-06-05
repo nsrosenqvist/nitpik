@@ -10,6 +10,7 @@
 //! tools. The critic's verdict format intentionally mirrors
 //! [`TriageVerdict`] so we can reuse the parser path.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::models::TokenUsage;
@@ -42,10 +43,18 @@ pub struct DroppedFinding {
 ///
 /// `findings` is consumed; on success the returned `kept` vec is in
 /// the original order.
+///
+/// `corroboration` maps each finding's [`dedup::fingerprint`] to the
+/// number of distinct reviewer lenses that independently raised it (see
+/// [`crate::orchestrator::dedup::deduplicate_with_corroboration`]).
+/// Findings flagged by 2+ lenses are surfaced to the critic as
+/// corroborated so it can apply a stronger keep-bias to them. Pass an
+/// empty map to disable the signal.
 pub async fn verify_findings(
     provider: &Arc<dyn ReviewProvider>,
     model: &str,
     findings: Vec<Finding>,
+    corroboration: &HashMap<String, u32>,
 ) -> VerifyOutcome {
     if findings.is_empty() {
         return VerifyOutcome {
@@ -66,7 +75,7 @@ pub async fn verify_findings(
         }
     };
 
-    let user_prompt = build_critic_prompt(&findings);
+    let user_prompt = build_critic_prompt(&findings, corroboration);
 
     match crate::providers::response::retry_transient(crate::constants::MAX_AUX_RETRIES, || {
         provider.triage(model, &critic.system_prompt, &user_prompt)
@@ -89,11 +98,15 @@ pub async fn verify_findings(
 /// Build the critic's user prompt: a numbered list of findings, each
 /// rendered compactly so the model can scan the batch and produce
 /// per-index verdicts.
-fn build_critic_prompt(findings: &[Finding]) -> String {
+fn build_critic_prompt(findings: &[Finding], corroboration: &HashMap<String, u32>) -> String {
+    use crate::orchestrator::dedup::fingerprint;
     let mut s = String::with_capacity(findings.len() * 200);
     s.push_str(
         "You are reviewing the following candidate findings. Vote keep or drop on each one. \
-         Return one JSON object per finding, indexed exactly as listed below.\n\n",
+         Return one JSON object per finding, indexed exactly as listed below.\n\n\
+         A `corroboration` field, when present, means that many *independent* reviewer lenses \
+         raised this issue separately — strong evidence it is real. Apply a heavy keep-bias to \
+         corroborated findings; drop one only with a specific, concrete reason.\n\n",
     );
     for (i, f) in findings.iter().enumerate() {
         s.push_str(&format!(
@@ -115,6 +128,13 @@ fn build_critic_prompt(findings: &[Finding]) -> String {
         }
         if !f.evidence.is_empty() {
             s.push_str(&format!("- evidence: {}\n", f.evidence.join(", ")));
+        }
+        if let Some(&count) = corroboration.get(&fingerprint(f))
+            && count >= 2
+        {
+            s.push_str(&format!(
+                "- corroboration: independently flagged by {count} reviewers\n"
+            ));
         }
         s.push('\n');
     }
@@ -250,11 +270,29 @@ mod tests {
     #[test]
     fn build_prompt_includes_each_finding_with_index() {
         let findings = vec![f("first"), f("second")];
-        let p = build_critic_prompt(&findings);
+        let p = build_critic_prompt(&findings, &HashMap::new());
         assert!(p.contains("### Finding 0"));
         assert!(p.contains("### Finding 1"));
         assert!(p.contains("first"));
         assert!(p.contains("second"));
+    }
+
+    #[test]
+    fn build_prompt_surfaces_corroboration_only_when_two_or_more() {
+        use crate::orchestrator::dedup::fingerprint;
+        let solo = f("solo lens");
+        let agreed = f("two lenses agreed");
+        let mut corroboration = HashMap::new();
+        corroboration.insert(fingerprint(&solo), 1);
+        corroboration.insert(fingerprint(&agreed), 3);
+
+        let p = build_critic_prompt(&[solo, agreed], &corroboration);
+        // The 3-lens finding is surfaced as corroborated…
+        assert!(p.contains("independently flagged by 3 reviewers"));
+        // …but a single-lens finding gets no corroboration line.
+        assert!(!p.contains("flagged by 1 reviewers"));
+        // And the system-facing explanation of the field is present.
+        assert!(p.contains("independent"));
     }
 
     /// Mock provider that returns a canned triage outcome.
@@ -316,7 +354,13 @@ mod tests {
             verdicts: vec![verdict(0, "keep", None), verdict(1, "drop", Some("nope"))],
             tokens: TokenUsage::default(),
         }));
-        let result = verify_findings(&provider, "test-model", vec![f("a"), f("b")]).await;
+        let result = verify_findings(
+            &provider,
+            "test-model",
+            vec![f("a"), f("b")],
+            &HashMap::new(),
+        )
+        .await;
         assert_eq!(result.kept.len(), 1);
         assert_eq!(result.kept[0].title, "a");
         assert_eq!(result.dropped.len(), 1);
@@ -326,7 +370,13 @@ mod tests {
     #[tokio::test]
     async fn verify_findings_fails_open_on_provider_error() {
         let provider: Arc<dyn ReviewProvider> = Arc::new(FailingTriage);
-        let result = verify_findings(&provider, "test-model", vec![f("a"), f("b")]).await;
+        let result = verify_findings(
+            &provider,
+            "test-model",
+            vec![f("a"), f("b")],
+            &HashMap::new(),
+        )
+        .await;
         assert_eq!(result.kept.len(), 2);
         assert!(result.dropped.is_empty());
     }
@@ -334,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn verify_findings_passes_through_empty_input() {
         let provider: Arc<dyn ReviewProvider> = Arc::new(FailingTriage);
-        let result = verify_findings(&provider, "test-model", Vec::new()).await;
+        let result = verify_findings(&provider, "test-model", Vec::new(), &HashMap::new()).await;
         assert!(result.kept.is_empty());
         assert!(result.dropped.is_empty());
     }
