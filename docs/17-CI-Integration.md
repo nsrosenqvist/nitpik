@@ -43,7 +43,7 @@ jobs:
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
-      - uses: nsrosenqvist/nitpik@v1
+      - uses: nsrosenqvist/nitpik@v3
         with:
           profiles: security,performance
           fail_on: warning
@@ -197,6 +197,33 @@ code-review:
 - Upload it as a `codequality` artifact to see findings in the merge request Code Quality widget.
 - Set `XDG_CONFIG_HOME` to a path inside the project directory so the cache is preserved between runs.
 - `when: always` ensures the cache is saved even when `--fail-on` causes the job to exit non-zero. Without it, GitLab only saves the cache on success.
+
+### Inline merge-request review (`gitlab-mr-review`)
+
+Instead of the Code Quality widget, `--format gitlab-mr-review` posts a **real inline MR review** — a summary note plus a positioned discussion on each finding's line. Like `github-pr-review`, it is dedup-aware (a re-run only posts findings not already raised) and supports `--request-changes`.
+
+```yaml
+nitpik-review:
+  stage: test
+  image: ghcr.io/nsrosenqvist/nitpik:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - nitpik review
+        --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+        --format gitlab-mr-review
+  variables:
+    NITPIK_PROVIDER: anthropic
+    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+    NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
+    GITLAB_TOKEN: $GITLAB_TOKEN
+```
+
+**Key details:**
+- Runs in a **merge-request pipeline** — nitpik publishes when `CI_MERGE_REQUEST_IID` is set (provided automatically on MR pipelines).
+- Authenticates with a `GITLAB_TOKEN` (a project/personal access token with `api` scope) or the pipeline's `CI_JOB_TOKEN`. Add it as a **masked** CI/CD variable — never hardcode it.
+- Anchors comments using the MR's diff refs; comments that can't be anchored to a changed line are dropped rather than failing the run.
+- Choose this over `--format gitlab` when you want conversational inline review comments rather than the Code Quality widget.
 
 ## Bitbucket Pipelines
 

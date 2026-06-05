@@ -418,7 +418,7 @@ jobs:
         with:
           path: ~/.config/nitpik/cache
           key: nitpik-${{ github.repository }}
-      - uses: nsrosenqvist/nitpik@v1
+      - uses: nsrosenqvist/nitpik@v3
         with:
           profiles: security,performance
           fail_on: warning

@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: nsrosenqvist/nitpik@v1
+      - uses: nsrosenqvist/nitpik@v3
         env:
           NITPIK_PROVIDER: github
           # GITHUB_TOKEN is exported automatically by Actions; nitpik picks it up.
