@@ -91,23 +91,30 @@ A label's fields:
 4. Write `expected.json`. No code changes needed — the harness auto-discovers
    any directory containing `expected.json`.
 
-## Current baseline & known-hard cases
+## Current baseline & where the headroom is
 
-The committed baseline (`tests/fixtures/eval-baseline.json`) is intentionally
-**not** a perfect score — a corpus the reviewer aces every time can't detect
-improvement, only regression. The two recurring misses are kept as honest
-headroom, not bugs in the corpus:
+The committed baseline (`tests/fixtures/eval-baseline.json`) currently sits at
+**recall 100% (13/13), precision lower bound ~93%, negatives 7/7 clean**. Recall
+is maxed, so the corpus now detects recall *regression* rather than recall
+*improvement* — the live headroom is on the **precision lower bound**, driven by
+extra warning+ findings on positive fixtures (e.g. `path-traversal-tainted` also
+draws an unhandled-I/O finding). The remaining signal to watch:
 
-- **resource-leak** — the planted leak spans the `open()` acquisition and the
-  early-return that skips `close()`. The reviewer reliably *finds* it but tends
-  to anchor on the `open()` line, which can fall outside a single label's ±2
-  window. A signal about anchor placement, not recall.
-- **swallowed-exception** — a blanket `except Exception: return 0`. Borderline
-  by design: some reviewers treat broad-except-with-default as acceptable, so a
-  miss here reflects severity judgment rather than a clear bug.
+- **Precision lower bound** — every warning+ finding on an unlabeled line in a
+  positive fixture deducts from it. Drives the precision lever.
+- **Span/anchor placement** — `resource-leak` and `swallowed-exception` are
+  multi-line constructs; their labels carry an `end_line` span so a reviewer
+  anchoring anywhere in the construct (the `open()`/`try`, the early return, the
+  `except`) is credited. Tightening a span back to a point is how you'd
+  re-expose an anchor-placement miss.
+- **Verify-panel false-drops** — the perspective-diverse critic panel can in
+  principle cut a true-but-borderline finding; the lens prompts now say *drop
+  means wrong, not minor*, but watch `verify dropped` counts on positive cases.
 
-The `--ignored` runner prints each finding's `file:line [severity] title`, so a
-miss can be diagnosed (wrong anchor vs. truly absent) without re-running.
+Once recall headroom matters again, add harder positives rather than loosening
+existing labels. The `--ignored` runner prints each finding's
+`file:line [severity] title`, so a miss can be diagnosed (wrong anchor vs. truly
+absent) without re-running.
 
 ## Roadmap
 

@@ -34,6 +34,8 @@ Prefer to keep:
 - **Findings citing real symbols**: when the finding's evidence references a symbol or line that actually appears in the diff, default to keep.
 - **Corroborated findings**: when a finding carries a `corroboration` field, two or more *independent* reviewer lenses raised the same issue separately. Independent agreement is strong evidence the issue is real — apply a heavy keep-bias and drop such a finding only when you can name a specific, concrete reason it is wrong (a shared misconception, not mere uncertainty).
 
+**Drop means _wrong_, not _minor_.** A finding that is genuinely real but low-impact or borderline is still a keep — its severity already reflects how much it matters, and downgrading is not your job. Reserve `drop` for findings you can show are false: hallucinated, unsound, out of scope, or slop. "This is true but feels small/marginal" is never a reason to drop.
+
 ## Output Format
 
 Return a single JSON array with one entry per finding (keyed by index, 0-based). For each finding produce:

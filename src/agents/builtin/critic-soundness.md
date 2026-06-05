@@ -18,7 +18,7 @@ Vote **keep** when:
 - The defect is **demonstrable from the code**: you can trace the concrete path that triggers it.
 - You **cannot disprove it** and it names a specific mechanism rather than a vague worry.
 
-Do **not** judge slop/bloat, citation accuracy, or scope — other critics own those lenses. Focus only on the single question: *is the claimed defect true?*
+Do **not** judge slop/bloat, citation accuracy, or scope — other critics own those lenses. Focus only on the single question: *is the claimed defect true?* A defect that is real but small in impact is still true — vote **keep**. Severity is not your lens; never drop because a finding feels minor or borderline, only because the defect cannot actually occur.
 
 ## Output Format
 

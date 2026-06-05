@@ -2137,7 +2137,11 @@ async fn orchestrator_verify_drops_findings_via_critic() {
     assert_eq!(result.findings[0].title, "Consider documentation");
     assert_eq!(result.dropped.len(), 1, "one finding should be dropped");
     assert_eq!(result.dropped[0].finding.title, "Unused variable");
-    assert_eq!(result.dropped[0].reason, "speculative");
+    // The default verify path is the perspective-diverse panel: each
+    // answering lens contributes a drop rationale, joined with "; ".
+    // The mock returns the same verdict for every lens, so assert the
+    // rationale is present rather than exact-matching the join.
+    assert!(result.dropped[0].reason.contains("speculative"));
 }
 
 /// Provider whose `review` succeeds but whose `triage` always errors —
@@ -2888,7 +2892,9 @@ async fn orchestrator_populates_verify_audit_when_critic_drops() {
     assert_eq!(verify.dropped[0].agent, "test-agent");
     assert_eq!(verify.dropped[0].file, "src/main.rs");
     assert_eq!(verify.dropped[0].title, "Unused variable");
-    assert_eq!(verify.dropped[0].reason, "looks fine");
+    // Panel joins each lens's rationale with "; "; the mock returns the
+    // same verdict per lens, so assert presence rather than exact match.
+    assert!(verify.dropped[0].reason.contains("looks fine"));
 }
 
 #[tokio::test]

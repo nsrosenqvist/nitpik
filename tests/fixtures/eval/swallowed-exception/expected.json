@@ -5,10 +5,11 @@
   "expected": [
     {
       "file": "load.py",
-      "line": 5,
+      "line": 2,
+      "end_line": 6,
       "min_severity": "warning",
-      "keywords": ["except", "exception", "swallow", "silent", "broad", "mask", "catch-all", "bare"],
-      "note": "must flag the overly broad exception swallow itself, not an unrelated co-located finding"
+      "keywords": ["except", "exception", "swallow", "silent", "suppress", "broad", "mask", "catch-all", "bare", "default", "sentinel"],
+      "note": "the defect is the whole try/except construct (lines 2-6): a broad catch returning a silent default. A reviewer may anchor on the `try` (line 2), the `except` (line 5), or the `return 0` (line 6) — all are the same finding. Keywords guard against crediting an unrelated co-located finding."
     }
   ]
 }
