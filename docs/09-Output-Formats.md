@@ -1,6 +1,6 @@
 # Output Formats
 
-nitpik supports nine output formats for different environments — from styled terminal output for local development to structured formats and real PR/MR reviews for CI platforms.
+nitpik supports ten output formats for different environments — from styled terminal output for local development to structured formats and real PR/MR reviews for CI platforms.
 
 ---
 
@@ -15,6 +15,7 @@ nitpik supports nine output formats for different environments — from styled t
 | GitLab Code Quality | `gitlab` | GitLab CI merge request widgets |
 | GitLab MR review | `gitlab-mr-review` | Real inline merge-request review on GitLab |
 | Bitbucket Code Insights | `bitbucket` | Bitbucket Pipelines |
+| Bitbucket PR review | `bitbucket-pr-review` | Real inline pull-request review on Bitbucket |
 | Checkstyle XML | `checkstyle` | Any CI platform with checkstyle support |
 | Forgejo/Gitea PR review | `forgejo` | Woodpecker CI, Forgejo, Gitea |
 
@@ -73,6 +74,16 @@ nitpik review --diff-base main --format bitbucket
 Posts findings as [Code Insights annotations](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-reports/) via the Bitbucket API. Inside Bitbucket Pipelines, authentication is handled automatically through the built-in proxy — no token required. Outside Pipelines, set the `BITBUCKET_TOKEN` environment variable with `pullrequest` and `repository:write` scopes.
 
 See [CI/CD Integration — Bitbucket](17-CI-Integration#bitbucket-pipelines) for pipeline config.
+
+## Bitbucket PR Review
+
+```bash
+nitpik review --diff-base origin/main --format bitbucket-pr-review
+```
+
+Posts a **real inline pull-request review** — a summary comment plus a comment on each finding's line — instead of commit-level Code Insights annotations. Like `github-pr-review`, it is dedup-aware (a re-run only posts findings not already raised) and supports `--request-changes`.
+
+Runs on a **PR-triggered pipeline** (`BITBUCKET_PR_ID` set) and authenticates with a `BITBUCKET_TOKEN` access token that has pull-request write scope (the in-Pipelines proxy used by `bitbucket` Code Insights does not cover PR comments). Choose this over `bitbucket` when you want conversational inline review comments rather than the Code Insights panel.
 
 ## Checkstyle XML
 

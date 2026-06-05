@@ -30,6 +30,7 @@
 //! exercised by two real backends from the start, but it is **not yet
 //! advertised** pending live testing — see `plans/pr-native-review/`.
 
+pub mod bitbucket;
 pub mod forgejo;
 pub mod github;
 pub mod gitlab;
@@ -200,6 +201,9 @@ pub fn detect(env: &Env) -> Option<Box<dyn Forge>> {
         return Some(Box::new(f));
     }
     if let Ok(f) = forgejo::ForgejoForge::from_env(env) {
+        return Some(Box::new(f));
+    }
+    if let Ok(f) = bitbucket::BitbucketForge::from_env(env) {
         return Some(Box::new(f));
     }
     None

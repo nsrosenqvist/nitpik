@@ -7,6 +7,7 @@
 //! has no knowledge of LLM providers, diffs, or orchestration.
 
 pub mod bitbucket;
+pub mod bitbucket_pr_review;
 pub mod checkstyle;
 pub mod escape;
 pub mod forgejo;

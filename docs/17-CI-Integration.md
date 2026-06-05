@@ -259,6 +259,34 @@ pipelines:
 
 > **Note:** Inside Bitbucket Pipelines, nitpik uses the built-in authentication proxy at `localhost:29418` to post Code Insights — no `BITBUCKET_TOKEN` needed. If you run nitpik outside Pipelines (e.g. a self-hosted runner), set `BITBUCKET_TOKEN` with `pullrequest` and `repository:write` scopes.
 
+### Inline pull-request review (`bitbucket-pr-review`)
+
+Instead of the Code Insights panel, `--format bitbucket-pr-review` posts a **real inline PR review** — a summary comment plus a comment on each finding's line. Like `github-pr-review`, it is dedup-aware and supports `--request-changes`.
+
+```yaml
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          image: ghcr.io/nsrosenqvist/nitpik:latest
+          script:
+            - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
+            - nitpik review
+                --diff-base "origin/$BITBUCKET_PR_DESTINATION_BRANCH"
+                --format bitbucket-pr-review
+          variables:
+            NITPIK_PROVIDER: anthropic
+            ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+            NITPIK_LICENSE_KEY: $NITPIK_LICENSE_KEY
+            BITBUCKET_TOKEN: $BITBUCKET_TOKEN
+```
+
+**Key details:**
+- Runs on a **pull-request pipeline** — nitpik publishes when `BITBUCKET_PR_ID` is set (provided automatically on `pull-requests` pipelines).
+- Requires a `BITBUCKET_TOKEN` access token with pull-request write scope. Unlike Code Insights, PR comments are **not** covered by the in-Pipelines proxy, so the token is required even inside Pipelines. Add it as a **secured** pipeline variable.
+- Anchors each comment to the finding's new-file line; a range collapses to its last line.
+- Choose this over `--format bitbucket` when you want conversational inline review comments rather than the Code Insights panel.
+
 ### Alternative: Checkstyle Format
 
 If you prefer a file-based approach without any API calls, use `--format checkstyle` and pipe the output to the [Checkstyle Code Insight Report pipe](https://bitbucket.org/product/features/pipelines/integrations?search=checkstyle):

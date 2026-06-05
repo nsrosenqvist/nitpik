@@ -425,6 +425,11 @@ pub enum OutputFormat {
     /// artifact.
     GitlabMrReview,
     Bitbucket,
+    /// Post a real PR review with inline comments via the Bitbucket Cloud API
+    /// (`--format bitbucket-pr-review`). Uses `BITBUCKET_TOKEN` on a
+    /// PR-triggered pipeline. Dedup-aware, unlike the `bitbucket` Code
+    /// Insights annotations.
+    BitbucketPrReview,
     Checkstyle,
     Forgejo,
 }
@@ -438,7 +443,7 @@ impl OutputFormat {
             OutputFormat::Github | OutputFormat::GithubPrReview => Some("github"),
             OutputFormat::Gitlab | OutputFormat::GitlabMrReview => Some("gitlab"),
             OutputFormat::Forgejo => Some("forgejo"),
-            OutputFormat::Bitbucket => Some("bitbucket"),
+            OutputFormat::Bitbucket | OutputFormat::BitbucketPrReview => Some("bitbucket"),
             OutputFormat::Terminal | OutputFormat::Json | OutputFormat::Checkstyle => None,
         }
     }
@@ -459,6 +464,9 @@ impl OutputFormat {
             OutputFormat::Bitbucket => {
                 nitpik::output::bitbucket::BitbucketFormatter.format(findings)
             }
+            OutputFormat::BitbucketPrReview => {
+                nitpik::output::bitbucket_pr_review::BitbucketPrReviewFormatter.format(findings)
+            }
             OutputFormat::Checkstyle => {
                 nitpik::output::checkstyle::CheckstyleFormatter.format(findings)
             }
@@ -474,6 +482,8 @@ impl OutputFormat {
     /// `review_event` (comment vs. changes-requested).
     /// GitLab MR review publishes when `CI_MERGE_REQUEST_IID` is set (a
     /// merge-request pipeline), posting with `review_event`.
+    /// Bitbucket PR review publishes when `BITBUCKET_PR_ID` is set (a
+    /// PR-triggered pipeline), posting with `review_event`.
     /// Other formats are no-ops.
     pub async fn publish(
         &self,
@@ -497,6 +507,15 @@ impl OutputFormat {
             }
             OutputFormat::GitlabMrReview if env.is_set("CI_MERGE_REQUEST_IID") => {
                 nitpik::output::gitlab_mr_review::GitlabMrReviewPublisher::new(
+                    env,
+                    review_event,
+                    force_review,
+                )
+                .publish(findings)
+                .await
+            }
+            OutputFormat::BitbucketPrReview if env.is_set("BITBUCKET_PR_ID") => {
+                nitpik::output::bitbucket_pr_review::BitbucketPrReviewPublisher::new(
                     env,
                     review_event,
                     force_review,
