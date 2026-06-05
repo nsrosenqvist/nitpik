@@ -22,6 +22,8 @@
 //! CI environment variables (`CI_API_V4_URL`/`CI_SERVER_URL`, `CI_PROJECT_ID`,
 //! `CI_MERGE_REQUEST_IID`, and `GITLAB_TOKEN` or `CI_JOB_TOKEN`).
 
+use std::collections::HashMap;
+
 use crate::env::Env;
 use crate::forge::{self, ReviewEvent, gitlab::GitlabForge};
 use crate::models::finding::Finding;
@@ -62,6 +64,7 @@ pub struct GitlabMrReviewPublisher<'a> {
     env: &'a Env,
     event: ReviewEvent,
     force: bool,
+    corroboration: HashMap<String, u32>,
 }
 
 impl<'a> GitlabMrReviewPublisher<'a> {
@@ -70,7 +73,20 @@ impl<'a> GitlabMrReviewPublisher<'a> {
     /// prior run already covered the MR (bypasses the quiet-on-re-run gate),
     /// for an explicit re-trigger.
     pub fn new(env: &'a Env, event: ReviewEvent, force: bool) -> Self {
-        Self { env, event, force }
+        Self {
+            env,
+            event,
+            force,
+            corroboration: HashMap::new(),
+        }
+    }
+
+    /// Attach a cross-lens corroboration map (keyed by
+    /// [`forge::fingerprint`]) so findings 2+ independent lenses raised are
+    /// badged in the posted review.
+    pub fn with_corroboration(mut self, corroboration: HashMap<String, u32>) -> Self {
+        self.corroboration = corroboration;
+        self
     }
 }
 
@@ -80,7 +96,14 @@ impl OutputPublisher for GitlabMrReviewPublisher<'_> {
         findings: &[Finding],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let forge = GitlabForge::from_env(self.env)?;
-        forge::publish_review(&forge, findings, self.event, self.force).await?;
+        forge::publish_review_with_corroboration(
+            &forge,
+            findings,
+            self.event,
+            self.force,
+            &self.corroboration,
+        )
+        .await?;
         Ok(())
     }
 }

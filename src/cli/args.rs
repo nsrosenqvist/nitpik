@@ -492,6 +492,7 @@ impl OutputFormat {
         review_event: nitpik::forge::ReviewEvent,
         force_review: bool,
         env: &nitpik::env::Env,
+        corroboration: &std::collections::HashMap<String, u32>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use nitpik::output::OutputPublisher;
         match self {
@@ -511,6 +512,7 @@ impl OutputFormat {
                     review_event,
                     force_review,
                 )
+                .with_corroboration(forge_corroboration_map(findings, corroboration))
                 .publish(findings)
                 .await
             }
@@ -520,6 +522,7 @@ impl OutputFormat {
                     review_event,
                     force_review,
                 )
+                .with_corroboration(forge_corroboration_map(findings, corroboration))
                 .publish(findings)
                 .await
             }
@@ -529,12 +532,34 @@ impl OutputFormat {
                     review_event,
                     force_review,
                 )
+                .with_corroboration(forge_corroboration_map(findings, corroboration))
                 .publish(findings)
                 .await
             }
             _ => Ok(()),
         }
     }
+}
+
+/// Re-key a corroboration map from the orchestrator's dedup fingerprint
+/// space to the forge fingerprint space the PR-review renderers look up by.
+///
+/// The orchestrator counts corroboration keyed by
+/// [`nitpik::orchestrator::dedup::fingerprint`] (`file|line|title`); the
+/// forge comment renderer keys by [`nitpik::forge::fingerprint`]
+/// (`file|title|evidence`, hashed). Bridging the two here — at the app
+/// boundary — keeps neither layer dependent on the other's scheme.
+fn forge_corroboration_map(
+    findings: &[nitpik::models::finding::Finding],
+    corroboration: &std::collections::HashMap<String, u32>,
+) -> std::collections::HashMap<String, u32> {
+    let mut out = std::collections::HashMap::new();
+    for f in findings {
+        if let Some(&count) = corroboration.get(&nitpik::orchestrator::dedup::fingerprint(f)) {
+            out.insert(nitpik::forge::fingerprint(f), count);
+        }
+    }
+    out
 }
 
 impl ReviewArgs {

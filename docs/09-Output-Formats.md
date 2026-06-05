@@ -113,6 +113,16 @@ Posts findings as inline PR review comments via the Forgejo/Gitea API. Requires 
 
 See [CI/CD Integration — Woodpecker/Forgejo](17-CI-Integration#woodpecker-ci-forgejo--gitea--codeberg) for token setup and pipeline config.
 
+## Cross-Lens Corroboration
+
+The PR-native review formats (`github-pr-review`, `gitlab-mr-review`, `bitbucket-pr-review`) badge findings that **multiple independent reviewer lenses raised separately**. When two or more reviewers (e.g. the correctness and security lenses) flag the same issue, nitpik collapses them into one comment and appends a note to the attribution line:
+
+```
+_— agent: security · corroborated by 3 independent reviewers_
+```
+
+The review summary also counts them (e.g. "2 corroborated by multiple reviewers"). Independent agreement is a strong signal a finding is real, so corroborated findings are worth prioritizing. Findings a single lens raised carry no badge — they are the normal case, not a weaker one.
+
 ## Failing on Findings
 
 By default, nitpik exits with a non-zero status code when any finding has severity `error` — matching the behavior of standard testing and linting tools like PHPUnit, Vitest, and ESLint.

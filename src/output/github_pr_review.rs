@@ -14,6 +14,8 @@
 //! See [`crate::forge`] for the neutral data model and the required
 //! environment variables.
 
+use std::collections::HashMap;
+
 use crate::env::Env;
 use crate::forge::{self, ReviewEvent, github::GithubForge};
 use crate::models::finding::Finding;
@@ -38,6 +40,7 @@ pub struct GithubPrReviewPublisher<'a> {
     env: &'a Env,
     event: ReviewEvent,
     force: bool,
+    corroboration: HashMap<String, u32>,
 }
 
 impl<'a> GithubPrReviewPublisher<'a> {
@@ -46,7 +49,20 @@ impl<'a> GithubPrReviewPublisher<'a> {
     /// when a prior run already covered the PR (bypasses the quiet-on-re-run
     /// gate), for an explicit `@nitpik review` re-trigger.
     pub fn new(env: &'a Env, event: ReviewEvent, force: bool) -> Self {
-        Self { env, event, force }
+        Self {
+            env,
+            event,
+            force,
+            corroboration: HashMap::new(),
+        }
+    }
+
+    /// Attach a cross-lens corroboration map (keyed by
+    /// [`forge::fingerprint`]) so findings 2+ independent lenses raised are
+    /// badged in the posted review.
+    pub fn with_corroboration(mut self, corroboration: HashMap<String, u32>) -> Self {
+        self.corroboration = corroboration;
+        self
     }
 }
 
@@ -56,7 +72,14 @@ impl OutputPublisher for GithubPrReviewPublisher<'_> {
         findings: &[Finding],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let forge = GithubForge::from_env(self.env)?;
-        forge::publish_review(&forge, findings, self.event, self.force).await?;
+        forge::publish_review_with_corroboration(
+            &forge,
+            findings,
+            self.event,
+            self.force,
+            &self.corroboration,
+        )
+        .await?;
         Ok(())
     }
 }

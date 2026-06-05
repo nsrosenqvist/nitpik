@@ -711,6 +711,7 @@ async fn run_review(args: cli::args::ReviewArgs, no_telemetry: bool) -> Result<(
         fail_on_severity,
         args.request_changes,
         args.force_review,
+        &output.result.corroboration,
     )
     .await;
 
@@ -925,6 +926,7 @@ async fn render_and_output(
     fail_on: Option<Severity>,
     request_changes: Option<Severity>,
     force_review: bool,
+    corroboration: &std::collections::HashMap<String, u32>,
 ) {
     use std::io::Write;
 
@@ -944,7 +946,14 @@ async fn render_and_output(
 
     // Publish to external APIs where applicable (Bitbucket, Forgejo, GitHub PR review)
     if let Err(e) = format
-        .publish(findings, fail_on, review_event, force_review, &env)
+        .publish(
+            findings,
+            fail_on,
+            review_event,
+            force_review,
+            &env,
+            corroboration,
+        )
         .await
     {
         eprintln!("Warning: failed to publish findings: {e}");

@@ -35,7 +35,7 @@ pub mod forgejo;
 pub mod github;
 pub mod gitlab;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -230,6 +230,23 @@ pub async fn publish_review(
     event: ReviewEvent,
     force: bool,
 ) -> Result<bool, ForgeError> {
+    publish_review_with_corroboration(forge, findings, event, force, &HashMap::new()).await
+}
+
+/// Like [`publish_review`], but annotates each finding multiple
+/// independent reviewer lenses raised with a cross-lens corroboration
+/// badge (see [`crate::orchestrator::dedup::deduplicate_with_corroboration`]).
+///
+/// `corroboration` maps each finding's [`fingerprint`] to the number of
+/// distinct lenses that flagged it; entries below 2 (or absent) render no
+/// badge. Pass an empty map to behave exactly like [`publish_review`].
+pub async fn publish_review_with_corroboration(
+    forge: &dyn Forge,
+    findings: &[Finding],
+    event: ReviewEvent,
+    force: bool,
+    corroboration: &HashMap<String, u32>,
+) -> Result<bool, ForgeError> {
     let existing = forge.existing_review_comments().await.unwrap_or_default();
     let markers = extract_markers(existing.iter().map(|c| c.body.as_str()));
     let had_prior = !markers.is_empty();
@@ -245,7 +262,8 @@ pub async fn publish_review(
             "\n\n_({skipped} finding(s) already reported in earlier reviews.)_"
         ));
     }
-    let draft = build_review_draft(findings, &fresh, &footer, event);
+    let draft =
+        build_review_draft_with_corroboration(findings, &fresh, &footer, event, corroboration);
     forge.post_review(&draft).await?;
     Ok(true)
 }
@@ -277,27 +295,66 @@ pub fn build_review_draft(
     footer: &str,
     event: ReviewEvent,
 ) -> ReviewDraft {
-    ReviewDraft {
-        summary: review_body(summary_findings, footer),
+    build_review_draft_with_corroboration(
+        summary_findings,
+        comment_findings,
+        footer,
         event,
-        comments: comment_findings.iter().map(inline_comment).collect(),
+        &HashMap::new(),
+    )
+}
+
+/// Like [`build_review_draft`], but threads a cross-lens corroboration
+/// map (keyed by [`fingerprint`]) so the summary and each inline comment
+/// can note when 2+ independent reviewer lenses raised the same issue.
+pub fn build_review_draft_with_corroboration(
+    summary_findings: &[Finding],
+    comment_findings: &[Finding],
+    footer: &str,
+    event: ReviewEvent,
+    corroboration: &HashMap<String, u32>,
+) -> ReviewDraft {
+    ReviewDraft {
+        summary: review_body_with_corroboration(summary_findings, footer, corroboration),
+        event,
+        comments: comment_findings
+            .iter()
+            .map(|f| inline_comment(f, corroboration))
+            .collect(),
     }
 }
 
+/// True when `corroboration` records 2+ independent lenses for `f`.
+fn corroborated(f: &Finding, corroboration: &HashMap<String, u32>) -> Option<u32> {
+    corroboration
+        .get(&fingerprint(f))
+        .copied()
+        .filter(|&n| n >= 2)
+}
+
 /// Map one finding to a neutral inline comment on the new-file side.
-fn inline_comment(f: &Finding) -> InlineComment {
+fn inline_comment(f: &Finding, corroboration: &HashMap<String, u32>) -> InlineComment {
     InlineComment {
         path: f.file.clone(),
         line: f.line,
         end_line: f.end_line.filter(|&e| e > f.line),
         side: Side::Right,
-        body: format_comment_body(f),
+        body: format_comment_body_with_corroboration(f, corroboration),
     }
 }
 
 /// Format a single finding as a Markdown inline-comment body, ending with
 /// the hidden dedup marker.
 pub fn format_comment_body(f: &Finding) -> String {
+    format_comment_body_with_corroboration(f, &HashMap::new())
+}
+
+/// Like [`format_comment_body`], but appends a cross-lens corroboration
+/// note to the attribution line when 2+ independent lenses flagged `f`.
+pub fn format_comment_body_with_corroboration(
+    f: &Finding,
+    corroboration: &HashMap<String, u32>,
+) -> String {
     let mut body = format!(
         "{} **{}** ({})\n\n{}",
         f.severity.emoji(),
@@ -308,16 +365,41 @@ pub fn format_comment_body(f: &Finding) -> String {
     if let Some(ref suggestion) = f.suggestion {
         body.push_str(&format!("\n\n**Suggestion:** {suggestion}"));
     }
-    body.push_str(&format!("\n\n_— agent: {}_", f.agent));
+    match corroborated(f, corroboration) {
+        Some(n) => body.push_str(&format!(
+            "\n\n_— agent: {} · corroborated by {n} independent reviewers_",
+            f.agent
+        )),
+        None => body.push_str(&format!("\n\n_— agent: {}_", f.agent)),
+    }
     body.push_str(&format!("\n\n{}", comment_marker(f)));
     body
 }
 
 /// Build the top-level review summary body. `footer` is appended verbatim.
 pub fn review_body(findings: &[Finding], footer: &str) -> String {
+    review_body_with_corroboration(findings, footer, &HashMap::new())
+}
+
+/// Like [`review_body`], but appends a count of findings corroborated by
+/// 2+ independent lenses when any exist.
+pub fn review_body_with_corroboration(
+    findings: &[Finding],
+    footer: &str,
+    corroboration: &HashMap<String, u32>,
+) -> String {
     let summary = crate::models::finding::Summary::from_findings(findings);
+    let corroborated_count = findings
+        .iter()
+        .filter(|f| corroborated(f, corroboration).is_some())
+        .count();
+    let corroboration_note = if corroborated_count > 0 {
+        format!(", {corroborated_count} corroborated by multiple reviewers")
+    } else {
+        String::new()
+    };
     format!(
-        "**{}** found {} {} ({} error{}, {} warning{}, {} info)\n\n_{}_{}",
+        "**{}** found {} {} ({} error{}, {} warning{}, {} info{})\n\n_{}_{}",
         crate::constants::APP_NAME,
         summary.total,
         if summary.total == 1 {
@@ -330,6 +412,7 @@ pub fn review_body(findings: &[Finding], footer: &str) -> String {
         summary.warnings,
         if summary.warnings == 1 { "" } else { "s" },
         summary.info,
+        corroboration_note,
         crate::constants::AI_DISCLOSURE,
         footer,
     )
@@ -483,7 +566,7 @@ mod tests {
     #[test]
     fn inline_comment_carries_range_and_marker() {
         let f = &sample_findings()[1];
-        let c = inline_comment(f);
+        let c = inline_comment(f, &HashMap::new());
         assert_eq!(c.line, 20);
         assert_eq!(c.end_line, Some(24));
         assert_eq!(c.side, Side::Right);
@@ -492,9 +575,75 @@ mod tests {
 
     #[test]
     fn single_line_finding_has_no_range() {
-        let c = inline_comment(&sample_findings()[0]);
+        let c = inline_comment(&sample_findings()[0], &HashMap::new());
         assert_eq!(c.line, 10);
         assert_eq!(c.end_line, None);
+    }
+
+    #[test]
+    fn corroborated_finding_is_badged_in_comment_and_summary() {
+        let all = sample_findings();
+        // Mark the first finding as flagged by 3 independent lenses.
+        let mut corroboration = HashMap::new();
+        corroboration.insert(fingerprint(&all[0]), 3);
+
+        let draft = build_review_draft_with_corroboration(
+            &all,
+            &all,
+            "",
+            ReviewEvent::Comment,
+            &corroboration,
+        );
+
+        // The corroborated finding's inline comment carries the badge…
+        let badged = draft
+            .comments
+            .iter()
+            .find(|c| c.path == all[0].file)
+            .unwrap();
+        assert!(
+            badged
+                .body
+                .contains("corroborated by 3 independent reviewers"),
+            "got: {}",
+            badged.body
+        );
+        // …the uncorroborated one does not.
+        let plain = draft
+            .comments
+            .iter()
+            .find(|c| c.path == all[1].file)
+            .unwrap();
+        assert!(!plain.body.contains("corroborated by"));
+
+        // And the summary counts the corroborated finding.
+        assert!(
+            draft
+                .summary
+                .contains("1 corroborated by multiple reviewers"),
+            "got: {}",
+            draft.summary
+        );
+    }
+
+    #[test]
+    fn single_lens_findings_get_no_badge_or_summary_note() {
+        let all = sample_findings();
+        // Counts of 1 must never badge ("never exactly 1").
+        let mut corroboration = HashMap::new();
+        corroboration.insert(fingerprint(&all[0]), 1);
+
+        let draft = build_review_draft_with_corroboration(
+            &all,
+            &all,
+            "",
+            ReviewEvent::Comment,
+            &corroboration,
+        );
+        assert!(!draft.summary.contains("corroborated"));
+        for c in &draft.comments {
+            assert!(!c.body.contains("corroborated"));
+        }
     }
 
     #[test]

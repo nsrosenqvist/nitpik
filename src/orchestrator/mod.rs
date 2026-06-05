@@ -14,7 +14,7 @@ pub mod prompt;
 pub mod scope;
 pub mod verify;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -89,6 +89,11 @@ pub struct ReviewResult {
     /// Critic verify-pass audit summary. `Some` only when both
     /// audit and verify were enabled.
     pub verify_audit: Option<VerifyAudit>,
+    /// Cross-lens corroboration: maps each finding's
+    /// [`dedup::fingerprint`] to the number of distinct reviewer lenses
+    /// that independently raised it. Used to badge corroborated findings
+    /// in PR-native review output.
+    pub corroboration: HashMap<String, u32>,
 }
 
 /// Orchestrates parallel review execution across agents and files.
@@ -340,6 +345,7 @@ impl ReviewOrchestrator {
                 Vec::new()
             },
             verify_audit,
+            corroboration,
         })
     }
 
