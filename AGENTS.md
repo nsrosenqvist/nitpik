@@ -113,6 +113,22 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 - **Test runner**: use [`cargo-nextest`](https://nexte.st/) instead of `cargo test`. It runs each test as a separate process and parallelises across all test binaries simultaneously, which is significantly faster. Install with `cargo install cargo-nextest --locked`, then run `cargo nextest run`. CI should use `cargo nextest run` as well.
 - **Slow tests**: the `security::rules::tests::default_rules_*` tests compile 219 gitleaks regexes (~3–5 s with rayon parallelization). They share a `LazyLock` within each binary so the cost is paid once per process, but they will always dominate wall-clock time.
 
+### Review-Quality Eval
+
+`tests/eval.rs` measures the reviewer's output quality against a labeled planted-bug corpus in `tests/fixtures/eval/` — recall (are real issues caught?), a precision lower bound (how many warning+ findings land on unlabeled lines?), and noise (does it stay quiet on clean negatives?). Run it whenever you change anything that affects review *quality*: `src/orchestrator/prompt.rs`, any built-in profile in `src/agents/builtin/` (reviewer or `critic*` lens), `dedup.rs`, `verify.rs`, or `scope.rs`. Validate against the committed baseline *before* committing the change.
+
+- The scoring core is unit-tested deterministically and runs under a normal `cargo nextest run`. The end-to-end scorecard makes **real LLM calls** and is `#[ignore]`d, so it never runs in CI.
+- Run it (compares to the committed baseline and prints a per-case scorecard + delta):
+
+  ```sh
+  ANTHROPIC_API_KEY=… NITPIK_EVAL_COMPARE=tests/fixtures/eval-baseline.json \
+    cargo test --test eval -- --ignored --nocapture
+  ```
+
+  Add `NITPIK_EVAL_STRICT=1` to make a regression fail the test; set `NITPIK_EVAL_BASELINE=<path>` to rewrite the baseline after a confirmed, intended improvement.
+- **Committed baseline** (`tests/fixtures/eval-baseline.json`, claude-sonnet-4-5, default engine + `--verify` panel): recall 100% (13/13), precision lower bound ~93%, negatives 7/7 clean. Each run is a single stochastic sample — one borderline case flipping moves recall ~8pp, so don't over-read a single run's delta on one case.
+- Corpus layout, label fields (`end_line` spans, `keywords` semantic guards), and how to add a case: `tests/fixtures/eval/README.md`.
+
 ### Documentation
 
 - Public items get `///` doc comments.
@@ -240,7 +256,7 @@ If rig-core supports it, add the provider name to config resolution in `src/conf
 
 The orchestrator supports several opt-in pipeline stages, all wired through CLI flags and threaded into `ReviewOrchestrator::new`:
 
-- **Verify / critic pass (`--verify`, `--show-dropped`)** — after dedup the orchestrator runs `orchestrator::verify::verify_findings`, which calls `ReviewProvider::triage` with the built-in `critic` profile (`src/agents/builtin/critic.md`). Dropped findings end up in `ReviewResult.dropped` and are printed by `main.rs` when `--show-dropped` is set. Fails open: provider errors keep every finding.
+- **Verify / critic pass (`--verify`, `--show-dropped`)** — after dedup the orchestrator runs `orchestrator::verify::verify_findings_panel`, a **perspective-diverse** critic panel: three independent lenses (`critic`, `critic-soundness`, `critic-grounding` in `src/agents/builtin/`) each vote keep/drop via `ReviewProvider::triage`, combined by majority vote — unanimity required to drop a cross-lens-corroborated finding. Each lens's drop rationale is joined into the dropped finding's `reason`. The single-critic `verify_findings` remains as a building block and graceful fallback when a lens profile can't load. Dropped findings end up in `ReviewResult.dropped` and are printed by `main.rs` when `--show-dropped` is set. Fails open at every level: a lens that errors abstains; if all error, every finding is kept.
 - **Hybrid auto-mode (`--auto-mode heuristic|llm|hybrid`)** — `main::select_auto_profiles` runs `agents::auto::auto_select_profiles_with_confidence` and only consults the LLM (built-in `triage` profile, `src/agents/builtin/triage.md`) when configured to. `parse_triage_profiles` filters verdicts to known profile names.
 - **Multi-wave (`--multi-wave`)** — the orchestrator partitions agents on `profile.wave` and runs wave 2 after wave 1 with a compact wave-1 summary spliced into each task's user prompt. Capped at 2 waves.
 - **Token usage** — every `ReviewOutcome.tokens` is aggregated into `ReviewResult.tokens` and split per resolved model in `tokens_by_model`. Suppress the per-run summary on terminal output with `--no-tokens`.
@@ -275,6 +291,7 @@ Follow these practices when working on this codebase as an AI coding agent.
 - Run the full test suite (`cargo nextest run`) and confirm all tests pass.
 - If you added new functionality, add tests for it.
 - If you changed a public API, update callers and tests accordingly.
+- If you touched review-quality code (`prompt.rs`, a built-in profile, `dedup.rs`, `verify.rs`, `scope.rs`), run the **Review-Quality Eval** against the baseline and confirm no regression before committing.
 - If you made architectural changes (new modules, new traits, changed module boundaries), update this file and `README.md`.
 - If you changed CLI flags or config options, update `README.md`.
 - Verify zero compiler warnings (`cargo build` should produce no `warning:` lines).
