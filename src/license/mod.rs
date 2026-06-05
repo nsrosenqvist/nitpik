@@ -40,13 +40,6 @@ struct TrustedKey {
     bytes: [u8; 32],
 }
 
-/// Ed25519 public keys the CLI trusts. The matching seed is held only
-/// in the nitpik.dev Worker as `ENTITLEMENT_SIGNING_SEED`. Add a new
-/// entry before deploying a server-side rotation.
-///
-/// To replace this with a production key, run
-/// `node scripts/derive-public-key.mjs --generate` in the nitpik-web
-/// repo and paste the resulting 32-byte raw key bytes here.
 /// Issuer claim the CLI requires on every entitlement JWT. A token
 /// signed by a trusted key but issued by some other service is rejected.
 const EXPECTED_ISS: &str = "https://nitpik.dev";
@@ -67,6 +60,26 @@ const EXPECTED_ISS: &str = "https://nitpik.dev";
 /// should use an offline token, which is the purpose-built mechanism.
 const OFFLINE_GRACE_SECONDS: i64 = 7 * 24 * 60 * 60;
 
+// Production trusted key — the public half of the nitpik.dev Worker's
+// `ENTITLEMENT_SIGNING_SEED`. The seed is held only as a `wrangler secret`;
+// rotating it means adding a new entry here under a new `kid` and bumping
+// `ENTITLEMENT_KID` in the Worker. Generated with
+// `node scripts/derive-public-key.mjs --generate` (nitpik-web).
+#[cfg(not(test))]
+const TRUSTED_KEYS: &[TrustedKey] = &[TrustedKey {
+    kid: "ed25519-2026-01",
+    bytes: [
+        0xa2, 0x6c, 0xad, 0xbb, 0xb2, 0x28, 0xcb, 0x75, 0x15, 0x9b, 0x4e,
+        0x3d, 0xda, 0x2c, 0x70, 0x3b, 0xc5, 0x3b, 0xac, 0x75, 0x4b, 0x61,
+        0xfe, 0xd3, 0x8e, 0xca, 0x0d, 0xa8, 0x48, 0x4f, 0xdd, 0x40,
+    ],
+}];
+
+// Test builds sign entitlements locally with the deterministic seed in
+// `signing_keypair()`, which the production key can't verify — so test builds
+// trust the matching test public key instead. Same `kid` so the lookup path
+// is exercised identically.
+#[cfg(test)]
 const TRUSTED_KEYS: &[TrustedKey] = &[TrustedKey {
     kid: "ed25519-2026-01",
     bytes: [
