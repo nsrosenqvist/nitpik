@@ -24,7 +24,7 @@ use crate::orchestrator::prompt::build_agentic_system_prompt;
 use crate::providers::response::{parse_findings_response, parse_verdicts_response};
 use crate::tools::budget::ToolBudget;
 use crate::tools::{
-    CustomCommandTool, GlobTool, ListDirectoryTool, ReadFileTool, ReadFilesTool,
+    CustomCommandTool, GitLogTool, GlobTool, ListDirectoryTool, ReadFileTool, ReadFilesTool,
     SUBMIT_FINDINGS_TOOL_NAME, SearchTextTool, SubmitFindingsTool,
 };
 
@@ -161,6 +161,7 @@ where
             Arc::new(SearchTextTool::new(cfg.repo_root.clone())),
             Arc::new(ListDirectoryTool::new(cfg.repo_root.clone())),
             Arc::new(GlobTool::new(cfg.repo_root.clone())),
+            Arc::new(GitLogTool::new(cfg.repo_root.clone())),
         ];
         for custom_tool in cfg.custom_tools {
             tools.push(Arc::new(custom_tool));

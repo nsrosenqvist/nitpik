@@ -488,7 +488,8 @@ fn build_agentic_context(
         "**Available tools:**\n\
          - `read_file` — read any file in the repository by relative path\n\
          - `search_text` — search for text patterns (literal or regex) across the codebase\n\
-         - `list_directory` — list directory contents (use `.` for the repo root)\n",
+         - `list_directory` — list directory contents (use `.` for the repo root)\n\
+         - `git_log` — show a file's recent commit history (does this change undo a past fix?)\n",
     );
 
     // Mention custom tools if the agent defines any
@@ -597,12 +598,15 @@ pub fn build_agentic_system_prompt(
          `src/**/handler*.rs` to discover files when you do not know their exact path.\n\
          5. **Understand the project layout** — use `list_directory` if you are unsure \
          where a file lives or what a module contains.\n\
-         6. **Verify before reporting** — do not flag an issue unless you have confirmed \
+         6. **Check a file's history** — use `git_log` to see the recent commits that \
+         touched a changed file. A change that reverts or re-introduces something a \
+         prior commit deliberately fixed is a real regression the diff alone won't reveal.\n\
+         7. **Verify before reporting** — do not flag an issue unless you have confirmed \
          it by reading the relevant code. False positives from guessing are worse \
          than a missed finding.\n"
     );
 
-    for (tool_number, tool) in (7..).zip(custom_tools.iter()) {
+    for (tool_number, tool) in (8..).zip(custom_tools.iter()) {
         prompt.push_str(&format!(
             "         {tool_number}. **Use `{}`** — {}\n",
             tool.name, tool.description
@@ -618,7 +622,8 @@ pub fn build_agentic_system_prompt(
          - Read a file: `read_file` with `{{\"path\": \"src/handler.rs\"}}`\n\
          - Read several files at once: `read_files` with `{{\"files\": [{{\"path\": \"src/a.rs\"}}, {{\"path\": \"src/b.rs\"}}]}}`\n\
          - Find files by pattern: `glob` with `{{\"pattern\": \"**/*.rs\"}}`\n\
-         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n",
+         - Search for usages: `search_text` with `{{\"pattern\": \"fn process_updates\"}}`\n\
+         - Inspect a file's history: `git_log` with `{{\"path\": \"src/handler.rs\"}}`\n",
     );
 
     for tool in custom_tools {
@@ -657,6 +662,10 @@ pub fn build_agentic_system_prompt(
          - **\"Symmetric\" obligations.** If the diff adds one half of a pair, search \
          for the other: a new acquire wants a release, a new migration wants a \
          rollback, a new error variant wants its handlers. Absence is the finding.\n\
+         - **Changes that contradict their own history.** When a diff weakens a check, \
+         removes a guard, or flips a value back, `git_log` the file: if a recent commit \
+         added that exact guard or value on purpose, this change likely re-introduces \
+         the bug it fixed. The commit subject is your evidence.\n\
          - **Stop when confirmed.** Once you've read enough to confirm or refute a \
          concern, stop searching and move on — don't spend the budget re-deriving \
          something you've already established.\n",
@@ -1223,6 +1232,7 @@ mod tests {
         assert!(enhanced.contains("search_text"));
         assert!(enhanced.contains("glob"));
         assert!(enhanced.contains("list_directory"));
+        assert!(enhanced.contains("git_log"));
         assert!(enhanced.contains("relative to the repository root"));
         assert!(enhanced.contains("proactively"));
     }

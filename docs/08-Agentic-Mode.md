@@ -33,7 +33,7 @@ Agentic reviews use more LLM tokens (each tool call is an additional turn) but p
 
 ## Built-in Tools
 
-Every agentic review has access to five built-in tools:
+Every agentic review has access to six built-in tools:
 
 ### `read_file`
 
@@ -54,6 +54,10 @@ Finds files by glob pattern (e.g. `**/*.rs`, `src/**/handler*.rs`). Gitignore-aw
 ### `list_directory`
 
 Lists the contents of a directory. The LLM uses this to understand module structure and navigate the codebase.
+
+### `git_log`
+
+Shows a file's recent commit history (followed across renames, newest first, up to 30 commits). The LLM uses this to judge a change against its past — catching when a diff reverts or re-introduces something a prior commit deliberately fixed, a regression the diff alone can't reveal. The diff shows *what* changed; `git_log` shows *why* the code is the way it is.
 
 ### `submit_findings`
 

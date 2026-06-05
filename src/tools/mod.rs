@@ -19,6 +19,7 @@
 pub mod budget;
 pub mod custom_command;
 pub mod format;
+pub mod git_log;
 pub mod glob;
 pub mod list_directory;
 pub mod memo;
@@ -29,6 +30,7 @@ pub mod submit_findings;
 
 // Re-export the rig Tool wrapper types
 pub use custom_command::CustomCommandTool;
+pub use git_log::GitLogTool;
 pub use glob::GlobTool;
 pub use list_directory::ListDirectoryTool;
 pub use read_file::ReadFileTool;

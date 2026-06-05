@@ -148,12 +148,12 @@ Profile authors are still trusted. Treat third-party agent profiles the same way
 
 ## Built-in Tool Safety
 
-The built-in agentic tools (`read_file`, `read_files`, `search_text`, `glob`, `list_directory`) run inside the nitpik process. They are read-only and constrained:
+The built-in agentic tools (`read_file`, `read_files`, `search_text`, `glob`, `list_directory`, `git_log`) are read-only and constrained:
 
-- **Path traversal protection.** All paths are sanitized (leading `/` stripped, `..` segments removed) and the canonical resolved path is checked to be inside the repo root. Symlinks pointing outside the repo are rejected.
-- **Size and budget caps.** Per-file reads are capped, and each task has an overall tool-call budget. The LLM cannot exhaust resources by reading a 10 GB log or making thousands of search calls.
+- **Path traversal protection.** All paths are sanitized (leading `/` stripped, `..` segments removed) and the canonical resolved path is checked to be inside the repo root. Symlinks pointing outside the repo are rejected. `git_log` rejects paths that escape the repo root before invoking `git`.
+- **Size and budget caps.** Per-file reads are capped, and each task has an overall tool-call budget. The LLM cannot exhaust resources by reading a 10 GB log or making thousands of search calls. `git_log` is capped at 30 commits per call.
 - **Gitignore-aware globbing.** `glob` respects `.gitignore`, `.git/info/exclude`, and global ignore files.
-- **No write access.** None of the built-in tools can modify files, run shell commands, or make network calls.
+- **No write access, no shell.** None of the built-in tools modify files or make network calls. All but `git_log` run entirely in-process. `git_log` runs the `git` binary as a child process for a read-only `git log`, with arguments passed directly (never through a shell) and the file path passed after `--`, so a hostile filename cannot inject arguments or commands.
 
 ---
 
