@@ -13,6 +13,7 @@ pub mod forgejo;
 pub mod github;
 pub mod github_pr_review;
 pub mod gitlab;
+pub mod gitlab_mr_review;
 pub mod json;
 pub mod terminal;
 

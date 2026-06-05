@@ -1,6 +1,6 @@
 # Output Formats
 
-nitpik supports seven output formats for different environments — from styled terminal output for local development to structured formats for CI platforms.
+nitpik supports nine output formats for different environments — from styled terminal output for local development to structured formats and real PR/MR reviews for CI platforms.
 
 ---
 
@@ -11,7 +11,9 @@ nitpik supports seven output formats for different environments — from styled 
 | Styled terminal | `terminal` | Local development (default) |
 | JSON | `json` | Custom tooling, dashboards, scripts |
 | GitHub annotations | `github` | GitHub Actions |
+| GitHub PR review | `github-pr-review` | Real inline PR review on GitHub |
 | GitLab Code Quality | `gitlab` | GitLab CI merge request widgets |
+| GitLab MR review | `gitlab-mr-review` | Real inline merge-request review on GitLab |
 | Bitbucket Code Insights | `bitbucket` | Bitbucket Pipelines |
 | Checkstyle XML | `checkstyle` | Any CI platform with checkstyle support |
 | Forgejo/Gitea PR review | `forgejo` | Woodpecker CI, Forgejo, Gitea |
@@ -51,6 +53,16 @@ nitpik review --diff-base main --format gitlab > gl-code-quality-report.json
 Outputs a [GitLab Code Quality report](https://docs.gitlab.com/ee/ci/testing/code_quality.html). Upload it as a CI artifact to see findings in the merge request Code Quality widget.
 
 See [CI/CD Integration — GitLab](17-CI-Integration#gitlab-cicd) for full pipeline setup.
+
+## GitLab MR Review
+
+```bash
+nitpik review --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --format gitlab-mr-review
+```
+
+Posts a **real inline merge-request review** — a summary note plus a positioned discussion on each finding's line — instead of a Code Quality artifact. Like `github-pr-review`, it is dedup-aware (a re-run only posts findings not already raised) and can request changes via `--request-changes`.
+
+Runs in a merge-request pipeline (`CI_MERGE_REQUEST_IID` set) and authenticates with `GITLAB_TOKEN` (a project/personal token with `api` scope) or the pipeline's `CI_JOB_TOKEN`. Choose this over `gitlab` when you want conversational inline review comments rather than the Code Quality widget.
 
 ## Bitbucket Code Insights
 

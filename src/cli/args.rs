@@ -419,6 +419,11 @@ pub enum OutputFormat {
     /// (`--format github-pr-review`). Uses the workflow's `GITHUB_TOKEN`.
     GithubPrReview,
     Gitlab,
+    /// Post a real MR review with inline discussions via the GitLab REST API
+    /// (`--format gitlab-mr-review`). Uses `GITLAB_TOKEN`/`CI_JOB_TOKEN` in a
+    /// merge-request pipeline. Dedup-aware, unlike the `gitlab` Code Quality
+    /// artifact.
+    GitlabMrReview,
     Bitbucket,
     Checkstyle,
     Forgejo,
@@ -436,6 +441,9 @@ impl OutputFormat {
                 nitpik::output::github_pr_review::GithubPrReviewFormatter.format(findings)
             }
             OutputFormat::Gitlab => nitpik::output::gitlab::GitlabFormatter.format(findings),
+            OutputFormat::GitlabMrReview => {
+                nitpik::output::gitlab_mr_review::GitlabMrReviewFormatter.format(findings)
+            }
             OutputFormat::Bitbucket => {
                 nitpik::output::bitbucket::BitbucketFormatter.format(findings)
             }
@@ -452,6 +460,8 @@ impl OutputFormat {
     /// Forgejo publishes when `CI_FORGE_URL` is set.
     /// GitHub PR review publishes when `GITHUB_TOKEN` is set, posting with
     /// `review_event` (comment vs. changes-requested).
+    /// GitLab MR review publishes when `CI_MERGE_REQUEST_IID` is set (a
+    /// merge-request pipeline), posting with `review_event`.
     /// Other formats are no-ops.
     pub async fn publish(
         &self,
@@ -472,6 +482,15 @@ impl OutputFormat {
                 nitpik::output::forgejo::ForgejoPublisher::new(env)
                     .publish(findings)
                     .await
+            }
+            OutputFormat::GitlabMrReview if env.is_set("CI_MERGE_REQUEST_IID") => {
+                nitpik::output::gitlab_mr_review::GitlabMrReviewPublisher::new(
+                    env,
+                    review_event,
+                    force_review,
+                )
+                .publish(findings)
+                .await
             }
             OutputFormat::GithubPrReview if env.is_set("GITHUB_TOKEN") => {
                 nitpik::output::github_pr_review::GithubPrReviewPublisher::new(
