@@ -3,6 +3,12 @@
   "kind": "positive",
   "profiles": ["backend"],
   "expected": [
-    { "file": "load.py", "line": 5, "min_severity": "warning", "note": "overly broad exception swallow hides real errors as a silent default" }
+    {
+      "file": "load.py",
+      "line": 5,
+      "min_severity": "warning",
+      "keywords": ["except", "exception", "swallow", "silent", "broad", "mask", "catch-all", "bare"],
+      "note": "must flag the overly broad exception swallow itself, not an unrelated co-located finding"
+    }
   ]
 }

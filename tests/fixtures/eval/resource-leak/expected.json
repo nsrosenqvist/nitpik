@@ -3,6 +3,13 @@
   "kind": "positive",
   "profiles": ["backend"],
   "expected": [
-    { "file": "reader.py", "line": 5, "min_severity": "warning", "note": "file handle leaked on the empty-line early return path" }
+    {
+      "file": "reader.py",
+      "line": 2,
+      "end_line": 6,
+      "min_severity": "warning",
+      "keywords": ["leak", "close", "handle", "resource", "context manager", "not closed"],
+      "note": "the leak spans open() on line 2 through the skipped f.close() on line 6 (early return on line 5); a finding anchored anywhere in that span counts"
+    }
   ]
 }

@@ -40,17 +40,43 @@ e2e fixtures, plus an `expected.json`:
   "kind": "positive | negative",
   "profiles": ["backend"],
   "expected": [
-    { "file": "clamp.py", "line": 3, "min_severity": "warning", "note": "off-by-one" }
+    { "file": "clamp.py", "line": 3, "min_severity": "warning", "note": "off-by-one" },
+    {
+      "file": "reader.py",
+      "line": 2,
+      "end_line": 6,
+      "min_severity": "warning",
+      "keywords": ["leak", "close", "handle"],
+      "note": "issue spans lines 2–6; finding must mention one of the keywords"
+    }
   ]
 }
 ```
 
+A label's fields:
+
+- `file`, `line` — required anchor.
+- `end_line` *(optional)* — last line of the issue's span. The bug may be
+  legitimately anchored anywhere in `[line, end_line]` (± the ±2 tolerance),
+  for issues that span a region (a resource opened on one line and leaked on
+  an early return several lines down). Defaults to a point label at `line`.
+- `min_severity` *(optional)* — lowest severity that counts as a catch
+  (default `warning`, so an `info` aside doesn't count).
+- `keywords` *(optional)* — semantic guard: the finding's title+message must
+  contain at least one (case-insensitive) to count. Without it, a finding that
+  merely lands on the right line is credited even if it's about an unrelated
+  issue — which silently inflates recall and hides a real miss. Add keywords
+  whenever a fixture's planted line is a plausible anchor for *other* findings
+  too.
+
 ## Two kinds of case
 
 - **positive** — one or more *planted* issues at known lines. Scores **recall**:
-  a label is "caught" if some finding lands within ±2 lines at `min_severity`
-  or higher. Extra findings (matching no label) are surfaced but not penalized,
-  since a positive fixture may contain other real issues.
+  a label is "caught" if some finding lands within its line span (± tolerance)
+  at `min_severity` or higher and satisfies any `keywords` guard. Extra findings
+  matching no label are surfaced; the warning+ ones feed the corpus-wide
+  **precision lower bound** (a positive fixture may contain other real issues,
+  so it's a lower bound, not an exact precision).
 - **negative** — clean-but-tempting code (cosmetic edits, renames, a
   load-bearing guard). `expected` is empty. Any `warning`/`error` finding here
   is **noise**; `info`-level observations are tolerated.
