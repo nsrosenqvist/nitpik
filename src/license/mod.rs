@@ -57,10 +57,15 @@ const EXPECTED_ISS: &str = "https://nitpik.dev";
 /// nitpik.dev outage never fails a review — the cached entitlement is
 /// honored for up to this window. Only a *confirmed* negative answer
 /// (revoked key / inactive subscription) downgrades immediately; an
-/// inability to reach us does not. 14 days comfortably spans any realistic
-/// outage while still bounding how long a since-canceled subscription could
-/// coast offline.
-const OFFLINE_GRACE_SECONDS: i64 = 14 * 24 * 60 * 60;
+/// inability to reach us does not.
+///
+/// 7 days comfortably spans any realistic nitpik.dev outage (a Worker + D1
+/// down for a week would be catastrophic) while keeping the post-revocation
+/// coast window tight — grace triggers on *network failure*, which a user
+/// can induce by blocking the domain, so shorter is better for revocation
+/// hygiene. Anyone who legitimately needs to run disconnected for longer
+/// should use an offline token, which is the purpose-built mechanism.
+const OFFLINE_GRACE_SECONDS: i64 = 7 * 24 * 60 * 60;
 
 const TRUSTED_KEYS: &[TrustedKey] = &[TrustedKey {
     kid: "ed25519-2026-01",
