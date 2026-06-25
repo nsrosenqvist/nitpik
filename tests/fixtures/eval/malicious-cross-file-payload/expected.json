@@ -1,0 +1,24 @@
+{
+  "description": "A two-file exfiltration split so neither file is damning alone: backup.py harvests api_keys and ssh_key and passes them to send_blob(); net.py's send_blob() POSTs its argument to an attacker host. Only by reading both changed files together (the whole-diff scope) does the credential exfiltration become visible. The lens may anchor on either the harvest (backup.py:5) or the sink (net.py); the label sits on the harvest, the strongest intent signal.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "backup.py",
+      "line": 5,
+      "min_severity": "warning",
+      "keywords": ["exfil", "key", "ssh", "credential", "secret", "send", "leak", "network", "external"],
+      "note": "harvests api_keys + ssh_key and ships them via net.send_blob"
+    },
+    {
+      "file": "net.py",
+      "line": 8,
+      "end_line": 11,
+      "min_severity": "warning",
+      "keywords": ["exfil", "endpoint", "external", "send", "leak", "network", "evil", "attacker"],
+      "note": "send_blob POSTs the harvested blob to an attacker host"
+    }
+  ]
+}

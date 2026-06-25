@@ -31,6 +31,16 @@ On top of those, a fast **triage** step selects from the **conditional lenses** 
 
 It is normal for triage to pick **no** conditional lens on a small, self-contained change — the always-on lenses already cover it. The three whole-diff lenses (`contract-impact`, `docs-drift`, `holistic`) review the entire change set at once and use repository-exploration tools by default (see [Agentic Mode](08-Agentic-Mode)).
 
+## Opt-in lenses
+
+Some lenses never run under `auto` — they run only when you name them with `--profile` or `--tag`:
+
+| Lens | Hunts for | Scope |
+|---|---|---|
+| `malicious` | deliberately hostile code: install-time execution, data exfiltration, backdoors/auth bypass, obfuscated payloads, persistence, sabotage/logic bombs | whole diff |
+
+`malicious` is the LLM half of nitpik's threat detection — it reasons about hostile *intent* across the whole diff, catching what the deterministic `--scan-threats` rules can't (a payload split across files, a neutered signature check, a novel logic bomb). Unlike `security` (which assumes the author erred), it assumes the author may be adversarial. It is off by default because that posture produces noise on trusted-author diffs; reach for it when reviewing **untrusted** changes — dependency bumps, first-time-contributor PRs, or package submissions. See [Threat Scanning → Malicious-code scan](15-Threat-Scanning#malicious-code-scan-the-malicious-lens).
+
 ## Auto-Selection
 
 When `--profile` is omitted, nitpik runs `auto`. You can request it explicitly:

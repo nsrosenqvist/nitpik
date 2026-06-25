@@ -1,0 +1,139 @@
+{
+  "cases": [
+    {
+      "caught": 0,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "negative",
+      "name": "benign-base64-asset",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "negative",
+      "name": "benign-dynamic-import",
+      "noise": 1,
+      "total_labels": 0
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "negative",
+      "name": "benign-env-config",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "negative",
+      "name": "benign-exec-build",
+      "noise": 0,
+      "total_labels": 0
+    },
+    {
+      "caught": 0,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "negative",
+      "name": "benign-remote-config-fetch",
+      "noise": 1,
+      "total_labels": 0
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-auth-backdoor",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 2,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-cross-file-payload",
+      "noise": 0,
+      "total_labels": 2
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-env-exfil",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-homoglyph-dep",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-logic-bomb",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-obfuscated-eval",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-postinstall-exfil",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-staged-remote-exec",
+      "noise": 0,
+      "total_labels": 1
+    },
+    {
+      "caught": 1,
+      "extra": 0,
+      "extra_significant": 0,
+      "kind": "positive",
+      "name": "malicious-weakened-verify",
+      "noise": 0,
+      "total_labels": 1
+    }
+  ],
+  "labels_caught": 10,
+  "labels_total": 10,
+  "negatives_clean": 3,
+  "negatives_total": 5,
+  "precision_lower_bound": 0.8333333333333334,
+  "recall": 1.0,
+  "total_extra": 0,
+  "total_noise": 2,
+  "total_significant_extra": 0
+}

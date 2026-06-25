@@ -1,0 +1,8 @@
+{
+  "name": "color-utils",
+  "version": "1.4.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js"
+  }
+}

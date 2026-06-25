@@ -1,0 +1,8 @@
+{
+  "description": "Base64-encodes raw bytes to build a `data:` URI for an inline asset. Base64 is present, but it is encoding for transport, not a decoded blob fed to eval/exec. The lens must not treat the mere presence of base64 as obfuscation — contrast with malicious-obfuscated-eval, where the decoded result is executed.",
+  "kind": "negative",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": []
+}

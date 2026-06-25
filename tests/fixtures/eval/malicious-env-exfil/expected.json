@@ -1,0 +1,17 @@
+{
+  "description": "The whole process environment (`dict(os.environ)`) is serialized and POSTed to an external host. The read of the full environment and the network send together are the exfiltration. The later `os.environ.get(\"REGION\")` on line 11 is legitimate config use and must NOT be flagged — a precision check that the lens distinguishes harvest-and-send from ordinary config reads.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "metrics.py",
+      "line": 7,
+      "end_line": 10,
+      "min_severity": "warning",
+      "keywords": ["exfil", "environ", "env", "secret", "send", "upload", "leak", "network"],
+      "note": "dict(os.environ) (line 7) serialized and sent out (lines 8-10)"
+    }
+  ]
+}

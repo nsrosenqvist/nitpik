@@ -1,24 +1,44 @@
-# Review-quality eval corpus
+# Eval corpus
 
-A labeled corpus for measuring nitpik's review quality — recall (do we catch
+A labeled corpus for measuring nitpik's output quality — recall (do we catch
 real issues?) and noise (do we stay quiet on clean code?). Driven by
 [`tests/eval.rs`](../../eval.rs).
+
+The corpus is split into two **suites**, each with its own scorecard and its
+own committed baseline so a change to one lens can't move the other's gate:
+
+| Suite | Test | Engine | Baseline |
+|---|---|---|---|
+| `review` (default) | `eval_corpus_scorecard` | shipped default engine (`auto` + `--verify`) | `tests/fixtures/eval-baseline.json` |
+| `malicious` | `eval_malicious_scorecard` | the opt-in `malicious` lens in isolation (`--profile malicious`, no verify) | `tests/fixtures/eval-malicious-baseline.json` |
+
+A case declares its suite via the `suite` field in `expected.json` (defaults to
+`review`); that determines which scorecard scores it.
 
 ## Running
 
 The scoring logic is unit-tested under a normal `cargo test`. The end-to-end
-scorecard makes real LLM calls and is `#[ignore]`d:
+scorecards make real LLM calls and are `#[ignore]`d:
 
 ```sh
-ANTHROPIC_API_KEY=sk-... cargo test --test eval -- --ignored --nocapture
-# also write a baseline file:
-NITPIK_EVAL_BASELINE=tests/fixtures/eval-baseline.json \
-  ANTHROPIC_API_KEY=sk-... cargo test --test eval -- --ignored --nocapture
+# review suite (compares to / can rewrite the unsuffixed baseline)
+ANTHROPIC_API_KEY=sk-... NITPIK_EVAL_COMPARE=tests/fixtures/eval-baseline.json \
+  cargo test --test eval eval_corpus_scorecard -- --ignored --nocapture
+
+# malicious suite — baseline env vars are namespaced with the _MALICIOUS suffix
+ANTHROPIC_API_KEY=sk-... NITPIK_EVAL_COMPARE_MALICIOUS=tests/fixtures/eval-malicious-baseline.json \
+  cargo test --test eval eval_malicious_scorecard -- --ignored --nocapture
+
+# write a baseline (per suite): NITPIK_EVAL_BASELINE / NITPIK_EVAL_BASELINE_MALICIOUS
 ```
 
+`NITPIK_EVAL_ONLY=sub1,sub2` narrows either suite to cases whose directory name
+contains one of the substrings — cheap single-case iteration without paying for
+the whole suite (e.g. `NITPIK_EVAL_ONLY=malicious-logic-bomb`).
+
 The scorecard is informational — it never hard-fails on a quality threshold
-(real-LLM runs are non-deterministic). Use it to compare prompt/dedup/verify
-changes against a baseline.
+(real-LLM runs are non-deterministic) unless `NITPIK_EVAL_STRICT=1` is set. Use
+it to compare prompt/dedup/verify/profile changes against a baseline.
 
 ## Case layout
 
@@ -38,7 +58,9 @@ e2e fixtures, plus an `expected.json`:
 {
   "description": "human note on what's planted / why it's clean",
   "kind": "positive | negative",
-  "profiles": ["backend"],
+  "suite": "review",
+  "profiles": ["malicious"],
+  "force_profiles": false,
   "expected": [
     { "file": "clamp.py", "line": 3, "min_severity": "warning", "note": "off-by-one" },
     {
@@ -52,6 +74,17 @@ e2e fixtures, plus an `expected.json`:
   ]
 }
 ```
+
+Case-level fields:
+
+- `kind` — `positive` (planted issues) or `negative` (clean). See below.
+- `suite` *(optional, default `review`)* — which scorecard scores this case.
+- `profiles` — profiles to run. Only consulted when `force_profiles` is set;
+  otherwise the `review` suite runs the shipped `auto` engine regardless.
+- `force_profiles` *(optional, default `false`)* — run the declared `profiles`
+  in isolation (no `auto`, no `--verify`) instead of the default engine. The
+  `malicious` suite uses this to measure the `malicious` lens alone, the way
+  the registry invokes it; the `auto` engine never selects that lens.
 
 A label's fields:
 
@@ -91,7 +124,30 @@ A label's fields:
 4. Write `expected.json`. No code changes needed — the harness auto-discovers
    any directory containing `expected.json`.
 
-## Current baseline & where the headroom is
+For a **`malicious`-suite** case, set `"suite": "malicious"`, `"profiles":
+["malicious"]`, and `"force_profiles": true` so it runs the `malicious` lens in
+isolation (the `auto` engine never selects that lens). Positives there target
+hostile *intent* a regex can't see (cross-file exfil, neutered checks, logic
+bombs); negatives are near-misses of those positives (a legit subprocess, env
+read, dynamic import) to keep precision honest.
+
+## Current baselines & where the headroom is
+
+### `malicious` suite (`tests/fixtures/eval-malicious-baseline.json`)
+
+14 cases (9 positives across the intent categories — install-time exfil,
+obfuscated eval, auth backdoor, env exfil, logic bomb, cross-file payload,
+homoglyph dep, weakened verify, staged remote exec — plus 5 near-miss
+negatives). Baseline: **recall 100% (10/10 labels), precision lower bound ~83%,
+negatives 3/5 clean**. The two standing false positives are deliberate: the
+lens flags a constrained `importlib` plugin load and a remote-config fetch —
+acceptable paranoia for a publish *gate* (a human clears them), noise for a PR
+lens. They are recorded in the baseline so the gate catches *new* noise or a
+recall drop, not so they're treated as correct. Don't tune them out against this
+synthetic corpus (teaching-to-the-test); revisit calibration on real malware
+samples.
+
+### `review` suite (`tests/fixtures/eval-baseline.json`)
 
 The committed baseline (`tests/fixtures/eval-baseline.json`) currently sits at
 **recall 100% (13/13), precision lower bound ~93%, negatives 7/7 clean**. Recall

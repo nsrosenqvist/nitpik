@@ -1,0 +1,8 @@
+{
+  "description": "Spawns a child process — but `execFileSync('git', ['rev-parse', ...])` runs a fixed, well-known command with array args (no shell, no interpolation, no network), to stamp the build with the current git SHA. Legitimate use of a powerful API. Flagging it as a backdoor or command injection is noise; the malicious lens must stay quiet.",
+  "kind": "negative",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": []
+}

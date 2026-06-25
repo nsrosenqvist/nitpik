@@ -1,0 +1,16 @@
+{
+  "description": "A patch-version bump adds a `postinstall` lifecycle hook that base64-encodes the entire process environment and ships it to a remote host at install time. Classic supply-chain env exfiltration. The deterministic scanner may catch the npm-hook pattern, but the malicious lens should flag the intent regardless.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "package.json",
+      "line": 7,
+      "min_severity": "warning",
+      "keywords": ["postinstall", "install", "exfil", "environ", "env", "credential", "leak", "telemetry", "network"],
+      "note": "postinstall hook exfiltrates process.env over the network"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Sabotage by neutering a check rather than adding code: the update's signature verification still computes the HMAC and still has the `if not compare_digest(...)` guard, but the `raise` was replaced with `pass`, so a bad signature is now silently accepted and any payload installs. The verification code remains present to lull a reviewer. No dangerous API a regex keys on — the malice is the removed enforcement.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "update.py",
+      "line": 6,
+      "end_line": 7,
+      "min_severity": "warning",
+      "keywords": ["signature", "verification", "disabled", "no-op", "bypass", "weaken", "sabotage", "tamper", "pass", "accepted"],
+      "note": "signature check guard body replaced with `pass` — verification disabled"
+    }
+  ]
+}

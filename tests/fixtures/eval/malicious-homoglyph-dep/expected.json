@@ -1,0 +1,17 @@
+{
+  "description": "The change adds `import rеquests` where the second character is a Cyrillic 'е' (U+0435), not Latin 'e' — a homoglyph typosquat impersonating the real `requests` package, and `fetch` is rerouted through it. This is the case most likely to expose a recall gap: an LLM may not perceive the mixed-script character, which is exactly why the deterministic homoglyph detector exists as the real net. A miss here is a documented boundary, not necessarily a bug.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "client.py",
+      "line": 2,
+      "end_line": 6,
+      "min_severity": "warning",
+      "keywords": ["homoglyph", "unicode", "cyrillic", "impersonat", "typosquat", "lookalike", "mixed-script", "spoof", "non-ascii"],
+      "note": "Cyrillic-е homoglyph import impersonating `requests`"
+    }
+  ]
+}

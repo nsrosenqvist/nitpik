@@ -1,0 +1,17 @@
+{
+  "description": "A date-gated logic bomb hidden inside a routine temp-cleanup function: on or after 2026-12-01 it recursively deletes the filesystem root. No obfuscation, no dangerous API a regex would key on in isolation (`shutil.rmtree` is ordinary) — the malice is the date gate plus the destructive target. This is the hardest intent case and the one most likely to expose a recall gap.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "cleanup.py",
+      "line": 7,
+      "end_line": 8,
+      "min_severity": "warning",
+      "keywords": ["logic bomb", "time bomb", "date", "destructive", "rmtree", "delete", "sabotage", "gated", "trigger"],
+      "note": "date-gated (line 7) recursive deletion of / (line 8)"
+    }
+  ]
+}

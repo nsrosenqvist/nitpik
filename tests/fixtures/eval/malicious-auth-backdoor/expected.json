@@ -1,0 +1,17 @@
+{
+  "description": "The change inserts a hardcoded master password into the auth check: any login with `s3rv1ce-0verr1de` returns True unconditionally, bypassing the hash comparison. A deliberate backdoor — the `security` lens (tuned for author mistakes / tainted flows) would not flag an intentional magic-credential branch; this lens should.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "auth.py",
+      "line": 5,
+      "end_line": 6,
+      "min_severity": "warning",
+      "keywords": ["backdoor", "hardcoded", "master", "bypass", "magic", "credential", "override", "unconditional"],
+      "note": "hardcoded master password bypasses authentication"
+    }
+  ]
+}

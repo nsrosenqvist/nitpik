@@ -78,9 +78,25 @@ struct ExpectedCase {
     #[allow(dead_code)]
     description: String,
     kind: CaseKind,
+    /// Which scorecard this case belongs to. `review` (default) is the
+    /// shipped-default-engine quality corpus; `malicious` is the opt-in
+    /// malice-hunting lens. Each suite keeps its own baseline so a change to
+    /// one lens can't move the other's regression gate.
+    #[serde(default = "default_suite")]
+    suite: String,
     profiles: Vec<String>,
+    /// Run the case's declared `profiles` in isolation (no `auto`, no verify)
+    /// instead of the shipped default engine. Used to measure a single named
+    /// lens's raw recall/precision — e.g. the opt-in `malicious` lens that
+    /// `auto` never selects. Defaults to false, so existing cases are unchanged.
+    #[serde(default)]
+    force_profiles: bool,
     #[serde(default)]
     expected: Vec<Label>,
+}
+
+fn default_suite() -> String {
+    "review".to_string()
 }
 
 // ===========================================================================
@@ -455,7 +471,9 @@ mod scoring_tests {
         ExpectedCase {
             description: String::new(),
             kind: CaseKind::Positive,
+            suite: default_suite(),
             profiles: vec!["backend".into()],
+            force_profiles: false,
             expected: labels,
         }
     }
@@ -464,7 +482,9 @@ mod scoring_tests {
         ExpectedCase {
             description: String::new(),
             kind: CaseKind::Negative,
+            suite: default_suite(),
             profiles: vec!["backend".into()],
+            force_profiles: false,
             expected: vec![],
         }
     }
@@ -844,6 +864,7 @@ struct CaseOutput {
 async fn review_case(
     repo: &Path,
     profiles: &[String],
+    force_profiles: bool,
     config: &nitpik::config::Config,
 ) -> CaseOutput {
     let diffs = diffs_owned(repo).await;
@@ -864,16 +885,26 @@ async fn review_case(
             .expect("construct provider"),
     );
 
-    // Measure the *shipped default engine*: run `auto`, which resolves the
-    // always-on lenses (security, correctness) plus any conditional lenses the
-    // diff-substance triage selects — not the fixture's declared profiles.
-    // `profiles` is retained for documentation/back-compat of the fixtures.
-    let _ = profiles;
-    let options = nitpik::review::ReviewOptions {
-        profiles: vec!["auto".to_string()],
-        verify: true,
-        no_cache: true,
-        ..Default::default()
+    // Default: measure the *shipped default engine* — run `auto`, which
+    // resolves the always-on lenses (security, correctness) plus any
+    // conditional lenses the diff-substance triage selects. A case may instead
+    // opt into `force_profiles` to run its declared profiles in isolation (no
+    // `auto`, no verify), measuring one named lens's raw recall/precision — for
+    // opt-in lenses like `malicious` that `auto` never selects.
+    let options = if force_profiles {
+        nitpik::review::ReviewOptions {
+            profiles: profiles.to_vec(),
+            verify: false,
+            no_cache: true,
+            ..Default::default()
+        }
+    } else {
+        nitpik::review::ReviewOptions {
+            profiles: vec!["auto".to_string()],
+            verify: true,
+            no_cache: true,
+            ..Default::default()
+        }
     };
     let agent_defs =
         nitpik::review::resolve_agents(Some(provider.as_ref()), &options, config, &diffs, repo)
@@ -928,6 +959,26 @@ async fn review_case(
 #[tokio::test]
 #[ignore = "makes real LLM calls; run with --ignored and an API key"]
 async fn eval_corpus_scorecard() {
+    // Review-quality suite: the shipped default engine (`auto` + verify) over
+    // the `review` cases. Baseline env vars are unsuffixed for back-compat
+    // (`NITPIK_EVAL_COMPARE`, `NITPIK_EVAL_BASELINE`).
+    run_scorecard("review", "").await;
+}
+
+#[tokio::test]
+#[ignore = "makes real LLM calls; run with --ignored and an API key"]
+async fn eval_malicious_scorecard() {
+    // Malice-hunting lens suite: the `malicious` cases, each run in isolation
+    // (`--profile malicious`, no verify). Independent baseline via the
+    // `_MALICIOUS`-suffixed env vars so it can't move the review gate.
+    run_scorecard("malicious", "_MALICIOUS").await;
+}
+
+/// Score every case in `suite`, print the card, and optionally compare against
+/// / write a baseline. `env_suffix` namespaces the baseline env vars
+/// (`""` → review, `"_MALICIOUS"` → malicious), keeping the two suites'
+/// regression gates fully separate.
+async fn run_scorecard(suite: &str, env_suffix: &str) {
     if !has_api_key() {
         return;
     }
@@ -940,7 +991,15 @@ async fn eval_corpus_scorecard() {
         .filter(|p| p.is_dir() && p.join("expected.json").exists())
         .collect();
     case_dirs.sort();
-    assert!(!case_dirs.is_empty(), "no eval cases found");
+
+    // Optional focus filter (within the suite): `NITPIK_EVAL_ONLY=sub1,sub2`
+    // keeps only cases whose directory name contains one of the substrings.
+    let only: Option<Vec<String>> = std::env::var("NITPIK_EVAL_ONLY").ok().map(|v| {
+        v.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    });
 
     let mut cases = Vec::new();
     for dir in &case_dirs {
@@ -949,8 +1008,17 @@ async fn eval_corpus_scorecard() {
         let case: ExpectedCase =
             serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{name}/expected.json: {e}"));
 
+        if case.suite != suite {
+            continue;
+        }
+        if let Some(subs) = &only
+            && !subs.iter().any(|s| name.contains(s.as_str()))
+        {
+            continue;
+        }
+
         let (repo, _tmp) = setup_repo(dir).await;
-        let out = review_case(&repo, &case.profiles, &config).await;
+        let out = review_case(&repo, &case.profiles, case.force_profiles, &config).await;
         eprintln!(
             "  · {name}: {} finding(s)  [verify dropped {}, corroborated {}]",
             out.findings.len(),
@@ -965,13 +1033,16 @@ async fn eval_corpus_scorecard() {
         cases.push(score_case(&name, &case, &out.findings));
     }
 
+    assert!(!cases.is_empty(), "no eval cases found for suite '{suite}'");
+
     let card = Scorecard { cases };
+    eprintln!("=== suite: {suite} ===");
     eprintln!("{}", card.render());
 
     // Optional regression gate against a prior baseline scorecard. Always
     // prints the delta; only fails the run when NITPIK_EVAL_STRICT is set,
     // so a single stochastic run doesn't break CI by default.
-    if let Ok(path) = std::env::var("NITPIK_EVAL_COMPARE") {
+    if let Ok(path) = std::env::var(format!("NITPIK_EVAL_COMPARE{env_suffix}")) {
         match std::fs::read_to_string(&path)
             .ok()
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -987,12 +1058,9 @@ async fn eval_corpus_scorecard() {
         }
     }
 
-    if let Ok(path) = std::env::var("NITPIK_EVAL_BASELINE") {
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&card.to_json()).unwrap(),
-        )
-        .expect("write baseline");
+    if let Ok(path) = std::env::var(format!("NITPIK_EVAL_BASELINE{env_suffix}")) {
+        std::fs::write(&path, serde_json::to_string_pretty(&card.to_json()).unwrap())
+            .expect("write baseline");
         eprintln!("  wrote baseline → {path}");
     }
 }

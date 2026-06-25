@@ -1,0 +1,8 @@
+{
+  "description": "Fetches JSON from a URL and parses it with json.load — a remote network read, but the result is parsed as data, never executed. The near-miss of malicious-staged-remote-exec (which fetches code and exec()s it). The lens must distinguish fetch-and-parse from fetch-and-execute and stay quiet here.",
+  "kind": "negative",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": []
+}

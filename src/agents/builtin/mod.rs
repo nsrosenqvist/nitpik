@@ -19,6 +19,7 @@ const USER_JOURNEY_MD: &str = include_str!("user-journey.md");
 const CONTRACT_IMPACT_MD: &str = include_str!("contract-impact.md");
 const DOCS_DRIFT_MD: &str = include_str!("docs-drift.md");
 const HOLISTIC_MD: &str = include_str!("holistic.md");
+const MALICIOUS_MD: &str = include_str!("malicious.md");
 
 // Internal profiles for nitpik's own passes.
 const CRITIC_MD: &str = include_str!("critic.md");
@@ -82,6 +83,12 @@ const BUILTINS: &[Builtin] = &[
     Builtin {
         name: "holistic",
         body: HOLISTIC_MD,
+    },
+    // Malice-hunting lens — opt-in (named via `--profile malicious`/`--tag`),
+    // never auto-on. Whole-diff scope so it can connect cross-file intent.
+    Builtin {
+        name: "malicious",
+        body: MALICIOUS_MD,
     },
     // Internal passes.
     Builtin {

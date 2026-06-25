@@ -1,0 +1,8 @@
+{
+  "description": "Dynamic import via importlib.import_module of a plugin from a fixed local package namespace (`app.plugins.*`). Dynamic loading looks alarming, but the name resolves to in-tree modules — no network, no eval of external content. The near-miss of dynamic-execution positives. The lens must not flag legitimate plugin loading as a backdoor.",
+  "kind": "negative",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": []
+}

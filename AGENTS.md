@@ -113,21 +113,27 @@ Keep the dependency tree lean — binary size and compile time matter for a CLI 
 - **Test runner**: use [`cargo-nextest`](https://nexte.st/) instead of `cargo test`. It runs each test as a separate process and parallelises across all test binaries simultaneously, which is significantly faster. Install with `cargo install cargo-nextest --locked`, then run `cargo nextest run`. CI should use `cargo nextest run` as well.
 - **Slow tests**: the `security::rules::tests::default_rules_*` tests compile 219 gitleaks regexes (~3–5 s with rayon parallelization). They share a `LazyLock` within each binary so the cost is paid once per process, but they will always dominate wall-clock time.
 
-### Review-Quality Eval
+### Output-Quality Eval
 
-`tests/eval.rs` measures the reviewer's output quality against a labeled planted-bug corpus in `tests/fixtures/eval/` — recall (are real issues caught?), a precision lower bound (how many warning+ findings land on unlabeled lines?), and noise (does it stay quiet on clean negatives?). Run it whenever you change anything that affects review *quality*: `src/orchestrator/prompt.rs`, any built-in profile in `src/agents/builtin/` (reviewer or `critic*` lens), `dedup.rs`, `verify.rs`, or `scope.rs`. Validate against the committed baseline *before* committing the change.
+`tests/eval.rs` measures output quality against a labeled corpus in `tests/fixtures/eval/` — recall (are real issues caught?), a precision lower bound (how many warning+ findings land on unlabeled lines?), and noise (does it stay quiet on clean negatives?). It has **two suites**, each with its own scorecard and committed baseline (a case picks one via the `suite` field, default `review`): `review` (test `eval_corpus_scorecard`) measures the shipped default engine (`auto` + `--verify`); `malicious` (test `eval_malicious_scorecard`) measures the opt-in `malicious` lens in isolation. Run the relevant suite whenever you change anything affecting its quality: `src/orchestrator/prompt.rs`, a built-in profile in `src/agents/builtin/` (a reviewer/`critic*` lens → `review`; `malicious.md` → `malicious`), `dedup.rs`, `verify.rs`, or `scope.rs`. Validate against the committed baseline *before* committing.
 
-- The scoring core is unit-tested deterministically and runs under a normal `cargo nextest run`. The end-to-end scorecard makes **real LLM calls** and is `#[ignore]`d, so it never runs in CI.
-- Run it (compares to the committed baseline and prints a per-case scorecard + delta):
+- The scoring core is unit-tested deterministically and runs under a normal `cargo nextest run`. The end-to-end scorecards make **real LLM calls** and are `#[ignore]`d, so they never run in CI.
+- Run a suite (compares to the committed baseline and prints a per-case scorecard + delta). The malicious suite namespaces its baseline env vars with a `_MALICIOUS` suffix so the two gates stay independent:
 
   ```sh
+  # review suite
   ANTHROPIC_API_KEY=… NITPIK_EVAL_COMPARE=tests/fixtures/eval-baseline.json \
-    cargo test --test eval -- --ignored --nocapture
+    cargo test --test eval eval_corpus_scorecard -- --ignored --nocapture
+  # malicious suite
+  ANTHROPIC_API_KEY=… NITPIK_EVAL_COMPARE_MALICIOUS=tests/fixtures/eval-malicious-baseline.json \
+    cargo test --test eval eval_malicious_scorecard -- --ignored --nocapture
   ```
 
-  Add `NITPIK_EVAL_STRICT=1` to make a regression fail the test; set `NITPIK_EVAL_BASELINE=<path>` to rewrite the baseline after a confirmed, intended improvement.
-- **Committed baseline** (`tests/fixtures/eval-baseline.json`, claude-sonnet-4-5, default engine + `--verify` panel): recall 100% (13/13), precision lower bound ~93%, negatives 7/7 clean. Each run is a single stochastic sample — one borderline case flipping moves recall ~8pp, so don't over-read a single run's delta on one case.
-- Corpus layout, label fields (`end_line` spans, `keywords` semantic guards), and how to add a case: `tests/fixtures/eval/README.md`.
+  Add `NITPIK_EVAL_STRICT=1` to make a regression fail the test; set `NITPIK_EVAL_BASELINE[_MALICIOUS]=<path>` to rewrite a baseline after a confirmed, intended improvement. `NITPIK_EVAL_ONLY=sub1,sub2` narrows a suite to matching case names.
+- **Review baseline** (`tests/fixtures/eval-baseline.json`, claude-sonnet-4-5, default engine + `--verify` panel): recall 100% (13/13), precision lower bound ~93%, negatives 7/7 clean.
+- **Malicious baseline** (`tests/fixtures/eval-malicious-baseline.json`, `--profile malicious`, no verify): recall 100% (10/10), precision lower bound ~83%, negatives 3/5 — the two standing FPs (constrained `importlib`, remote-config fetch) are deliberate gate-paranoia, recorded to catch *new* noise, not to be tuned out against synthetic cases.
+- Each run is a single stochastic sample — on the small corpora one borderline case flips recall several points, so don't over-read a single run's delta.
+- Corpus layout, suites, label fields (`end_line` spans, `keywords` semantic guards), and how to add a case: `tests/fixtures/eval/README.md`.
 
 ### Documentation
 

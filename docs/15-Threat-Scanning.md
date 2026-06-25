@@ -2,6 +2,13 @@
 
 nitpik detects potentially harmful code patterns in your diffs — obfuscated payloads, dangerous API calls, supply chain hooks, backdoors, and data exfiltration — **before** the LLM review even starts. When an LLM provider is configured, flagged patterns are triaged by the model to reduce false positives.
 
+nitpik approaches malicious code in **two complementary layers**:
+
+1. **`--scan-threats`** — fast, deterministic pattern matching (regex + entropy + structural heuristics), then optional LLM triage. Catches known-shape attacks; runs offline (triage aside).
+2. **The `malicious` lens** (`--profile malicious`) — an LLM reviewer that reasons about hostile *intent* across the whole diff. Catches what no regex can: a payload split across files, a neutered check, a novel logic bomb.
+
+Run them together for a full [malicious-code scan](#malicious-code-scan-the-malicious-lens).
+
 ---
 
 ## Enabling Threat Scanning
@@ -47,6 +54,40 @@ Threat scanning runs in two phases:
 2. **LLM triage** — when an LLM provider is configured, all pattern matches are sent to a single triage call. The model classifies each as confirmed, dismissed, or downgraded. This eliminates false positives from legitimate uses of flagged patterns (e.g., a test file that intentionally contains `eval`).
 
 > **Note:** If the LLM call fails or no provider is configured, all pattern matches pass through as-is — the scanner is fail-open.
+
+## Malicious-code scan: the `malicious` lens
+
+`--scan-threats` is pattern-based: it finds attacks that *look like* known bad shapes. Some malice has no regex tell — the danger is in the **intent and the data flow**, not any single token:
+
+- A secret read in one file and sent out in another (exfiltration split across files).
+- A signature or auth check that's quietly turned into a no-op (sabotage by *removing* enforcement).
+- A date- or condition-gated destructive payload (a logic bomb using only ordinary APIs).
+- A novel obfuscation or staging technique no rule anticipated.
+
+The **`malicious` lens** is an opt-in LLM reviewer for exactly this. It sees the **whole diff at once** (so it can connect behavior across files) and, unlike the `security` lens — which assumes the author made a mistake — it assumes the author may be **adversarial**: a dangerous operation can be the *intended payload*, not an accident.
+
+### Running a full malicious-code scan
+
+Combine the deterministic scanner with the lens to run both layers and **nothing else** — no general quality review:
+
+```bash
+nitpik review --diff-base <previous-tag> --profile malicious --scan-threats
+```
+
+- `--profile malicious` runs **only** that lens (explicit `--profile` does not add the always-on `security`/`correctness` lenses), so you get a focused malicious-code scan rather than a full review.
+- `--scan-threats` adds the deterministic pattern layer and its triage in the same pass.
+- The lens needs an **LLM provider**. With none configured, you still get the deterministic layer; the lens simply contributes nothing (fail-open).
+
+This is the recommended shape for gating **untrusted** changes — dependency bumps, first-time-contributor PRs, or scanning each tagged version of a submitted package.
+
+### Use it as a gate
+
+For a publish/merge gate, parse the findings (e.g. [`--format json`](09-Output-Formats)) and decide pass / quarantine / block on severity. Two notes specific to gating:
+
+- **Leave `--verify` off** (the default for this invocation). The verify critic panel can *drop* a borderline finding to reduce false positives — desirable in a PR, but in a gate a dropped finding means a **missed payload**. Treat any drop as "still needs a human," not "cleared."
+- **Recall over precision.** The lens leans paranoid: it may flag a constrained dynamic import or a remote-config fetch. For a gate with a human review queue that's an acceptable trade — better a cleared false alarm than a shipped backdoor.
+
+> The `malicious` lens is a **best-effort** layer, like the rest of threat scanning — see [Limitations](#limitations). It is not a guarantee, and findings are advisory.
 
 ## Custom Rules
 
@@ -151,6 +192,7 @@ Threat scanning is a **best-effort defense layer**, not a guarantee. The built-i
 
 ## Related Pages
 
+- [Reviewer Profiles & Lenses](06-Reviewer-Profiles#opt-in-lenses) — the `malicious` lens and other opt-in reviewers
 - [Secret Scanning](14-Secret-Scanning) — credential detection and redaction
 - [How Reviews Work](10-How-Reviews-Work) — where threat scanning fits in the pipeline
 - [Configuration](16-Configuration) — full config reference

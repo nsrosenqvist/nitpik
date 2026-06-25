@@ -1,0 +1,8 @@
+{
+  "description": "Reads two specific environment variables (`DB_HOST`, `DB_PORT`) to build a local connection string. Reads the environment, but for ordinary configuration — the values never leave the process. Contrast with malicious-env-exfil, which harvests the whole environment and sends it out. The lens must not flag config reads as exfiltration.",
+  "kind": "negative",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": []
+}

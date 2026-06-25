@@ -1,0 +1,17 @@
+{
+  "description": "A staged loader: bootstrap() downloads Python from a remote URL and passes it straight to exec(). No base64 or obfuscation — the malice is purely in the data flow (untrusted network bytes become executed code), which a pattern scanner keyed on encoded blobs would miss but the lens should catch from the fetch->exec chain.",
+  "kind": "positive",
+  "suite": "malicious",
+  "profiles": ["malicious"],
+  "force_profiles": true,
+  "expected": [
+    {
+      "file": "plugins.py",
+      "line": 9,
+      "end_line": 10,
+      "min_severity": "warning",
+      "keywords": ["remote", "download", "fetch", "exec", "staged", "dynamic", "payload", "code execution", "untrusted"],
+      "note": "fetch remote code (line 9) and exec it (line 10)"
+    }
+  ]
+}
